@@ -1,10 +1,11 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { ShoppingBag, MessageCircle, User, PlusCircle, Search } from 'lucide-react';
-import { CURRENT_USER } from '../constants';
+import { useAuth } from '../contexts/AuthContext'; // Import hook useAuth
 
 const Navbar: React.FC = () => {
   const location = useLocation();
+  const { user, isAdmin } = useAuth(); // Lấy thông tin user từ Context
 
   const isActive = (path: string) => location.pathname === path ? 'text-indigo-600' : 'text-gray-500 hover:text-gray-900';
 
@@ -19,13 +20,13 @@ const Navbar: React.FC = () => {
             </Link>
             <div className="hidden sm:ml-6 sm:flex sm:space-x-8">
               <Link to="/" className={`${isActive('/')} inline-flex items-center px-1 pt-1 border-b-2 border-transparent text-sm font-medium`}>
-                Home
+                Trang chủ
               </Link>
               <Link to="/market" className={`${isActive('/market')} inline-flex items-center px-1 pt-1 border-b-2 border-transparent text-sm font-medium`}>
-                Marketplace
+                Chợ
               </Link>
               <Link to="/chat" className={`${isActive('/chat')} inline-flex items-center px-1 pt-1 border-b-2 border-transparent text-sm font-medium`}>
-                Messages
+                Tin nhắn
               </Link>
             </div>
           </div>
@@ -33,18 +34,33 @@ const Navbar: React.FC = () => {
              <Link to="/market" className="p-2 text-gray-400 hover:text-gray-500 sm:hidden">
               <Search className="h-6 w-6" />
             </Link>
+            
             <Link to="/post" className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md shadow-sm text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500">
               <PlusCircle className="mr-2 h-4 w-4" />
-              Post Item
+              Đăng bài
             </Link>
-            <div className="flex-shrink-0 relative ml-4">
-               <Link to="/profile" className="flex items-center">
-                 <img className="h-8 w-8 rounded-full object-cover border border-gray-200" src={CURRENT_USER.avatar} alt="User" />
-               </Link>
-            </div>
+
+            {/* Logic hiển thị Avatar hoặc nút Login */}
+            {user ? (
+              <div className="flex-shrink-0 relative ml-4 flex items-center">
+                 {isAdmin && (
+                    <Link to="/admin" className="mr-4 text-xs font-bold text-red-600 border border-red-200 bg-red-50 px-2 py-1 rounded">
+                        ADMIN
+                    </Link>
+                 )}
+                 <Link to="/profile" className="flex items-center">
+                   <img className="h-8 w-8 rounded-full object-cover border border-gray-200" src={user.avatar || 'https://via.placeholder.com/150'} alt="User" />
+                 </Link>
+              </div>
+            ) : (
+              <Link to="/auth" className="ml-4 text-sm font-medium text-indigo-600 hover:text-indigo-500">
+                Đăng nhập
+              </Link>
+            )}
           </div>
         </div>
       </div>
+
       {/* Mobile Nav */}
       <div className="sm:hidden flex justify-around border-t border-gray-200 bg-white py-2 fixed bottom-0 w-full z-40">
          <Link to="/" className={`flex flex-col items-center p-2 ${isActive('/')}`}>
@@ -59,9 +75,9 @@ const Navbar: React.FC = () => {
             <MessageCircle className="h-6 w-6" />
             <span className="text-xs">Chat</span>
          </Link>
-          <Link to="/profile" className={`flex flex-col items-center p-2 ${isActive('/profile')}`}>
+          <Link to={user ? "/profile" : "/auth"} className={`flex flex-col items-center p-2 ${isActive('/profile')}`}>
             <User className="h-6 w-6" />
-            <span className="text-xs">Profile</span>
+            <span className="text-xs">{user ? 'Profile' : 'Login'}</span>
          </Link>
       </div>
     </nav>
