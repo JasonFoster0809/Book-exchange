@@ -1,22 +1,63 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { ArrowRight, BookOpen, Calculator, PenTool, Shirt } from 'lucide-react';
 import ProductCard from '../components/ProductCard';
-import { MOCK_PRODUCTS } from '../constants';
+import { supabase } from '../services/supabase'; // Import Supabase
+import { Product } from '../types';
 
 const HomePage: React.FC = () => {
-  const featuredProducts = MOCK_PRODUCTS.slice(0, 4);
+  const [featuredProducts, setFeaturedProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  // Fetch 4 sản phẩm mới nhất từ Supabase
+  useEffect(() => {
+    const fetchRecentProducts = async () => {
+      try {
+        const { data, error } = await supabase
+          .from('products')
+          .select('*')
+          .order('posted_at', { ascending: false })
+          .limit(4);
+
+        if (error) throw error;
+
+        if (data) {
+          // Map dữ liệu từ DB sang Frontend
+          const mappedProducts: Product[] = data.map((item: any) => ({
+            id: item.id,
+            sellerId: item.seller_id,
+            title: item.title,
+            description: item.description,
+            price: item.price,
+            category: item.category,
+            condition: item.condition,
+            images: item.images || [],
+            tradeMethod: item.trade_method,
+            postedAt: item.posted_at,
+            isLookingToBuy: item.is_looking_to_buy
+          }));
+          setFeaturedProducts(mappedProducts);
+        }
+      } catch (error) {
+        console.error("Lỗi tải sản phẩm trang chủ:", error);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchRecentProducts();
+  }, []);
 
   const categories = [
     { name: 'Textbooks', icon: BookOpen, color: 'bg-blue-100 text-blue-600' },
     { name: 'Electronics', icon: Calculator, color: 'bg-orange-100 text-orange-600' },
-    { name: 'Supplies', icon: PenTool, color: 'bg-green-100 text-green-600' },
-    { name: 'Uniforms', icon: Shirt, color: 'bg-purple-100 text-purple-600' },
+    { name: 'School Supplies', icon: PenTool, color: 'bg-green-100 text-green-600' }, // Sửa tên khớp với Enum
+    { name: 'Uniforms/Clothing', icon: Shirt, color: 'bg-purple-100 text-purple-600' }, // Sửa tên khớp với Enum
   ];
 
   return (
     <div className="min-h-screen pb-16">
-      {/* Hero Section */}
+      {/* Hero Section - Giữ nguyên */}
       <div className="relative bg-indigo-800">
         <div className="absolute inset-0">
           <img
@@ -58,7 +99,7 @@ const HomePage: React.FC = () => {
         </div>
       </div>
 
-      {/* Featured Items */}
+      {/* Featured Items (Dữ liệu thật) */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12 bg-gray-50">
         <div className="flex justify-between items-center mb-6">
           <h2 className="text-2xl font-bold text-gray-900">Recent Listings</h2>
@@ -66,14 +107,20 @@ const HomePage: React.FC = () => {
             View all <ArrowRight className="ml-1 h-4 w-4" />
           </Link>
         </div>
-        <div className="grid grid-cols-1 gap-y-10 sm:grid-cols-2 gap-x-6 lg:grid-cols-4 xl:gap-x-8">
-          {featuredProducts.map((product) => (
-            <ProductCard key={product.id} product={product} />
-          ))}
-        </div>
+        
+        {loading ? (
+           <div className="text-center py-10">Loading...</div>
+        ) : (
+          <div className="grid grid-cols-1 gap-y-10 sm:grid-cols-2 gap-x-6 lg:grid-cols-4 xl:gap-x-8">
+            {featuredProducts.map((product) => (
+              <ProductCard key={product.id} product={product} />
+            ))}
+            {featuredProducts.length === 0 && <p>Chưa có sản phẩm nào được đăng.</p>}
+          </div>
+        )}
       </div>
       
-      {/* Features Section */}
+      {/* Features Section - Giữ nguyên */}
       <div className="max-w-7xl mx-auto px-4 py-16 sm:px-6 lg:px-8">
          <div className="grid grid-cols-1 md:grid-cols-3 gap-8 text-center">
             <div className="p-6">

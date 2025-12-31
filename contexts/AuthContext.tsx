@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase } from '../services/supabase';
 import { User, DBProfile } from '../types';
 
@@ -13,103 +13,111 @@ const AuthContext = createContext<AuthContextType>({} as AuthContextType);
 
 export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true); // Mặc định là đang tải
+  const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const mounted = useRef(false);
 
   useEffect(() => {
-    // 1. Kiểm tra session ngay khi F5
-    const initAuth = async () => {
+    mounted.current = true;
+
+    // Hàm lấy profile từ DB
+    const fetchProfile = async (sessionUser: any) => {
       try {
-        const { data: { session } } = await supabase.auth.getSession();
-        
-        if (session?.user) {
-          // Nếu có session, lấy thông tin profile
-          await fetchProfile(session.user.id, session.user.email);
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', sessionUser.id)
+          .single();
+
+        if (data) {
+          const profile = data as DBProfile;
+          const userData: User = {
+            id: profile.id,
+            email: sessionUser.email,
+            name: profile.name || sessionUser.user_metadata?.name || 'User',
+            studentId: profile.student_id || '',
+            avatar: profile.avatar_url || sessionUser.user_metadata?.avatar_url || `https://ui-avatars.com/api/?name=User`,
+            isVerified: profile.is_verified,
+            role: profile.role as 'user' | 'admin'
+          };
+          
+          if(mounted.current) {
+            setUser(userData);
+            setIsAdmin(profile.role === 'admin');
+          }
         } else {
-          // Không có session -> Không phải lỗi, chỉ là chưa đăng nhập
-          setLoading(false);
+            // Fallback nếu chưa có trigger hoặc lỗi mạng
+            console.warn("Chưa tìm thấy profile, dùng thông tin meta tạm thời");
+            if(mounted.current) {
+                setUser({
+                    id: sessionUser.id,
+                    email: sessionUser.email,
+                    name: sessionUser.user_metadata?.name || sessionUser.email?.split('@')[0],
+                    studentId: sessionUser.user_metadata?.student_id || '',
+                    avatar: sessionUser.user_metadata?.avatar_url || 'https://via.placeholder.com/150',
+                    isVerified: false,
+                    role: 'user'
+                });
+            }
         }
       } catch (error) {
-        console.error("Lỗi khởi tạo Auth:", error);
-        setLoading(false);
+        console.error("Lỗi fetch profile:", error);
+      } finally {
+        if(mounted.current) setLoading(false);
       }
     };
 
-    initAuth();
-
-    // 2. Lắng nghe sự kiện Login/Logout
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        setLoading(true);
-        await fetchProfile(session.user.id, session.user.email);
-      } else if (event === 'SIGNED_OUT') {
-        setUser(null);
-        setIsAdmin(false);
-        setLoading(false);
+    // 1. Logic kiểm tra session ban đầu (chạy 1 lần khi F5)
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (session?.user) {
+        fetchProfile(session.user);
+      } else {
+        if(mounted.current) setLoading(false);
       }
     });
 
-    return () => listener.subscription.unsubscribe();
-  }, []);
-
-  const fetchProfile = async (userId: string, email?: string) => {
-    try {
-      // Gọi database lấy thông tin chi tiết
-      const { data, error } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', userId)
-        .single();
-
-      if (data) {
-        // TRƯỜNG HỢP 1: Có dữ liệu profile đầy đủ
-        const profile = data as DBProfile;
-        setUser({
-          id: profile.id,
-          email: email,
-          name: profile.name || email?.split('@')[0] || 'User', // Fallback name
-          studentId: profile.student_id || '',
-          avatar: profile.avatar_url || `https://ui-avatars.com/api/?name=${email}&background=random`,
-          isVerified: profile.is_verified,
-          role: profile.role as 'user' | 'admin'
+    // 2. Lắng nghe sự kiện thay đổi (Login/Logout)
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      // Chỉ xử lý SIGNED_IN nếu user hiện tại đang null (tránh conflict với logic getSession ở trên)
+      if (event === 'SIGNED_IN' && session?.user) {
+        // Chỉ set loading true nếu user chưa có dữ liệu (để tránh xoay vòng khi F5)
+        setUser((prev) => {
+            if (!prev || prev.id !== session.user.id) {
+                setLoading(true);
+                fetchProfile(session.user);
+            }
+            return prev;
         });
-        setIsAdmin(profile.role === 'admin');
-      } else {
-        // TRƯỜNG HỢP 2: Đã đăng nhập nhưng chưa có trong bảng 'profiles' (Lỗi trigger hoặc delay)
-        // -> Vẫn cho đăng nhập để không bị trắng màn hình
-        console.warn("Không tìm thấy profile trong DB, dùng thông tin tạm.");
-        setUser({
-          id: userId,
-          email: email,
-          name: email?.split('@')[0] || 'User',
-          studentId: '',
-          avatar: `https://ui-avatars.com/api/?name=${email}&background=random`,
-          isVerified: false,
-          role: 'user'
-        });
-        setIsAdmin(false);
+      } else if (event === 'SIGNED_OUT') {
+        if(mounted.current) {
+            setUser(null);
+            setIsAdmin(false);
+            setLoading(false);
+        }
       }
-    } catch (error) {
-      console.error("Lỗi khi fetch profile:", error);
-    } finally {
-      // QUAN TRỌNG: Luôn tắt loading dù thành công hay thất bại
-      setLoading(false);
-    }
-  };
+    });
+
+    return () => {
+      mounted.current = false;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
 
   const signOut = async () => {
     await supabase.auth.signOut();
     setUser(null);
     setIsAdmin(false);
-    // Có thể thêm navigate('/auth') ở đây nếu muốn
+    setLoading(false);
   };
 
   return (
     <AuthContext.Provider value={{ user, loading, isAdmin, signOut }}>
-      {/* Chỉ render con khi đã tải xong, tránh lỗi trắng màn hình do user null */}
       {!loading ? children : (
         <div className="h-screen flex items-center justify-center bg-gray-50">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-600"></div>
+          <div className="flex flex-col items-center">
+             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mb-4"></div>
+             <p className="text-gray-500 text-sm">Đang tải dữ liệu...</p>
+          </div>
         </div>
       )}
     </AuthContext.Provider>
