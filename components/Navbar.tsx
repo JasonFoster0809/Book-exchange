@@ -1,13 +1,22 @@
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { ShoppingBag, MessageCircle, User, PlusCircle, Search } from 'lucide-react';
-import { useAuth } from '../contexts/AuthContext'; // Import hook useAuth
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { ShoppingBag, MessageCircle, User, PlusCircle, Search, LogOut } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
 
 const Navbar: React.FC = () => {
   const location = useLocation();
-  const { user, isAdmin } = useAuth(); // Lấy thông tin user từ Context
+  const navigate = useNavigate();
+  // Lấy hàm signOut từ AuthContext. Nếu signOut chưa sẵn sàng, dùng hàm rỗng để tránh lỗi
+  const { user, isAdmin, signOut } = useAuth();
 
   const isActive = (path: string) => location.pathname === path ? 'text-indigo-600' : 'text-gray-500 hover:text-gray-900';
+
+  const handleLogout = async () => {
+    if (signOut) {
+      await signOut();
+      navigate('/auth');
+    }
+  };
 
   return (
     <nav className="bg-white shadow-sm sticky top-0 z-50">
@@ -40,17 +49,23 @@ const Navbar: React.FC = () => {
               Đăng bài
             </Link>
 
-            {/* Logic hiển thị Avatar hoặc nút Login */}
             {user ? (
-              <div className="flex-shrink-0 relative ml-4 flex items-center">
+              <div className="flex-shrink-0 relative ml-4 flex items-center gap-3">
                  {isAdmin && (
-                    <Link to="/admin" className="mr-4 text-xs font-bold text-red-600 border border-red-200 bg-red-50 px-2 py-1 rounded">
+                    <Link to="/admin" className="hidden md:block text-xs font-bold text-red-600 border border-red-200 bg-red-50 px-2 py-1 rounded">
                         ADMIN
                     </Link>
                  )}
                  <Link to="/profile" className="flex items-center">
                    <img className="h-8 w-8 rounded-full object-cover border border-gray-200" src={user.avatar || 'https://via.placeholder.com/150'} alt="User" />
                  </Link>
+                 <button 
+                    onClick={handleLogout}
+                    className="p-1 text-gray-400 hover:text-red-600 transition-colors"
+                    title="Đăng xuất"
+                 >
+                    <LogOut className="h-5 w-5" />
+                 </button>
               </div>
             ) : (
               <Link to="/auth" className="ml-4 text-sm font-medium text-indigo-600 hover:text-indigo-500">
@@ -61,7 +76,6 @@ const Navbar: React.FC = () => {
         </div>
       </div>
 
-      {/* Mobile Nav */}
       <div className="sm:hidden flex justify-around border-t border-gray-200 bg-white py-2 fixed bottom-0 w-full z-40">
          <Link to="/" className={`flex flex-col items-center p-2 ${isActive('/')}`}>
             <ShoppingBag className="h-6 w-6" />
