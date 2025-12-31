@@ -1,58 +1,62 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { supabase } from '../services/supabase';
-import { ShoppingBag, Lock, Mail, User as UserIcon, BookOpen } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+import { BookOpen, Mail, Lock, User, ArrowRight, Loader } from 'lucide-react';
+// Import Toast
+import { useToast } from '../contexts/ToastContext';
 
 const AuthPage: React.FC = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
+  const { signIn, signUp } = useAuth();
+  const { addToast } = useToast(); // Hook thông báo
+  const navigate = useNavigate();
+
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     name: '',
     studentId: ''
   });
-  const navigate = useNavigate();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Validate cơ bản
+    if (!formData.email.endsWith('@hcmut.edu.vn') && !formData.email.endsWith('@vnu.edu.vn')) {
+        addToast("Vui lòng sử dụng email sinh viên (@hcmut.edu.vn hoặc @vnu.edu.vn) để tham gia.", "warning");
+        return;
+    }
+    if (formData.password.length < 6) {
+        addToast("Mật khẩu phải có ít nhất 6 ký tự.", "warning");
+        return;
+    }
+
     setLoading(true);
     try {
       if (isLogin) {
-        // Xử lý Đăng nhập (Giữ nguyên)
-        const { error } = await supabase.auth.signInWithPassword({
-          email: formData.email,
-          password: formData.password,
-        });
+        const { error } = await signIn(formData.email, formData.password);
         if (error) throw error;
-        navigate('/'); 
+        addToast("Chào mừng bạn quay trở lại! 🎉", "success");
       } else {
-        // --- PHẦN SỬA ĐỔI QUAN TRỌNG ---
-        // Gửi thông tin kèm theo options -> data
-        const { data, error } = await supabase.auth.signUp({
-          email: formData.email,
-          password: formData.password,
-          options: {
-            data: {
-              name: formData.name,
-              student_id: formData.studentId, // Map với trigger SQL
-              avatar_url: `https://ui-avatars.com/api/?name=${formData.name}&background=random`
-            }
-          }
-        });
-
-        if (error) throw error;
-
-        // Đã xóa bỏ đoạn code supabase.from('profiles').insert(...) gây lỗi
-        // Database sẽ tự động làm việc đó.
-
-        if (data.user) {
-          alert('Đăng ký thành công! Bạn có thể đăng nhập ngay.');
-          setIsLogin(true);
+        if (!formData.name || !formData.studentId) {
+            addToast("Vui lòng điền Tên và MSSV.", "warning");
+            setLoading(false);
+            return;
         }
+        const { error } = await signUp(formData.email, formData.password, formData.name, formData.studentId);
+        if (error) throw error;
+        addToast("Đăng ký thành công! Hãy kiểm tra email để xác thực.", "success");
       }
+      navigate('/');
     } catch (error: any) {
-      alert(error.message || 'Có lỗi xảy ra. Vui lòng thử lại.');
+      console.error(error);
+      // Xử lý lỗi cụ thể để thông báo thân thiện hơn
+      let msg = error.message;
+      if (msg.includes("Invalid login credentials")) msg = "Sai email hoặc mật khẩu.";
+      if (msg.includes("User already registered")) msg = "Email này đã được đăng ký.";
+      
+      addToast(msg, "error");
     } finally {
       setLoading(false);
     }
@@ -60,70 +64,88 @@ const AuthPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="flex justify-center">
-             <ShoppingBag className="h-12 w-12 text-indigo-600" />
+      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
+        <div className="mx-auto h-16 w-16 bg-indigo-600 rounded-2xl flex items-center justify-center rotate-3 shadow-lg mb-4">
+             <BookOpen className="h-10 w-10 text-white" />
         </div>
-        <h2 className="mt-6 text-center text-3xl font-extrabold text-gray-900">
-          {isLogin ? 'Đăng nhập UniMarket' : 'Tạo tài khoản mới'}
+        <h2 className="text-3xl font-extrabold text-gray-900">
+          {isLogin ? 'Chào mừng trở lại' : 'Gia nhập UniMarket'}
         </h2>
+        <p className="mt-2 text-sm text-gray-600">
+          Cộng đồng trao đổi giáo trình & đồ dùng sinh viên
+        </p>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-white py-8 px-4 shadow sm:rounded-lg sm:px-10">
-          <form className="space-y-6" onSubmit={handleSubmit}>
+        <div className="bg-white py-8 px-4 shadow-xl shadow-gray-100 sm:rounded-xl sm:px-10 border border-gray-100">
+          <form className="space-y-5" onSubmit={handleSubmit}>
             {!isLogin && (
               <>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Họ và Tên</label>
+                  <label className="block text-sm font-medium text-gray-700">Họ và tên</label>
                   <div className="mt-1 relative rounded-md shadow-sm">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <UserIcon className="h-5 w-5 text-gray-400" />
-                    </div>
-                    <input type="text" required value={formData.name} onChange={e => setFormData({...formData, name: e.target.value})} className="pl-10 block w-full border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm py-2 border" placeholder="Nguyễn Văn A" />
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><User className="h-5 w-5 text-gray-400" /></div>
+                    <input type="text" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="Nguyễn Văn A" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
                   </div>
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-gray-700">Mã Số Sinh Viên (MSSV)</label>
+                  <label className="block text-sm font-medium text-gray-700">MSSV</label>
                   <div className="mt-1 relative rounded-md shadow-sm">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                      <BookOpen className="h-5 w-5 text-gray-400" />
-                    </div>
-                    <input type="text" required value={formData.studentId} onChange={e => setFormData({...formData, studentId: e.target.value})} className="pl-10 block w-full border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm py-2 border" placeholder="2021xxxx" />
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><span className="text-gray-400 font-bold text-xs">ID</span></div>
+                    <input type="text" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="201xxxx" value={formData.studentId} onChange={(e) => setFormData({...formData, studentId: e.target.value})} />
                   </div>
                 </div>
               </>
             )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700">Email Sinh Viên</label>
+              <label className="block text-sm font-medium text-gray-700">Email sinh viên</label>
               <div className="mt-1 relative rounded-md shadow-sm">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Mail className="h-5 w-5 text-gray-400" />
-                </div>
-                <input type="email" required value={formData.email} onChange={e => setFormData({...formData, email: e.target.value})} className="pl-10 block w-full border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm py-2 border" placeholder="student@university.edu.vn" />
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Mail className="h-5 w-5 text-gray-400" /></div>
+                <input type="email" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="ten.ho@hcmut.edu.vn" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} />
               </div>
             </div>
 
             <div>
               <label className="block text-sm font-medium text-gray-700">Mật khẩu</label>
               <div className="mt-1 relative rounded-md shadow-sm">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-gray-400" />
-                </div>
-                <input type="password" required value={formData.password} onChange={e => setFormData({...formData, password: e.target.value})} className="pl-10 block w-full border-gray-300 rounded-md focus:ring-indigo-500 focus:border-indigo-500 sm:text-sm py-2 border" />
+                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock className="h-5 w-5 text-gray-400" /></div>
+                <input type="password" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="••••••••" value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} />
               </div>
             </div>
 
-            <button type="submit" disabled={loading} className="w-full flex justify-center py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:opacity-50">
-              {loading ? 'Đang xử lý...' : (isLogin ? 'Đăng Nhập' : 'Đăng Ký')}
-            </button>
+            <div>
+              <button 
+                type="submit" 
+                disabled={loading}
+                className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+              >
+                {loading ? <Loader className="animate-spin h-5 w-5" /> : (isLogin ? 'Đăng Nhập' : 'Đăng Ký')}
+              </button>
+            </div>
           </form>
 
           <div className="mt-6">
-             <button onClick={() => setIsLogin(!isLogin)} className="w-full inline-flex justify-center py-2 px-4 border border-gray-300 rounded-md shadow-sm bg-white text-sm font-medium text-gray-500 hover:bg-gray-50">
-                {isLogin ? 'Chưa có tài khoản? Đăng ký ngay' : 'Quay lại Đăng nhập'}
+            <div className="relative">
+              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-300" /></div>
+              <div className="relative flex justify-center text-sm"><span className="px-2 bg-white text-gray-500">Hoặc</span></div>
+            </div>
+
+            <div className="mt-6 grid grid-cols-1 gap-3">
+              <button 
+                onClick={() => {
+                    setFormData({ email: '', password: '', name: '', studentId: '' });
+                    setIsLogin(!isLogin);
+                }}
+                className="w-full flex justify-center items-center py-2.5 px-4 border border-gray-300 rounded-lg shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all group"
+              >
+                {isLogin ? (
+                    <>Tạo tài khoản mới <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" /></>
+                ) : (
+                    <>Đã có tài khoản? Đăng nhập ngay</>
+                )}
               </button>
+            </div>
           </div>
         </div>
       </div>

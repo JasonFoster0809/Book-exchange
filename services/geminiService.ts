@@ -1,24 +1,23 @@
 import OpenAI from "openai";
 import { ProductCategory } from "../types";
 
-// Lấy API Key từ file .env.local (hoặc dùng key cứng nếu test nhanh)
+// Sử dụng biến môi trường chuẩn VITE_GROQ_API_KEY
+// Fallback key chỉ dùng cho demo, nên đưa vào .env trong thực tế
 const apiKey = import.meta.env.VITE_GROQ_API_KEY || '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';
 
-// Cấu hình Client kết nối tới Groq
 const client = new OpenAI({
   apiKey: apiKey,
   baseURL: "https://api.groq.com/openai/v1",
-  dangerouslyAllowBrowser: true // Cho phép chạy trên trình duyệt (React)
+  dangerouslyAllowBrowser: true 
 });
 
-// Hàm 1: Viết mô tả sản phẩm (Dùng Llama 3)
 export const generateProductDescription = async (
   title: string,
   condition: string,
   category: string,
   keyDetails: string
 ): Promise<string> => {
-  if (!apiKey) return "Chưa có API Key Groq.";
+  if (!apiKey) return "Chưa có API Key.";
 
   try {
     const prompt = `
@@ -31,23 +30,23 @@ export const generateProductDescription = async (
       User Notes: ${keyDetails}
       
       Tone: Friendly, student-to-student, transparent about defects.
+      Language: Vietnamese (Tiếng Việt).
       Output: Just the description text, no quotes.
     `;
 
     const response = await client.chat.completions.create({
-      model: "llama3-70b-8192", // Model mạnh và siêu nhanh của Groq
+      model: "llama3-70b-8192", 
       messages: [{ role: "user", content: prompt }],
       temperature: 0.7,
     });
 
     return response.choices[0]?.message?.content || "Không thể tạo mô tả.";
   } catch (error) {
-    console.error("Llama/Groq API Error:", error);
+    console.error("AI API Error:", error);
     return "Lỗi khi gọi AI. Vui lòng kiểm tra lại kết nối.";
   }
 };
 
-// Hàm 2: Tìm kiếm thông minh (Dùng Llama 3 trả về JSON)
 export const smartSearchInterpreter = async (query: string): Promise<{
     category?: ProductCategory,
     keywords: string[]
@@ -66,7 +65,7 @@ export const smartSearchInterpreter = async (query: string): Promise<{
         const response = await client.chat.completions.create({
             model: "llama3-70b-8192",
             messages: [{ role: "user", content: prompt }],
-            response_format: { type: "json_object" }, // Bắt buộc Llama trả về JSON chuẩn
+            response_format: { type: "json_object" },
             temperature: 0,
         });
         

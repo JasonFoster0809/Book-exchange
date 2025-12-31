@@ -1,3 +1,7 @@
+// src/types.ts
+
+// --- ENUMS (DANH MỤC CỐ ĐỊNH) ---
+
 export enum ProductCategory {
   TEXTBOOK = 'Textbook',
   ELECTRONICS = 'Electronics',
@@ -20,14 +24,30 @@ export enum ProductCondition {
   POOR = 'Poor'
 }
 
+// Enum trạng thái sản phẩm
+export enum ProductStatus {
+  AVAILABLE = 'available', // Đang bán
+  PENDING = 'pending',     // Đang giao dịch
+  SOLD = 'sold'            // Đã bán
+}
+
+// Enum trạng thái săn tin
+export enum HuntStatus {
+  ACTIVE = 'active',       // Đang tìm kiếm
+  PENDING = 'pending',     // Đang thương lượng
+  COMPLETED = 'completed'  // Đã mua được
+}
+
+// --- INTERFACES (CẤU TRÚC DỮ LIỆU) ---
+
 export interface User {
   id: string;
-  email?: string;       // Bắt buộc có dòng này
+  email?: string;
   name: string;
   studentId: string;
   avatar: string;
   isVerified: boolean;
-  role?: 'user' | 'admin'; // Bắt buộc có dòng này
+  role?: 'user' | 'admin';
 }
 
 export interface Product {
@@ -36,14 +56,29 @@ export interface Product {
   title: string;
   description: string;
   price: number;
-  category: ProductCategory;
-  condition: ProductCondition;
+  category: ProductCategory | string;
+  condition: ProductCondition | string;
   images: string[];
-  tradeMethod: TradeMethod;
+  tradeMethod: TradeMethod | string;
   postedAt: string;
   isLookingToBuy?: boolean;
-  isSold?: boolean; 
-  buyerId?: string;// <--- Đã thêm dòng này vào đây
+  
+  status: ProductStatus | string; 
+  buyerId?: string;
+
+  // [ĐÃ CÓ] Đánh dấu tin đã tim
+  isLiked?: boolean; 
+  
+  // [MỚI THÊM] Đếm lượt xem
+  view_count?: number;
+}
+
+export interface Hunt {
+  id: string;
+  userId: string;
+  keyword: string;
+  status: HuntStatus | string;
+  createdAt: string;
 }
 
 export interface ChatMessage {
@@ -60,7 +95,6 @@ export interface ChatSession {
   unreadCount: number;
 }
 
-// BẮT BUỘC PHẢI CÓ CÁI NÀY Ở CUỐI FILE
 export interface DBProfile {
   id: string;
   name: string | null;
@@ -69,7 +103,7 @@ export interface DBProfile {
   is_verified: boolean;
   role: string;
 }
-// Thêm vào file types.ts
+
 export interface Review {
   id: string;
   reviewerId: string;
@@ -79,6 +113,7 @@ export interface Review {
   comment: string;
   createdAt: string;
 }
+
 export interface Comment {
   id: string;
   productId: string;
@@ -87,6 +122,15 @@ export interface Comment {
   userAvatar: string;
   content: string;
   createdAt: string;
-  parentId: string | null; // <--- Thêm dòng này
-  replies?: Comment[];     // <--- Dùng để render ở frontend
+  parentId: string | null;
+  replies?: Comment[];
+}
+
+export interface Report {
+  id: string;
+  reason: string;
+  status: 'pending' | 'resolved' | 'dismissed';
+  created_at: string;
+  product?: Product;
+  reporter?: DBProfile;
 }
