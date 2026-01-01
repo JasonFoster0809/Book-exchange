@@ -5,7 +5,6 @@ import { useNavigate, Link } from 'react-router-dom';
 import { Trash2, ShieldCheck, Users, Package, Flag, XCircle, AlertTriangle, ExternalLink, RefreshCw } from 'lucide-react';
 import { Product, DBProfile } from '../types';
 
-// Định nghĩa Interface nội bộ để tránh lỗi nếu file types.ts chưa update
 interface ReportData {
   id: string;
   reporter_id: string;
@@ -13,7 +12,6 @@ interface ReportData {
   reason: string;
   status: 'pending' | 'resolved' | 'dismissed';
   created_at: string;
-  // Dữ liệu đã map
   reporter?: DBProfile;
   product?: Product;
 }
@@ -40,8 +38,7 @@ const AdminPage: React.FC = () => {
   const fetchData = async () => {
     setIsLoadingData(true);
     try {
-        // --- 1. XỬ LÝ BÁO CÁO (REPORTS) - CÁCH AN TOÀN ---
-        // Lấy danh sách báo cáo thô
+        // --- 1. XỬ LÝ BÁO CÁO (REPORTS) ---
         const { data: rawReports, error: rError } = await supabase
             .from('reports')
             .select('*')
@@ -50,11 +47,9 @@ const AdminPage: React.FC = () => {
         if (rError) console.error("Lỗi tải reports:", rError);
 
         if (rawReports && rawReports.length > 0) {
-            // Lấy danh sách ID cần thiết
             const reporterIds = [...new Set(rawReports.map(r => r.reporter_id))];
             const productIds = [...new Set(rawReports.map(r => r.product_id))];
 
-            // Tải thông tin User & Product song song
             const [usersRes, productsRes] = await Promise.all([
                 supabase.from('profiles').select('*').in('id', reporterIds),
                 supabase.from('products').select('*').in('id', productIds)
@@ -63,19 +58,34 @@ const AdminPage: React.FC = () => {
             const usersMap = new Map(usersRes.data?.map(u => [u.id, u]) || []);
             const productsMap = new Map(productsRes.data?.map(p => [p.id, p]) || []);
 
-            // Ghép dữ liệu (Manual Join)
-            const fullReports = rawReports.map(r => ({
-                ...r,
-                reporter: usersMap.get(r.reporter_id),
-                product: productsMap.get(r.product_id) ? {
-                    // Map snake_case từ DB sang camelCase của Product interface
-                    id: productsMap.get(r.product_id).id,
-                    title: productsMap.get(r.product_id).title,
-                    price: productsMap.get(r.product_id).price,
-                    images: productsMap.get(r.product_id).images || [],
-                    isSold: productsMap.get(r.product_id).is_sold
-                } : null
-            }));
+            // Ghép dữ liệu và map field chính xác
+            const fullReports = rawReports.map(r => {
+                const rawProduct = productsMap.get(r.product_id);
+                
+                // Map từ DB (snake_case) sang Interface (camelCase)
+                const mappedProduct: Product | undefined = rawProduct ? {
+                    id: rawProduct.id,
+                    sellerId: rawProduct.seller_id,
+                    title: rawProduct.title,
+                    description: rawProduct.description,
+                    price: rawProduct.price,
+                    category: rawProduct.category,
+                    condition: rawProduct.condition,
+                    images: rawProduct.images || [],
+                    tradeMethod: rawProduct.trade_method,
+                    postedAt: rawProduct.posted_at,
+                    isLookingToBuy: rawProduct.is_looking_to_buy,
+                    isSold: rawProduct.is_sold,
+                    status: rawProduct.status,
+                    view_count: rawProduct.view_count
+                } : undefined;
+
+                return {
+                    ...r,
+                    reporter: usersMap.get(r.reporter_id),
+                    product: mappedProduct
+                };
+            });
             
             setReports(fullReports as ReportData[]);
         } else {
@@ -83,7 +93,6 @@ const AdminPage: React.FC = () => {
         }
 
         // --- 2. XỬ LÝ SẢN PHẨM (PRODUCTS) ---
-        // Sắp xếp theo posted_at để hiển thị đúng thứ tự đăng
         const { data: prodData } = await supabase
             .from('products')
             .select('*')
@@ -102,7 +111,8 @@ const AdminPage: React.FC = () => {
                 tradeMethod: item.trade_method,
                 postedAt: item.posted_at,
                 isLookingToBuy: item.is_looking_to_buy,
-                isSold: item.is_sold
+                isSold: item.is_sold,
+                status: item.status
             }));
             setProducts(mappedProds);
         }
@@ -118,15 +128,10 @@ const AdminPage: React.FC = () => {
     }
   };
 
-  // --- ACTIONS ---
   const handleResolveReport = async (reportId: string, productId: string) => {
       if(!confirm("Hành động này sẽ XÓA VĨNH VIỄN sản phẩm bị báo cáo. Bạn chắc chứ?")) return;
-
-      // Xóa sản phẩm
       await supabase.from('products').delete().eq('id', productId);
-      // Cập nhật report
       await supabase.from('reports').update({ status: 'resolved' }).eq('id', reportId);
-      
       alert("Đã xử lý xong!");
       fetchData();
   };
@@ -163,38 +168,21 @@ const AdminPage: React.FC = () => {
           </button>
       </div>
 
-      {/* Tabs Menu */}
       <div className="bg-white rounded-xl shadow-sm p-1 mb-6 inline-flex border border-gray-200 overflow-x-auto max-w-full">
-        <button 
-            onClick={() => setActiveTab('reports')} 
-            className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center ${activeTab === 'reports' ? 'bg-red-50 text-red-600 shadow-sm ring-1 ring-red-200' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}
-        >
-          <Flag className="w-4 h-4 mr-2" /> 
-          Báo cáo 
-          {reports.filter(r => r.status === 'pending').length > 0 && (
-             <span className="ml-2 bg-red-600 text-white px-2 py-0.5 rounded-full text-xs">
-                 {reports.filter(r => r.status === 'pending').length}
-             </span>
-          )}
+        <button onClick={() => setActiveTab('reports')} className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center ${activeTab === 'reports' ? 'bg-red-50 text-red-600 shadow-sm ring-1 ring-red-200' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}>
+          <Flag className="w-4 h-4 mr-2" /> Báo cáo 
+          {reports.filter(r => r.status === 'pending').length > 0 && <span className="ml-2 bg-red-600 text-white px-2 py-0.5 rounded-full text-xs">{reports.filter(r => r.status === 'pending').length}</span>}
         </button>
-        <button 
-            onClick={() => setActiveTab('products')} 
-            className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center ${activeTab === 'products' ? 'bg-indigo-50 text-indigo-600 shadow-sm ring-1 ring-indigo-200' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}
-        >
+        <button onClick={() => setActiveTab('products')} className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center ${activeTab === 'products' ? 'bg-indigo-50 text-indigo-600 shadow-sm ring-1 ring-indigo-200' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}>
           <Package className="w-4 h-4 mr-2" /> Sản phẩm <span className="ml-2 text-xs font-normal bg-gray-100 px-2 py-0.5 rounded-full text-gray-600">{products.length}</span>
         </button>
-        <button 
-            onClick={() => setActiveTab('users')} 
-            className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center ${activeTab === 'users' ? 'bg-green-50 text-green-600 shadow-sm ring-1 ring-green-200' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}
-        >
+        <button onClick={() => setActiveTab('users')} className={`px-6 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center ${activeTab === 'users' ? 'bg-green-50 text-green-600 shadow-sm ring-1 ring-green-200' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}>
           <Users className="w-4 h-4 mr-2" /> Người dùng <span className="ml-2 text-xs font-normal bg-gray-100 px-2 py-0.5 rounded-full text-gray-600">{usersList.length}</span>
         </button>
       </div>
 
-      {/* --- NỘI DUNG --- */}
       <div className="bg-white shadow-lg rounded-xl border border-gray-200 overflow-hidden min-h-[500px]">
-        
-        {/* === TAB 1: BÁO CÁO (Đã cải tiến hiển thị) === */}
+        {/* TAB 1: REPORTS */}
         {activeTab === 'reports' && (
              <div className="divide-y divide-gray-100">
                 {reports.length === 0 ? (
@@ -207,58 +195,27 @@ const AdminPage: React.FC = () => {
                     reports.map((report) => (
                     <div key={report.id} className={`p-6 transition hover:bg-gray-50 ${report.status !== 'pending' ? 'opacity-60 bg-gray-50' : ''}`}>
                         <div className="flex flex-col md:flex-row gap-6">
-                            {/* Ảnh sản phẩm bị report */}
-                            <div className="w-24 h-24 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200 relative group">
-                                {report.product?.images?.[0] ? (
-                                    <img src={report.product.images[0]} className="w-full h-full object-cover" alt="Spam"/>
-                                ) : (
-                                    <div className="flex flex-col items-center justify-center h-full text-[10px] text-gray-400 p-2 text-center bg-gray-50">
-                                        <XCircle className="w-6 h-6 mb-1 opacity-20"/>
-                                        Mất ảnh / Đã xóa
-                                    </div>
-                                )}
+                            <div className="w-24 h-24 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200 relative">
+                                {report.product?.images?.[0] ? <img src={report.product.images[0]} className="w-full h-full object-cover" alt="Spam"/> : <div className="flex flex-col items-center justify-center h-full text-[10px] text-gray-400 p-2 text-center bg-gray-50"><XCircle className="w-6 h-6 mb-1 opacity-20"/>Mất ảnh</div>}
                             </div>
-
                             <div className="flex-1">
                                 <div className="flex items-center flex-wrap gap-2 mb-2">
-                                    <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold border border-red-200 flex items-center">
-                                        <AlertTriangle className="w-3 h-3 mr-1"/> {report.reason}
-                                    </span>
-                                    <span className={`text-xs font-mono px-2 py-0.5 rounded border uppercase ${report.status === 'pending' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-gray-100 text-gray-500'}`}>
-                                        {report.status}
-                                    </span>
-                                    <span className="text-xs text-gray-400 ml-auto">
-                                        {new Date(report.created_at).toLocaleString('vi-VN')}
-                                    </span>
+                                    <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold border border-red-200 flex items-center"><AlertTriangle className="w-3 h-3 mr-1"/> {report.reason}</span>
+                                    <span className={`text-xs font-mono px-2 py-0.5 rounded border uppercase ${report.status === 'pending' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-gray-100 text-gray-500'}`}>{report.status}</span>
+                                    <span className="text-xs text-gray-400 ml-auto">{new Date(report.created_at).toLocaleString('vi-VN')}</span>
                                 </div>
-
                                 {report.product ? (
-                                    <Link to={`/product/${report.product.id}`} target="_blank" className="text-lg font-bold text-gray-900 hover:text-indigo-600 hover:underline flex items-center gap-2 mb-1">
-                                        {report.product.title} <ExternalLink className="w-4 h-4 text-gray-400"/>
-                                    </Link>
+                                    <Link to={`/product/${report.product.id}`} target="_blank" className="text-lg font-bold text-gray-900 hover:text-indigo-600 hover:underline flex items-center gap-2 mb-1">{report.product.title} <ExternalLink className="w-4 h-4 text-gray-400"/></Link>
                                 ) : <p className="text-gray-400 italic font-medium">Sản phẩm gốc không còn tồn tại.</p>}
-
                                 <div className="text-sm text-gray-500 flex items-center gap-2">
                                     <img src={report.reporter?.avatar_url || 'https://via.placeholder.com/20'} className="w-5 h-5 rounded-full border" />
                                     <span>Báo bởi: <b>{report.reporter?.name || 'Ẩn danh'}</b></span>
                                 </div>
                             </div>
-
-                            {/* Actions */}
                             {report.status === 'pending' && report.product && (
                                 <div className="flex flex-col gap-2 min-w-[160px] justify-center border-l pl-6 border-gray-100">
-                                    <button 
-                                        onClick={() => handleResolveReport(report.id, report.product!.id)}
-                                        className="w-full py-2 px-4 bg-red-600 hover:bg-red-700 text-white rounded-md text-xs font-bold shadow-sm transition flex items-center justify-center"
-                                    >
-                                        <Trash2 className="w-3.5 h-3.5 mr-2" /> XÓA BÀI NÀY
-                                    </button>
-                                    <button 
-                                        onClick={() => handleDismissReport(report.id)}
-                                        className="w-full py-2 px-4 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-md text-xs font-bold transition flex items-center justify-center"
-                                    >
-                                        <XCircle className="w-3.5 h-3.5 mr-2" /> BỎ QUA
-                                    </button>
+                                    <button onClick={() => handleResolveReport(report.id, report.product!.id)} className="w-full py-2 px-4 bg-red-600 hover:bg-red-700 text-white rounded-md text-xs font-bold shadow-sm transition flex items-center justify-center"><Trash2 className="w-3.5 h-3.5 mr-2" /> XÓA BÀI NÀY</button>
+                                    <button onClick={() => handleDismissReport(report.id)} className="w-full py-2 px-4 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-md text-xs font-bold transition flex items-center justify-center"><XCircle className="w-3.5 h-3.5 mr-2" /> BỎ QUA</button>
                                 </div>
                             )}
                         </div>
@@ -268,46 +225,20 @@ const AdminPage: React.FC = () => {
              </div>
         )}
 
-        {/* === TAB 2: SẢN PHẨM (Dạng bảng chuyên nghiệp) === */}
+        {/* TAB 2: PRODUCTS */}
         {activeTab === 'products' && (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
-                    <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sản phẩm</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Giá & Trạng thái</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Ngày đăng</th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Hành động</th>
-                    </tr>
+                    <tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sản phẩm</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Giá & Status</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Ngày đăng</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Hành động</th></tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                     {products.map((product) => (
                         <tr key={product.id} className="hover:bg-gray-50">
-                            <td className="px-6 py-4">
-                                <div className="flex items-center">
-                                    <div className="h-10 w-10 flex-shrink-0 bg-gray-100 rounded overflow-hidden border border-gray-200">
-                                        <img className="h-full w-full object-cover" src={product.images[0] || ''} alt="" />
-                                    </div>
-                                    <div className="ml-4">
-                                        <div className="text-sm font-medium text-gray-900 line-clamp-1 max-w-xs" title={product.title}>{product.title}</div>
-                                        <div className="text-xs text-gray-500">{product.category} • {product.condition}</div>
-                                    </div>
-                                </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="text-sm text-gray-900 font-bold">{product.price.toLocaleString()} đ</div>
-                                <span className={`px-2 inline-flex text-[10px] leading-5 font-semibold rounded-full ${product.isSold ? 'bg-gray-100 text-gray-500 border border-gray-200' : 'bg-green-50 text-green-700 border border-green-200'}`}>
-                                    {product.isSold ? 'Đã bán' : 'Đang bán'}
-                                </span>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500">
-                                {new Date(product.postedAt).toLocaleDateString('vi-VN')}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                <button onClick={() => handleDeleteProduct(product.id)} className="text-red-600 hover:text-red-900 bg-red-50 p-2 rounded-full hover:bg-red-100 transition" title="Xóa">
-                                    <Trash2 className="w-4 h-4" />
-                                </button>
-                            </td>
+                            <td className="px-6 py-4"><div className="flex items-center"><div className="h-10 w-10 flex-shrink-0 bg-gray-100 rounded overflow-hidden border border-gray-200"><img className="h-full w-full object-cover" src={product.images[0] || ''} /></div><div className="ml-4"><div className="text-sm font-medium text-gray-900 line-clamp-1 max-w-xs">{product.title}</div><div className="text-xs text-gray-500">{product.category}</div></div></div></td>
+                            <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-900 font-bold">{product.price.toLocaleString()} đ</div><span className={`px-2 text-[10px] font-semibold rounded-full ${product.isSold ? 'bg-gray-100 text-gray-500' : 'bg-green-50 text-green-700'}`}>{product.isSold ? 'Đã bán' : 'Đang bán'}</span></td>
+                            <td className="px-6 py-4 text-xs text-gray-500">{new Date(product.postedAt).toLocaleDateString('vi-VN')}</td>
+                            <td className="px-6 py-4 text-right"><button onClick={() => handleDeleteProduct(product.id)} className="text-red-600 hover:text-red-900 bg-red-50 p-2 rounded-full"><Trash2 className="w-4 h-4" /></button></td>
                         </tr>
                     ))}
                 </tbody>
@@ -315,60 +246,26 @@ const AdminPage: React.FC = () => {
           </div>
         )}
 
-        {/* === TAB 3: NGƯỜI DÙNG === */}
+        {/* TAB 3: USERS */}
         {activeTab === 'users' && (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
                 <thead className="bg-gray-50">
-                    <tr>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Người dùng</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MSSV</th>
-                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vai trò</th>
-                        <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Xác thực</th>
-                    </tr>
+                    <tr><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">MSSV</th><th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Role</th><th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase">Verify</th></tr>
                 </thead>
                 <tbody className="bg-white divide-y divide-gray-200">
                     {usersList.map((usr) => (
                         <tr key={usr.id} className="hover:bg-gray-50">
-                            <td className="px-6 py-4 whitespace-nowrap">
-                                <div className="flex items-center">
-                                    <div className="h-8 w-8 flex-shrink-0">
-                                        <img className="h-8 w-8 rounded-full border border-gray-200" src={usr.avatar_url || ''} alt="" />
-                                    </div>
-                                    <div className="ml-4">
-                                        <div className="text-sm font-medium text-gray-900">{usr.name}</div>
-                                    </div>
-                                </div>
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 font-mono">
-                                {usr.student_id || '---'}
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
-                                {usr.role === 'admin' 
-                                    ? <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-xs font-bold border border-purple-200">ADMIN</span> 
-                                    : <span className="bg-gray-100 text-gray-600 px-2 py-0.5 rounded text-xs border border-gray-200">User</span>
-                                }
-                            </td>
-                            <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                <button 
-                                    onClick={() => handleVerifyUser(usr.id, usr.is_verified)}
-                                    className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-bold transition-colors ${
-                                        usr.is_verified 
-                                        ? 'bg-green-100 text-green-800 hover:bg-green-200 border border-green-200' 
-                                        : 'bg-gray-100 text-gray-500 hover:bg-gray-200 border border-gray-200'
-                                    }`}
-                                >
-                                    <ShieldCheck className={`w-3 h-3 mr-1 ${usr.is_verified ? 'fill-green-800' : ''}`} />
-                                    {usr.is_verified ? 'Đã xác thực' : 'Chờ xác thực'}
-                                </button>
-                            </td>
+                            <td className="px-6 py-4"><div className="flex items-center"><div className="h-8 w-8"><img className="h-8 w-8 rounded-full border" src={usr.avatar_url || ''}/></div><div className="ml-4"><div className="text-sm font-medium text-gray-900">{usr.name}</div></div></div></td>
+                            <td className="px-6 py-4 text-sm text-gray-500 font-mono">{usr.student_id || '---'}</td>
+                            <td className="px-6 py-4 text-sm">{usr.role === 'admin' ? <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-xs font-bold">ADMIN</span> : 'User'}</td>
+                            <td className="px-6 py-4 text-right"><button onClick={() => handleVerifyUser(usr.id, usr.is_verified)} className={`px-3 py-1 rounded-full text-xs font-bold ${usr.is_verified ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-500'}`}>{usr.is_verified ? 'Đã xác thực' : 'Chờ xác thực'}</button></td>
                         </tr>
                     ))}
                 </tbody>
             </table>
           </div>
         )}
-
       </div>
     </div>
   );

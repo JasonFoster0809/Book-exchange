@@ -2,13 +2,12 @@ import React, { createContext, useContext, useEffect, useState, useRef } from 'r
 import { supabase } from '../services/supabase';
 import { User, DBProfile } from '../types';
 
-// 1. Cập nhật Interface để bao gồm signIn và signUp
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   isAdmin: boolean;
-  signIn: (email: string, password: string) => Promise<{ error: any }>; // Thêm dòng này
-  signUp: (email: string, password: string, name: string, studentId: string) => Promise<{ error: any }>; // Thêm dòng này
+  signIn: (email: string, password: string) => Promise<{ error: any }>;
+  signUp: (email: string, password: string, name: string, studentId: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
 }
 
@@ -100,7 +99,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
-  // 2. Thêm hàm SignIn
   const signIn = async (email: string, password: string) => {
     const { error } = await supabase.auth.signInWithPassword({
       email,
@@ -109,19 +107,37 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return { error };
   };
 
-  // 3. Thêm hàm SignUp (kèm metadata để lưu tên & MSSV)
+  // --- HÀM SIGN UP ĐÃ ĐƯỢC SỬA ---
   const signUp = async (email: string, password: string, name: string, studentId: string) => {
-    const { error } = await supabase.auth.signUp({
+    // 1. Tạo tài khoản Auth
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: {
-        data: {
-          name: name,
-          student_id: studentId, // Lưu ý: key này phải khớp với trigger bên Supabase nếu có
-        },
+        data: { name, student_id: studentId },
       },
     });
-    return { error };
+
+    if (error) return { error };
+
+    // 2. Tự động chèn thông tin vào bảng profiles
+    if (data.user) {
+        const { error: profileError } = await supabase.from('profiles').insert({
+            id: data.user.id,
+            name: name,
+            student_id: studentId,
+            email: email,
+            avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`,
+            role: 'user',
+            is_verified: false
+        });
+
+        if (profileError) {
+            console.error("Lỗi tạo profile DB:", profileError);
+        }
+    }
+
+    return { error: null };
   };
 
   const signOut = async () => {
@@ -131,7 +147,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setLoading(false);
   };
 
-  // 4. Export đầy đủ các hàm trong value
   return (
     <AuthContext.Provider value={{ user, loading, isAdmin, signIn, signUp, signOut }}>
       {!loading ? children : (

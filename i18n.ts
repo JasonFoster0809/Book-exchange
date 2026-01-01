@@ -6,20 +6,24 @@ const resources = {
     translation: {
       nav: {
         home: "Home",
-        market: "The Exchange", // Góc Pass Đồ
-        post: "Pass Item",      // Đăng tin (Pass đồ)
+        market: "The Exchange",
+        post: "Pass Item",
         chat: "Chats",
         login: "Login",
         profile: "Profile",
         admin: "Admin",
-        logout: "Logout"
+        logout: "Logout",
+        // Bổ sung các key mới
+        login_as: "Logged in as",
+        my_listings: "My Listings",
+        saved: "Saved Items"
       },
       market: {
-        title: "Student Thrift Corner", // Góc Pass Đồ Sinh Viên
+        title: "Student Thrift Corner",
         subtitle: "Trade textbooks, pass on calculators at student prices.",
-        search_placeholder: "What are you hunting for?...", // Bạn đang săn gì?
+        search_placeholder: "What are you hunting for?...",
         ai_btn: "AI Find",
-        hunt_btn: "Hunt Alerts", // Săn tin
+        hunt_btn: "Hunt Alerts",
         filter_btn: "Filter",
         cat_all: "All",
         cat_textbook: "Textbooks",
@@ -41,12 +45,12 @@ const resources = {
         error: "Error"
       },
       home: {
-        hero_title: "Old to you, New to me.", // Cũ người mới ta
+        hero_title: "Old to you, New to me.",
         hero_subtitle: "Trusted student exchange platform. Pass on textbooks and gears safely within the campus community.",
-        explore_btn: "Hunt Deals Now", // Săn Đồ Ngay
-        sell_btn: "Pass Item Now",     // Pass Đồ Ngay
+        explore_btn: "Hunt Deals Now",
+        sell_btn: "Pass Item Now",
         popular_cat: "Trending Categories",
-        latest_items: "Freshly Listed", // Tin mới lên sàn
+        latest_items: "Freshly Listed",
         view_all: "See all",
         no_items: "No items passed yet.",
         loading: "Loading items...",
@@ -59,13 +63,32 @@ const resources = {
         }
       },
       post: {
-        title: "Pass Your Item", // Đăng Tin Pass Đồ
+        sell_tab: "I want to sell",
+        buy_tab: "I want to buy",
+        img_label: "Product Images",
+        img_placeholder: "Add Image",
+        img_limit: "Max 4 images. First one is cover.",
+        cat_label: "Category",
+        cond_label: "Condition",
+        method_label: "Trade Method",
+        placeholder_title: "e.g. Calculus 1 Textbook...",
+        placeholder_desc: "Detail about the item...",
+        submit_btn: "POST NOW",
+        loading_btn: "Processing...",
+        title: "Pass Your Item",
         name_label: "Item Name",
-        price_label: "Pass Price (VND)", // Giá pass lại
-        desc_label: "Condition Details", // Mô tả tình trạng
+        price_label: "Pass Price (VND)",
+        desc_label: "Condition Details",
         ai_write: "Let AI Write",
-        submit_btn: "Post to Pass",
         success_msg: "Item posted successfully!"
+      },
+      common: {
+        status_sold: "SOLD",
+        price_free: "FREE",
+        method_locker: "LOCKER",
+        method_meetup: "MEETUP",
+        member: "User",
+        buy_tag: "Wanted"
       },
       auth: {
         welcome: "Welcome Back",
@@ -92,7 +115,11 @@ const resources = {
         login: "Đăng nhập",
         profile: "Hồ sơ",
         admin: "Quản trị",
-        logout: "Đăng xuất"
+        logout: "Đăng xuất",
+        // Bổ sung các key mới
+        login_as: "Đang đăng nhập là",
+        my_listings: "Tin đăng của tôi",
+        saved: "Tin đã lưu"
       },
       market: {
         title: "Góc Pass Đồ Sinh Viên",
@@ -139,13 +166,32 @@ const resources = {
         }
       },
       post: {
+        sell_tab: "Tôi muốn bán",
+        buy_tab: "Tôi cần mua",
+        img_label: "Hình ảnh sản phẩm",
+        img_placeholder: "Thêm ảnh",
+        img_limit: "Tối đa 4 ảnh. Ảnh đầu là ảnh bìa.",
+        cat_label: "Danh mục",
+        cond_label: "Tình trạng",
+        method_label: "Cách giao dịch",
+        placeholder_title: "VD: Giáo trình Giải tích 1...",
+        placeholder_desc: "Mô tả sản phẩm của bạn...",
+        submit_btn: "ĐĂNG TIN NGAY",
+        loading_btn: "Đang xử lý...",
         title: "Đăng Tin Pass Đồ",
         name_label: "Tên món đồ",
         price_label: "Giá pass lại (VNĐ)",
         desc_label: "Mô tả tình trạng",
         ai_write: "Dùng AI viết",
-        submit_btn: "Đăng Tin Ngay",
         success_msg: "Đăng tin thành công!"
+      },
+      common: {
+        status_sold: "ĐÃ BAY",
+        price_free: "MIỄN PHÍ",
+        method_locker: "LOCKER",
+        method_meetup: "GẶP MẶT",
+        member: "Người dùng",
+        buy_tag: "Cần mua"
       },
       auth: {
         welcome: "Chào mừng trở lại",
@@ -172,6 +218,9 @@ i18n
     fallbackLng: "en",
     interpolation: {
       escapeValue: false 
+    },
+    react: {
+        useSuspense: false 
     }
   });
 

@@ -1,10 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 
-// Dùng luôn key cứng để đảm bảo không bị lỗi biến môi trường
-const supabaseUrl = "https://efyrdkncvjmkgfpcxcdg.supabase.co";
-const supabaseKey = "sb_publishable_1EY9pnGFXIfpyNCYt1bwCw_6t3fPBYH";
+// Đọc biến môi trường từ file .env.local
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
-// Log ra kiểm tra xem có nhận được key không (Bật F12 Console để xem)
-console.log("Supabase URL:", supabaseUrl);
+if (!supabaseUrl || !supabaseKey) {
+    console.error("Thiếu cấu hình Supabase trong .env.local");
+}
 
 export const supabase = createClient(supabaseUrl, supabaseKey);
