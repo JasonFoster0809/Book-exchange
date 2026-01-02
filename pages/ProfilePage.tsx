@@ -2,55 +2,81 @@ import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
-// Import useToast để dùng thông báo đẹp
 import { useToast } from '../contexts/ToastContext'; 
-import { ShieldCheck, LogOut, Package, MessageCircle, Star, User as UserIcon, Camera, Edit3, Save, X, ShoppingBag } from 'lucide-react';
+import { 
+  ShieldCheck, LogOut, Package, MessageCircle, Star, User as UserIcon, 
+  Camera, Edit3, Save, X, ShoppingBag, Image as ImageIcon,
+  Upload, Clock, Mail, Calendar, Flag, UserPlus, UserCheck, MapPin, 
+  MoreHorizontal, Eye, Zap, CheckCircle, School, Search 
+} from 'lucide-react';
 import { Product, User, Review } from '../types';
+import ProductCard from '../components/ProductCard';
+
+interface ExtendedUser extends User {
+    bio?: string;
+    major?: string;
+    academicYear?: string;
+    joinedAt?: string;
+    coverUrl?: string; 
+    lastSeen?: string;
+}
 
 const ProfilePage: React.FC = () => {
   const { user: currentUser, signOut } = useAuth();
-  const { addToast } = useToast(); // Hook lấy hàm thông báo
+  const { addToast } = useToast(); 
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
   const isOwnProfile = !id || (currentUser && id === currentUser.id);
   const targetUserId = isOwnProfile ? currentUser?.id : id;
 
-  // Data States
-  const [profileUser, setProfileUser] = useState<User | null>(null);
+  // --- STATES ---
+  const [profileUser, setProfileUser] = useState<ExtendedUser | null>(null);
   const [userProducts, setUserProducts] = useState<Product[]>([]);
   const [purchasedProducts, setPurchasedProducts] = useState<Product[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [averageRating, setAverageRating] = useState<number>(0);
-  
+  const [isFollowing, setIsFollowing] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'posts' | 'bought' | 'info' | 'reviews'>('posts');
+  const [activeTab, setActiveTab] = useState<'selling' | 'buying' | 'bought' | 'reviews'>('selling');
   
-  // Edit Profile States
-  const [isEditing, setIsEditing] = useState(false);
+  // Edit & Verify States
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
   const [editName, setEditName] = useState('');
+  const [editBio, setEditBio] = useState('');
+  const [editMajor, setEditMajor] = useState('');
+  const [editYear, setEditYear] = useState('');
   const [editAvatarFile, setEditAvatarFile] = useState<File | null>(null);
   const [previewAvatar, setPreviewAvatar] = useState<string | null>(null);
+  const [editCoverFile, setEditCoverFile] = useState<File | null>(null);
+  const [previewCover, setPreviewCover] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  // Review Form States
   const [newRating, setNewRating] = useState(5);
   const [newComment, setNewComment] = useState('');
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [verifyModalOpen, setVerifyModalOpen] = useState(false);
+  const [uploadingVerify, setUploadingVerify] = useState(false);
+  const [verificationStatus, setVerificationStatus] = useState<'none' | 'pending' | 'approved' | 'rejected'>('none');
 
-  const maskStudentId = (studentId: string) => {
-    if (!studentId) return 'Chưa cập nhật';
-    if (isOwnProfile) return studentId;
-    return studentId.length > 5 ? `${studentId.slice(0, 3)}****${studentId.slice(-2)}` : '*******';
+  // --- HELPER: TÍNH THỜI GIAN HOẠT ĐỘNG ---
+  const formatLastSeen = (timestamp?: string) => {
+    if (!timestamp) return 'Offline';
+    const lastSeenDate = new Date(timestamp);
+    const diffInSeconds = Math.floor((new Date().getTime() - lastSeenDate.getTime()) / 1000);
+    
+    if (diffInSeconds < 60) return 'Vừa truy cập';
+    if (diffInSeconds < 300) return 'Đang hoạt động'; 
+    if (diffInSeconds < 3600) return `Hoạt động ${Math.floor(diffInSeconds / 60)} phút trước`;
+    if (diffInSeconds < 86400) return `Hoạt động ${Math.floor(diffInSeconds / 3600)} giờ trước`;
+    return `Hoạt động ${Math.floor(diffInSeconds / 86400)} ngày trước`;
   };
 
   useEffect(() => {
     const fetchData = async () => {
       if (!targetUserId) return;
       setLoading(true);
-
       try {
-        // 1. Fetch Profile
         const { data: profileData } = await supabase.from('profiles').select('*').eq('id', targetUserId).single();
         if (profileData) {
             setProfileUser({
@@ -59,361 +85,377 @@ const ProfilePage: React.FC = () => {
                 email: profileData.email,
                 studentId: profileData.student_id || '',
                 avatar: profileData.avatar_url || 'https://via.placeholder.com/150',
+                coverUrl: profileData.cover_url,
                 isVerified: profileData.is_verified,
-                role: profileData.role as any
+                role: profileData.role as any,
+                bio: profileData.bio || '',
+                major: profileData.major || '',
+                academicYear: profileData.academic_year || '',
+                joinedAt: profileData.created_at,
+                lastSeen: profileData.last_seen
             });
-            setEditName(profileData.name || '');
         }
 
-        // 2. Fetch Selling Products
-        let query = supabase.from('products').select('*').eq('seller_id', targetUserId).order('posted_at', { ascending: false });
-        if (!isOwnProfile) query = query.eq('is_sold', false);
-        
+        if (!isOwnProfile && currentUser) {
+            const { data: followData } = await supabase.from('follows').select('*').eq('follower_id', currentUser.id).eq('following_id', targetUserId).single();
+            setIsFollowing(!!followData);
+        }
+
+        let query = supabase.from('products').select('*, profiles:seller_id(name, avatar_url)').eq('seller_id', targetUserId).order('posted_at', { ascending: false });
+        if (!isOwnProfile) query = query.eq('status', 'available'); 
         const { data: productsData } = await query;
-        if (productsData) {
-             const mapped = mapProducts(productsData);
-             setUserProducts(mapped);
-        }
+        if (productsData) setUserProducts(mapProducts(productsData));
 
-        // 3. Fetch Purchased Products
         if (isOwnProfile) {
-            const { data: boughtData } = await supabase
-                .from('products')
-                .select('*')
-                .eq('buyer_id', targetUserId)
-                .eq('is_sold', true)
-                .order('posted_at', { ascending: false });
-            
-            if (boughtData) {
-                setPurchasedProducts(mapProducts(boughtData));
-            }
+            const { data: boughtData } = await supabase.from('products').select('*, profiles:seller_id(name, avatar_url)').eq('buyer_id', targetUserId).eq('status', 'sold').order('posted_at', { ascending: false });
+            if (boughtData) setPurchasedProducts(mapProducts(boughtData));
         }
 
-        // 4. Fetch Reviews
         fetchReviews();
+        if (isOwnProfile && currentUser) checkVerificationStatus();
 
-      } catch (error) {
-        console.error("Lỗi tải dữ liệu:", error);
-      } finally {
-        setLoading(false);
-      }
+      } catch (error) { console.error(error); } finally { setLoading(false); }
     };
-
     fetchData();
-  }, [id, currentUser, targetUserId]);
+  }, [id, currentUser, targetUserId, isOwnProfile]);
 
-  const mapProducts = (data: any[]): Product[] => {
-      return data.map((item: any) => ({
-        id: item.id,
-        sellerId: item.seller_id,
-        title: item.title,
-        description: item.description,
-        price: item.price,
-        category: item.category,
-        condition: item.condition,
-        images: item.images || [],
-        tradeMethod: item.trade_method,
-        postedAt: item.posted_at,
-        isLookingToBuy: item.is_looking_to_buy,
-        isSold: item.is_sold
-     }));
+  // ... (Giữ nguyên các hàm handle actions: handleOpenEdit, handleUpdateProfile, handleToggleFollow, mapProducts, fetchReviews...)
+  const handleOpenEdit = () => {
+      if (!profileUser) return;
+      setEditName(profileUser.name);
+      setEditBio(profileUser.bio || '');
+      setEditMajor(profileUser.major || '');
+      setEditYear(profileUser.academicYear || '');
+      setPreviewAvatar(null); setEditAvatarFile(null);
+      setPreviewCover(null); setEditCoverFile(null);
+      setIsEditModalOpen(true);
   };
 
-  const fetchReviews = async () => {
-      if (!targetUserId) return;
-      const { data: reviewsData } = await supabase
-        .from('reviews')
-        .select(`*, reviewer:reviewer_id(name, avatar_url)`)
-        .eq('reviewee_id', targetUserId)
-        .order('created_at', { ascending: false });
-
-      if (reviewsData) {
-          const mappedReviews: Review[] = reviewsData.map((item: any) => ({
-              id: item.id, reviewerId: item.reviewer_id, reviewerName: item.reviewer?.name || 'Ẩn danh',
-              reviewerAvatar: item.reviewer?.avatar_url || 'https://via.placeholder.com/150',
-              rating: item.rating, comment: item.comment, createdAt: item.created_at
-          }));
-          setReviews(mappedReviews);
-          if (mappedReviews.length > 0) {
-              const total = mappedReviews.reduce((sum, r) => sum + r.rating, 0);
-              setAverageRating(Number((total / mappedReviews.length).toFixed(1)));
-          }
-      }
-  };
-
-  // --- [CHỈNH SỬA] XỬ LÝ UPDATE PROFILE VỚI TOAST ---
   const handleUpdateProfile = async () => {
       if (!currentUser) return;
       setIsSaving(true);
       try {
           let avatarUrl = profileUser?.avatar;
-
+          let coverUrl = profileUser?.coverUrl;
           if (editAvatarFile) {
-              const fileExt = editAvatarFile.name.split('.').pop();
-              const fileName = `${currentUser.id}/avatar_${Date.now()}.${fileExt}`;
-              const { error: uploadError } = await supabase.storage.from('product-images').upload(fileName, editAvatarFile);
-              if (uploadError) throw uploadError;
-              
-              const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
-              avatarUrl = data.publicUrl;
+              const fileName = `${currentUser.id}/avatar_${Date.now()}`;
+              await supabase.storage.from('product-images').upload(fileName, editAvatarFile);
+              avatarUrl = supabase.storage.from('product-images').getPublicUrl(fileName).data.publicUrl;
           }
-
-          const { error: updateError } = await supabase
-              .from('profiles')
-              .update({ name: editName, avatar_url: avatarUrl })
-              .eq('id', currentUser.id);
-
-          if (updateError) throw updateError;
-
-          setProfileUser(prev => prev ? ({ ...prev, name: editName, avatar: avatarUrl! }) : null);
-          setIsEditing(false);
-          
-          // THAY ALERT BẰNG TOAST XANH LÁ
-          addToast("Cập nhật hồ sơ thành công!", "success");
-
-      } catch (err: any) {
-          console.error(err);
-          // THAY ALERT BẰNG TOAST ĐỎ
-          addToast("Lỗi cập nhật: " + err.message, "error");
-      } finally {
-          setIsSaving(false);
-      }
+          if (editCoverFile) {
+              const fileName = `${currentUser.id}/cover_${Date.now()}`;
+              await supabase.storage.from('product-images').upload(fileName, editCoverFile);
+              coverUrl = supabase.storage.from('product-images').getPublicUrl(fileName).data.publicUrl;
+          }
+          const { error } = await supabase.from('profiles').update({ name: editName, avatar_url: avatarUrl, cover_url: coverUrl, bio: editBio, major: editMajor, academic_year: editYear }).eq('id', currentUser.id);
+          if (error) throw error;
+          setProfileUser(prev => prev ? ({ ...prev, name: editName, avatar: avatarUrl!, coverUrl: coverUrl, bio: editBio, major: editMajor, academicYear: editYear }) : null);
+          setIsEditModalOpen(false);
+          addToast("Cập nhật thành công!", "success");
+      } catch (err: any) { addToast("Lỗi: " + err.message, "error"); } finally { setIsSaving(false); }
   };
 
-  const handleAvatarChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-      if (e.target.files && e.target.files[0]) {
-          setEditAvatarFile(e.target.files[0]);
-          setPreviewAvatar(URL.createObjectURL(e.target.files[0]));
-      }
-  };
-
-  // --- REVIEW, DELETE, MARK SOLD (CŨNG DÙNG TOAST) ---
-  const handleCreateReview = async (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!currentUser || !targetUserId) return;
-      setSubmittingReview(true);
-      const { error } = await supabase.from('reviews').insert({ reviewer_id: currentUser.id, reviewee_id: targetUserId, rating: newRating, comment: newComment });
-      
-      if (!error) { 
-          setNewComment(''); setNewRating(5); fetchReviews(); 
-          addToast("Đã gửi đánh giá của bạn!", "success");
+  const handleToggleFollow = async () => {
+      if (!currentUser) return navigate('/auth');
+      if (isFollowing) {
+          await supabase.from('follows').delete().eq('follower_id', currentUser.id).eq('following_id', targetUserId);
+          setIsFollowing(false);
+          addToast("Đã hủy theo dõi", "info");
       } else {
-          addToast(error.message, "error");
+          await supabase.from('follows').insert({ follower_id: currentUser.id, following_id: targetUserId });
+          setIsFollowing(true);
+          addToast("Đã theo dõi", "success");
       }
-      setSubmittingReview(false);
   };
 
-  const handleMarkAsSold = async (productId: string) => {
-      if (!confirm("Xác nhận đã bán?")) return;
-      await supabase.from('products').update({ is_sold: true }).eq('id', productId);
-      setUserProducts(prev => prev.map(p => p.id === productId ? { ...p, isSold: true } : p));
-      addToast("Đã đánh dấu là Đã bán", "success");
-  };
-
-  const handleDelete = async (productId: string) => {
-      if (!confirm("Xóa tin này vĩnh viễn?")) return;
-      await supabase.from('products').delete().eq('id', productId);
-      setUserProducts(prev => prev.filter(p => p.id !== productId));
-      addToast("Đã xóa tin đăng", "info");
-  };
-
+  const checkVerificationStatus = async () => { if (!currentUser) return; try { const { data } = await supabase.from('verification_requests').select('status').eq('user_id', currentUser.id).order('created_at', { ascending: false }).limit(1).single(); if (data) setVerificationStatus(data.status as any); } catch (e) {} };
+  const handleUploadVerification = async (e: React.ChangeEvent<HTMLInputElement>) => { try { if (!currentUser || !e.target.files?.[0]) return; setUploadingVerify(true); const file = e.target.files[0]; const fileName = `${currentUser.id}-${Math.random()}`; await supabase.storage.from('product-images').upload(fileName, file); const { data } = supabase.storage.from('product-images').getPublicUrl(fileName); await supabase.from('verification_requests').insert({ user_id: currentUser.id, image_url: data.publicUrl, status: 'pending' }); addToast("Đã gửi yêu cầu!", "success"); setVerificationStatus('pending'); setVerifyModalOpen(false); } catch (err: any) { addToast("Lỗi: " + err.message, "error"); } finally { setUploadingVerify(false); } };
+  const mapProducts = (data: any[]): Product[] => data.map((item: any) => ({ id: item.id, sellerId: item.seller_id, title: item.title, description: item.description, price: item.price, category: item.category, condition: item.condition, images: item.images || [], tradeMethod: item.trade_method, postedAt: item.posted_at, isLookingToBuy: item.is_looking_to_buy, status: item.status, seller: item.profiles, view_count: item.view_count || 0 }));
+  const handleCreateReview = async (e: React.FormEvent) => { e.preventDefault(); if (!currentUser || !targetUserId) return; setSubmittingReview(true); const { error } = await supabase.from('reviews').insert({ reviewer_id: currentUser.id, reviewee_id: targetUserId, rating: newRating, comment: newComment }); if (!error) { setNewComment(''); setNewRating(5); fetchReviews(); addToast("Đã gửi đánh giá!", "success"); } else { addToast(error.message, "error"); } setSubmittingReview(false); };
+  const handleDelete = async (pid: string) => { if (!confirm("Xóa tin?")) return; await supabase.from('products').delete().eq('id', pid); setUserProducts(prev => prev.filter(p => p.id !== pid)); addToast("Đã xóa", "info"); };
   const handleLogout = async () => { await signOut(); navigate('/'); };
 
-  if (loading) return <div className="text-center py-20">Đang tải profile...</div>;
-  if (!profileUser) return <div className="text-center py-20">User not found</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#034EA2]"></div></div>;
+  if (!profileUser) return <div className="text-center py-20">Không tìm thấy người dùng</div>;
+
+  // Lọc sản phẩm theo nhu cầu
+  const sellingProducts = userProducts.filter(p => !p.isLookingToBuy);
+  const buyingRequests = userProducts.filter(p => p.isLookingToBuy);
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-      <div className="bg-white shadow rounded-lg overflow-hidden mb-6 group">
-        <div className="bg-gradient-to-r from-indigo-500 to-purple-600 h-32 w-full"></div>
-        <div className="px-6 relative flex flex-col sm:flex-row items-end sm:items-center pb-6">
-           
-           {/* AVATAR AREA */}
-           <div className="relative -top-12">
-               <img 
-                 src={previewAvatar || profileUser.avatar} 
-                 alt="Avatar" 
-                 className="w-24 h-24 rounded-full border-4 border-white shadow-md object-cover bg-white"
-               />
-               {isEditing && (
-                   <label className="absolute bottom-0 right-0 bg-gray-900 text-white p-1.5 rounded-full cursor-pointer hover:bg-black transition-colors shadow-sm">
-                       <Camera className="w-4 h-4" />
-                       <input type="file" className="hidden" accept="image/*" onChange={handleAvatarChange} />
-                   </label>
-               )}
-           </div>
+    <div className="min-h-screen bg-[#F0F2F5] pb-20 font-sans">
+      
+      {/* 1. HEADER (FACEBOOK STYLE - COMPACT) */}
+      <div className="bg-white shadow-sm pb-2">
+        <div className="max-w-5xl mx-auto px-0 md:px-4"> {/* Container hẹp hơn chút cho giống FB */}
+            
+            {/* COVER PHOTO */}
+            <div className="relative w-full h-[160px] md:h-[220px] bg-gradient-to-r from-gray-200 to-gray-300 md:rounded-b-xl overflow-hidden group/cover">
+                {profileUser.coverUrl ? (
+                    <img src={profileUser.coverUrl} className="w-full h-full object-cover" alt="Cover" />
+                ) : (
+                    <div className="w-full h-full flex items-center justify-center text-gray-400">
+                        <span className="text-sm font-medium opacity-50">Sinh viên Bách Khoa</span>
+                    </div>
+                )}
+            </div>
 
-           <div className="mt-14 sm:mt-0 sm:ml-6 flex-1 w-full text-center sm:text-left">
-             {isEditing ? (
-                 <div className="flex items-center gap-2 mb-2">
-                     <input 
-                        type="text" 
-                        value={editName} 
-                        onChange={e => setEditName(e.target.value)} 
-                        className="text-xl font-bold border-b-2 border-indigo-500 focus:outline-none px-1 w-full sm:w-auto"
-                        autoFocus
-                     />
-                 </div>
-             ) : (
-                 <h1 className="text-2xl font-bold text-gray-900 flex items-center justify-center sm:justify-start">
-                   {profileUser.name}
-                   {profileUser.isVerified && <ShieldCheck className="w-6 h-6 text-blue-500 ml-2" title="Đã xác thực" />}
-                 </h1>
-             )}
-             
-             <div className="flex flex-col sm:flex-row items-center mt-1 text-sm text-gray-500 gap-2 sm:gap-4">
-                 <span>MSSV: <span className="font-mono text-gray-700">{maskStudentId(profileUser.studentId)}</span></span>
-                 <span className="flex items-center text-yellow-500 font-bold bg-yellow-50 px-2 py-0.5 rounded-full border border-yellow-200">
-                     {averageRating > 0 ? averageRating : 'New'} <Star className="w-3.5 h-3.5 ml-1 fill-current" />
-                     <span className="text-gray-400 font-normal ml-1 text-xs">({reviews.length} đánh giá)</span>
-                 </span>
-             </div>
-           </div>
+            {/* INFO SECTION */}
+            <div className="px-4">
+                <div className="flex flex-col md:flex-row items-center md:items-start -mt-12 md:-mt-8 relative">
+                    
+                    {/* AVATAR */}
+                    <div className="relative z-20 flex-shrink-0">
+                        <div className={`w-32 h-32 md:w-40 md:h-40 rounded-full border-[4px] border-white bg-white shadow-md overflow-hidden relative ${profileUser.isVerified ? 'ring-2 ring-blue-500 ring-offset-2' : ''}`}>
+                            <img src={profileUser.avatar} className="w-full h-full object-cover" alt={profileUser.name} />
+                        </div>
+                    </div>
 
-           {/* ACTION BUTTONS */}
-           <div className="mt-4 sm:mt-0 flex gap-3">
-               {isOwnProfile ? (
-                   isEditing ? (
-                       <>
-                           <button onClick={() => { setIsEditing(false); setPreviewAvatar(null); setEditName(profileUser.name); }} className="text-gray-600 hover:bg-gray-100 px-3 py-2 rounded-md transition"><X className="w-5 h-5"/></button>
-                           <button onClick={handleUpdateProfile} disabled={isSaving} className="bg-green-600 text-white px-4 py-2 rounded-md flex items-center hover:bg-green-700 transition shadow">
-                               {isSaving ? 'Đang lưu...' : <><Save className="w-4 h-4 mr-2"/> Lưu</>}
-                           </button>
-                       </>
-                   ) : (
-                       <>
-                           <button onClick={() => setIsEditing(true)} className="text-indigo-600 hover:bg-indigo-50 px-4 py-2 rounded-md border border-indigo-100 transition flex items-center font-medium">
-                               <Edit3 className="w-4 h-4 mr-2" /> Sửa
-                           </button>
-                           <button onClick={handleLogout} className="text-red-600 hover:bg-red-50 px-4 py-2 rounded-md flex items-center transition">
-                               <LogOut className="w-4 h-4" />
-                           </button>
-                       </>
-                   )
-               ) : (
-                   <Link to={`/chat?partnerId=${profileUser.id}`} className="bg-indigo-600 text-white px-4 py-2 rounded-md text-sm font-medium hover:bg-indigo-700 transition flex items-center shadow-sm">
-                       <MessageCircle className="w-4 h-4 mr-2" /> Nhắn tin
-                   </Link>
-               )}
-           </div>
-        </div>
+                    {/* NAME & INFO (Căn lề chuẩn) */}
+                    <div className="flex-1 text-center md:text-left md:ml-5 mt-3 md:mt-10 mb-4 w-full">
+                        <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex items-center justify-center md:justify-start gap-2">
+                            {profileUser.name}
+                            {profileUser.isVerified && <ShieldCheck className="w-5 h-5 text-blue-500 fill-blue-50" title="Đã xác thực thẻ SV" />}
+                        </h1>
+                        
+                        {/* Dòng Trust Info */}
+                        <div className="flex flex-col md:flex-row md:items-center gap-1 md:gap-3 mt-1 text-sm text-gray-600 font-medium">
+                            {/* Chuyên ngành + Khóa */}
+                            {(profileUser.major || profileUser.academicYear) && (
+                                <span className="flex items-center justify-center md:justify-start">
+                                    <School size={14} className="mr-1.5"/> 
+                                    {profileUser.major ? `Sinh viên ${profileUser.major}` : 'Sinh viên Bách Khoa'} 
+                                    {profileUser.academicYear ? ` - ${profileUser.academicYear}` : ''}
+                                </span>
+                            )}
+                            
+                            {/* Last Seen (Realtime) */}
+                            <span className="hidden md:inline text-gray-300">•</span>
+                            <span className="flex items-center justify-center md:justify-start text-green-600">
+                                <Zap size={12} className="mr-1 fill-current"/> {formatLastSeen(profileUser.lastSeen)}
+                            </span>
+                        </div>
 
-        {/* TABS */}
-        <div className="border-t border-gray-200 px-6 flex gap-6 overflow-x-auto scrollbar-hide">
-            <button onClick={() => setActiveTab('posts')} className={`py-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === 'posts' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                Tin đăng ({userProducts.length})
-            </button>
-            {isOwnProfile && (
-                <button onClick={() => setActiveTab('bought')} className={`py-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === 'bought' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                    Đã mua ({purchasedProducts.length})
-                </button>
-            )}
-            <button onClick={() => setActiveTab('reviews')} className={`py-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === 'reviews' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                Đánh giá ({reviews.length})
-            </button>
-            <button onClick={() => setActiveTab('info')} className={`py-4 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${activeTab === 'info' ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                Thông tin
-            </button>
+                        {profileUser.bio && <p className="text-gray-500 text-sm mt-2 italic">"{profileUser.bio}"</p>}
+                    </div>
+
+                    {/* ACTIONS BUTTONS */}
+                    <div className="flex gap-2 mt-4 md:mt-10 flex-shrink-0">
+                        {isOwnProfile ? (
+                            <>
+                                <button onClick={handleOpenEdit} className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg font-bold hover:bg-gray-200 flex items-center text-sm transition h-10">
+                                    <Edit3 size={16} className="mr-1.5"/> Chỉnh sửa
+                                </button>
+                                <button onClick={handleLogout} className="px-4 py-2 bg-gray-100 text-gray-800 rounded-lg font-bold hover:bg-gray-200 flex items-center text-sm transition h-10">
+                                    <LogOut size={16}/>
+                                </button>
+                            </>
+                        ) : (
+                            <>
+                                <Link to={`/chat?partnerId=${profileUser.id}`} className="px-5 py-2 bg-[#0866FF] text-white rounded-lg font-bold hover:bg-[#0054d6] flex items-center text-sm transition shadow-sm h-10">
+                                    <MessageCircle size={18} className="mr-1.5"/> Nhắn tin
+                                </Link>
+                                <button onClick={handleToggleFollow} className={`px-4 py-2 rounded-lg font-bold flex items-center text-sm transition h-10 ${isFollowing ? 'bg-gray-100 text-black hover:bg-gray-200' : 'bg-blue-50 text-blue-600 hover:bg-blue-100'}`}>
+                                    {isFollowing ? <><UserCheck size={18} className="mr-1.5"/> Đã theo dõi</> : <><UserPlus size={18} className="mr-1.5"/> Theo dõi</>}
+                                </button>
+                                <button className="px-3 py-2 bg-gray-100 text-black rounded-lg hover:bg-gray-200 transition h-10" title="Báo cáo">
+                                    <Flag size={18}/>
+                                </button>
+                            </>
+                        )}
+                    </div>
+                </div>
+
+                {/* --- STATS GRID (ĐỔI WORDING) --- */}
+                <div className="grid grid-cols-3 gap-4 border-t border-gray-100 pt-4 mt-6 mb-2 max-w-2xl mx-auto md:mx-0">
+                    <div className="text-center md:text-left group">
+                        <span className="block text-xl font-black text-gray-900">{userProducts.length}</span>
+                        <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest block mt-0.5">Tin đăng</span>
+                    </div>
+                    <div className="text-center md:text-left border-l border-r border-gray-100 group">
+                        <span className="block text-xl font-black text-green-600">{userProducts.filter(p => p.status === 'sold').length}</span>
+                        <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest block mt-0.5">Đã bán</span>
+                    </div>
+                    <div className="text-center md:text-left group">
+                        {reviews.length > 0 ? (
+                            <div className="flex items-center justify-center md:justify-start gap-1">
+                                <span className="text-xl font-black text-yellow-500">{averageRating}</span>
+                                <Star className="w-4 h-4 text-yellow-500 fill-current"/>
+                            </div>
+                        ) : (
+                            // WORDING MỚI: NGƯỜI BÁN MỚI
+                            <span className="flex items-center justify-center md:justify-start text-sm font-bold text-green-600">
+                                <span className="mr-1">🌱</span> Người bán mới
+                            </span>
+                        )}
+                        <span className="text-[10px] text-gray-500 uppercase font-bold tracking-widest block mt-0.5">
+                            {profileUser.isVerified ? 'Đã xác thực SV' : 'Độ uy tín'}
+                        </span>
+                    </div>
+                </div>
+
+                {/* TABS NAVIGATION */}
+                <div className="flex items-center gap-6 mt-4 border-t border-gray-100 pt-1 overflow-x-auto no-scrollbar">
+                    <button onClick={() => setActiveTab('selling')} className={`py-3 text-[14px] font-semibold border-b-[3px] transition-colors whitespace-nowrap flex items-center ${activeTab === 'selling' ? 'border-[#0866FF] text-[#0866FF]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                        <Package size={16} className="mr-1.5"/> Đang bán ({sellingProducts.length})
+                    </button>
+                    <button onClick={() => setActiveTab('buying')} className={`py-3 text-[14px] font-semibold border-b-[3px] transition-colors whitespace-nowrap flex items-center ${activeTab === 'buying' ? 'border-[#0866FF] text-[#0866FF]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                        <Search size={16} className="mr-1.5"/> Cần mua ({buyingRequests.length})
+                    </button>
+                    <button onClick={() => setActiveTab('reviews')} className={`py-3 text-[14px] font-semibold border-b-[3px] transition-colors whitespace-nowrap flex items-center ${activeTab === 'reviews' ? 'border-[#0866FF] text-[#0866FF]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                        <Star size={16} className="mr-1.5"/> Đánh giá ({reviews.length})
+                    </button>
+                    {isOwnProfile && (
+                        <button onClick={() => setActiveTab('bought')} className={`py-3 text-[14px] font-semibold border-b-[3px] transition-colors whitespace-nowrap flex items-center ${activeTab === 'bought' ? 'border-[#0866FF] text-[#0866FF]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                            <ShoppingBag size={16} className="mr-1.5"/> Lịch sử mua
+                        </button>
+                    )}
+                </div>
+            </div>
         </div>
       </div>
 
-      {/* === TAB CONTENT === */}
-      
-      {/* 1. SELLING POSTS */}
-      {activeTab === 'posts' && (
-          <div className="bg-white shadow rounded-lg p-6 min-h-[300px]">
-              {isOwnProfile && <div className="flex justify-between mb-4"><h2 className="font-bold text-gray-900">Quản lý tin bán</h2><Link to="/post" className="text-sm text-indigo-600 flex items-center hover:underline"><Package className="w-4 h-4 mr-1"/> Đăng mới</Link></div>}
-              {userProducts.length === 0 ? <div className="text-center py-10 text-gray-400 border-2 border-dashed rounded-lg">Chưa có tin đăng nào.</div> : 
-                  <div className="grid grid-cols-1 gap-4">
-                      {userProducts.map((p) => (
-                          <div key={p.id} className={`flex items-center border p-4 rounded-lg hover:shadow-sm transition ${p.isSold ? 'bg-gray-50 opacity-75' : 'bg-white'}`}>
-                              <img src={p.images[0] || 'https://via.placeholder.com/100'} className="w-16 h-16 object-cover rounded bg-gray-200" />
-                              <div className="flex-1 ml-4">
-                                  <Link to={`/product/${p.id}`} className="font-bold text-gray-900 hover:text-indigo-600 line-clamp-1">{p.title}</Link>
-                                  <div className="flex gap-2 mt-1 items-center">
-                                    {p.isSold && <span className="text-[10px] bg-gray-500 text-white px-2 py-0.5 rounded uppercase font-bold">ĐÃ BÁN</span>}
-                                    <span className="text-indigo-600 text-sm font-bold">{p.price.toLocaleString()} đ</span>
-                                  </div>
-                              </div>
-                              {isOwnProfile && (
-                                  <div className="flex gap-2">
-                                      {!p.isSold && <button onClick={() => handleMarkAsSold(p.id)} className="text-xs bg-green-50 text-green-700 px-3 py-2 rounded hover:bg-green-100 border border-green-200">Đã bán</button>}
-                                      <button onClick={() => handleDelete(p.id)} className="text-xs bg-red-50 text-red-700 px-3 py-2 rounded hover:bg-red-100 border border-red-200">Xóa</button>
-                                  </div>
-                              )}
-                          </div>
-                      ))}
-                  </div>
-              }
-          </div>
+      {/* 2. MAIN CONTENT - GRID LAYOUT */}
+      <div className="max-w-5xl mx-auto px-4 mt-6">
+        <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+            
+            {/* TAB: ĐANG BÁN */}
+            {activeTab === 'selling' && (
+                sellingProducts.length === 0 ? (
+                    <div className="text-center py-20 bg-white rounded-xl border border-dashed border-gray-200">
+                        <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-300"><Package size={32}/></div>
+                        <p className="text-gray-500 font-medium">Chưa có tin đăng bán nào.</p>
+                        {isOwnProfile && <Link to="/post" className="mt-4 inline-block text-blue-600 font-bold text-sm hover:underline">Đăng tin ngay</Link>}
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {sellingProducts.map((p) => (
+                            <div key={p.id} className="relative group">
+                                <ProductCard product={p} />
+                                {isOwnProfile && (
+                                    <button onClick={() => handleDelete(p.id)} className="absolute top-2 right-2 bg-white/90 text-gray-700 p-1.5 rounded-full shadow-sm hover:bg-red-50 hover:text-red-600 transition z-10" title="Xóa tin"><X size={16}/></button>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )
+            )}
+
+            {/* TAB: CẦN MUA */}
+            {activeTab === 'buying' && (
+                buyingRequests.length === 0 ? (
+                    <div className="text-center py-20 bg-white rounded-xl border border-dashed border-gray-200">
+                        <div className="w-16 h-16 bg-gray-50 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-300"><Search size={32}/></div>
+                        <p className="text-gray-500 font-medium">Chưa có tin tìm mua nào.</p>
+                    </div>
+                ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                        {buyingRequests.map((p) => (
+                            <div key={p.id} className="relative group">
+                                <ProductCard product={p} />
+                                {isOwnProfile && (
+                                    <button onClick={() => handleDelete(p.id)} className="absolute top-2 right-2 bg-white/90 text-gray-700 p-1.5 rounded-full shadow-sm hover:bg-red-50 hover:text-red-600 transition z-10" title="Xóa tin"><X size={16}/></button>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )
+            )}
+
+            {/* TAB: ĐÁNH GIÁ */}
+            {activeTab === 'reviews' && (
+                <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 max-w-3xl mx-auto">
+                    {!isOwnProfile && currentUser && (
+                        <form onSubmit={handleCreateReview} className="mb-8 p-4 bg-gray-50 rounded-xl border border-gray-200">
+                            <div className="flex items-center mb-3"><span className="text-sm font-bold mr-3 text-gray-700">Đánh giá người bán:</span><div className="flex gap-1">{[1, 2, 3, 4, 5].map(s => (<button key={s} type="button" onClick={() => setNewRating(s)} className="focus:outline-none hover:scale-110 transition-transform"><Star className={`w-6 h-6 ${s <= newRating ? 'text-yellow-400 fill-current' : 'text-gray-300'}`} /></button>))}</div></div>
+                            <textarea required className="w-full border border-gray-300 p-3 rounded-lg text-sm mb-3 focus:ring-2 focus:ring-[#034EA2] outline-none" placeholder="Nhập nhận xét..." value={newComment} onChange={e => setNewComment(e.target.value)} rows={2}/>
+                            <div className="text-right"><button disabled={submittingReview} className="bg-[#034EA2] text-white px-4 py-2 rounded-lg text-xs font-bold hover:bg-[#003875] transition-colors shadow-sm">Gửi đánh giá</button></div>
+                        </form>
+                    )}
+                    <div className="space-y-6">
+                        {reviews.length === 0 ? (
+                            <div className="text-center py-10 text-gray-400">
+                                <div className="inline-block p-3 bg-green-50 rounded-full mb-3"><span className="text-2xl">🌱</span></div>
+                                <p className="text-gray-900 font-bold">Chưa có đánh giá nào</p>
+                                <p className="text-sm mt-1">Hãy là người đầu tiên giao dịch với {profileUser.name}!</p>
+                            </div>
+                        ) : reviews.map(r => (
+                            <div key={r.id} className="flex gap-4 border-b border-gray-50 pb-6 last:border-0 last:pb-0">
+                                <img src={r.reviewerAvatar} className="w-10 h-10 rounded-full bg-gray-200 object-cover border border-gray-100" />
+                                <div className="flex-1">
+                                    <div className="flex items-center justify-between mb-1">
+                                        <div className="flex items-center gap-2"><span className="font-bold text-gray-900 text-sm">{r.reviewerName}</span><span className="text-xs text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">{new Date(r.createdAt).toLocaleDateString('vi-VN')}</span></div>
+                                        <div className="flex">{[...Array(5)].map((_, i) => <Star key={i} className={`w-3 h-3 ${i < r.rating ? 'text-yellow-400 fill-current' : 'text-gray-200'}`} />)}</div>
+                                    </div>
+                                    <p className="text-gray-700 text-sm bg-gray-50 p-3 rounded-lg rounded-tl-none">{r.comment}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            )}
+
+            {/* TAB: LỊCH SỬ MUA (PRIVATE) */}
+            {activeTab === 'bought' && isOwnProfile && (
+                <div className="bg-white rounded-xl border border-gray-100 shadow-sm p-6 max-w-3xl mx-auto">
+                    {purchasedProducts.length === 0 ? <p className="text-center text-gray-400 py-10 text-sm">Bạn chưa mua món nào.</p> : <div className="space-y-3">{purchasedProducts.map((p) => (<div key={p.id} className="flex gap-4 p-3 border border-gray-100 hover:bg-gray-50 rounded-xl items-center transition-colors cursor-pointer" onClick={() => navigate(`/product/${p.id}`)}><img src={p.images[0]} className="w-16 h-16 rounded-lg object-cover bg-white border border-gray-200"/><div className="flex-1"><h4 className="font-bold text-gray-900 text-sm line-clamp-1">{p.title}</h4><p className="text-xs text-gray-500 mt-0.5">Người bán: {p.seller?.name}</p></div><span className="font-bold text-green-600 text-sm">{p.price.toLocaleString()} đ</span></div>))}</div>}
+                </div>
+            )}
+        </div>
+      </div>
+
+      {/* --- EDIT MODAL (POPUP) --- */}
+      {isEditModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[100] p-4 animate-in fade-in duration-200">
+            <div className="bg-white p-0 rounded-xl max-w-lg w-full shadow-2xl relative overflow-hidden">
+                <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-white">
+                    <h3 className="text-xl font-bold text-gray-900">Chỉnh sửa trang cá nhân</h3>
+                    <button onClick={() => setIsEditModalOpen(false)} className="bg-gray-100 hover:bg-gray-200 p-1.5 rounded-full text-gray-600"><X size={20}/></button>
+                </div>
+                
+                <div className="p-4 max-h-[80vh] overflow-y-auto space-y-6">
+                    <div>
+                        <div className="flex justify-between items-center mb-2"><span className="font-bold text-base">Ảnh bìa</span><label className="text-blue-600 text-sm cursor-pointer hover:underline font-medium">Thay đổi <input type="file" className="hidden" accept="image/*" onChange={(e) => { if(e.target.files?.[0]) { setEditCoverFile(e.target.files[0]); setPreviewCover(URL.createObjectURL(e.target.files[0])); } }} /></label></div>
+                        <div className="h-32 rounded-lg overflow-hidden bg-gray-200 relative"><img src={previewCover || profileUser?.coverUrl || 'https://via.placeholder.com/600x200'} className="w-full h-full object-cover" /></div>
+                    </div>
+                    <div>
+                        <div className="flex justify-between items-center mb-2"><span className="font-bold text-base">Ảnh đại diện</span><label className="text-blue-600 text-sm cursor-pointer hover:underline font-medium">Thay đổi <input type="file" className="hidden" accept="image/*" onChange={(e) => { if(e.target.files?.[0]) { setEditAvatarFile(e.target.files[0]); setPreviewAvatar(URL.createObjectURL(e.target.files[0])); } }} /></label></div>
+                        <div className="flex justify-center"><div className="w-24 h-24 rounded-full overflow-hidden border-4 border-gray-100"><img src={previewAvatar || profileUser?.avatar} className="w-full h-full object-cover" /></div></div>
+                    </div>
+                    <div className="space-y-4">
+                        <span className="font-bold text-base block">Thông tin</span>
+                        <input type="text" value={editName} onChange={e => setEditName(e.target.value)} className="w-full p-3 bg-gray-50 rounded-lg outline-none border border-gray-200 focus:border-blue-500 transition" placeholder="Tên hiển thị" />
+                        <div className="grid grid-cols-2 gap-3">
+                            <input type="text" value={editMajor} onChange={e => setEditMajor(e.target.value)} className="p-3 bg-gray-50 rounded-lg outline-none border border-gray-200 focus:border-blue-500" placeholder="Ngành học" />
+                            <input type="text" value={editYear} onChange={e => setEditYear(e.target.value)} className="p-3 bg-gray-50 rounded-lg outline-none border border-gray-200 focus:border-blue-500" placeholder="Khóa (K2021)" />
+                        </div>
+                        <textarea value={editBio} onChange={e => setEditBio(e.target.value)} className="w-full p-3 bg-gray-50 rounded-lg outline-none border border-gray-200 focus:border-blue-500 resize-none h-24" placeholder="Giới thiệu bản thân..." />
+                    </div>
+                </div>
+                <div className="p-4 border-t border-gray-200 flex justify-end gap-3">
+                    <button onClick={() => setIsEditModalOpen(false)} className="px-5 py-2.5 rounded-lg font-bold text-gray-600 hover:bg-gray-100 transition">Hủy</button>
+                    <button onClick={handleUpdateProfile} disabled={isSaving} className="px-5 py-2.5 bg-blue-600 text-white rounded-lg font-bold hover:bg-blue-700 transition shadow-sm">{isSaving ? 'Đang lưu...' : 'Lưu thay đổi'}</button>
+                </div>
+            </div>
+        </div>
       )}
 
-      {/* 2. BOUGHT PRODUCTS */}
-      {activeTab === 'bought' && isOwnProfile && (
-          <div className="bg-white shadow rounded-lg p-6 min-h-[300px]">
-              <h2 className="font-bold text-gray-900 mb-4">Lịch sử mua hàng</h2>
-              {purchasedProducts.length === 0 ? <div className="text-center py-10 text-gray-400 border-2 border-dashed rounded-lg flex flex-col items-center"><ShoppingBag className="w-10 h-10 mb-2 opacity-20"/>Chưa mua món nào.</div> : 
-                  <div className="grid grid-cols-1 gap-4">
-                      {purchasedProducts.map((p) => (
-                          <div key={p.id} className="flex items-center border p-4 rounded-lg bg-green-50/30 border-green-100">
-                              <div className="relative">
-                                <img src={p.images[0]} className="w-16 h-16 object-cover rounded bg-white border border-green-200" />
-                                <div className="absolute -bottom-2 -right-2 bg-green-500 text-white rounded-full p-1"><ShieldCheck className="w-3 h-3"/></div>
-                              </div>
-                              <div className="flex-1 ml-4">
-                                  <Link to={`/product/${p.id}`} className="font-bold text-gray-900 hover:text-indigo-600 line-clamp-1">{p.title}</Link>
-                                  <p className="text-xs text-gray-500 mt-1">Đã mua từ: <Link to={`/profile/${p.sellerId}`} className="text-indigo-600 hover:underline">Người bán</Link></p>
-                              </div>
-                              <span className="font-bold text-green-700">{p.price.toLocaleString()} đ</span>
-                          </div>
-                      ))}
-                  </div>
-              }
-          </div>
+      {/* Verify Modal */}
+      {verifyModalOpen && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+            <div className="bg-white p-6 rounded-2xl max-w-sm w-full shadow-2xl relative text-center">
+                <button onClick={() => setVerifyModalOpen(false)} className="absolute top-4 right-4 text-gray-400 hover:text-gray-600"><X size={20}/></button>
+                <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4"><ShieldCheck size={28}/></div>
+                <h3 className="text-xl font-bold text-gray-900">Xác thực sinh viên</h3>
+                <p className="text-gray-500 text-sm mt-2 mb-6">Tải ảnh thẻ sinh viên để nhận huy hiệu tích xanh uy tín.</p>
+                <label className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-xl cursor-pointer transition-all ${uploadingVerify ? 'bg-gray-50 border-gray-300' : 'border-blue-200 bg-blue-50 hover:bg-blue-100'}`}>
+                    {uploadingVerify ? <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-blue-600"></div> : <div className="flex flex-col items-center justify-center text-blue-600"><Upload className="w-6 h-6 mb-2" /><p className="text-sm font-bold">Bấm để tải ảnh</p></div>}
+                    <input type="file" className="hidden" accept="image/*" onChange={handleUploadVerification} disabled={uploadingVerify} />
+                </label>
+            </div>
+        </div>
       )}
 
-      {/* 3. REVIEWS */}
-      {activeTab === 'reviews' && (
-          <div className="bg-white shadow rounded-lg p-6">
-              <h2 className="text-lg font-bold text-gray-900 mb-6 flex items-center">Đánh giá cộng đồng ({reviews.length})</h2>
-              {!isOwnProfile && currentUser && (
-                  <form onSubmit={handleCreateReview} className="mb-8 p-4 bg-gray-50 rounded-lg border border-gray-200">
-                      <div className="flex items-center mb-3">
-                          <span className="text-sm mr-3 text-gray-600">Đánh giá người này:</span>
-                          {[1, 2, 3, 4, 5].map(s => <button key={s} type="button" onClick={() => setNewRating(s)}><Star className={`w-6 h-6 ${s <= newRating ? 'text-yellow-400 fill-current' : 'text-gray-300'}`} /></button>)}
-                      </div>
-                      <textarea required className="w-full border p-2 rounded text-sm mb-2" placeholder="Nhập nhận xét..." value={newComment} onChange={e => setNewComment(e.target.value)} />
-                      <div className="text-right"><button disabled={submittingReview} className="bg-indigo-600 text-white px-4 py-2 rounded text-xs font-bold hover:bg-indigo-700">Gửi đánh giá</button></div>
-                  </form>
-              )}
-              <div className="space-y-4">
-                  {reviews.map(r => (
-                      <div key={r.id} className="flex gap-3 border-b pb-4 last:border-0">
-                          <img src={r.reviewerAvatar} className="w-10 h-10 rounded-full bg-gray-200" />
-                          <div>
-                              <div className="flex items-center gap-2"><span className="font-bold text-sm">{r.reviewerName}</span><span className="text-xs text-gray-400">{new Date(r.createdAt).toLocaleDateString('vi-VN')}</span></div>
-                              <div className="flex my-1">{[...Array(5)].map((_, i) => <Star key={i} className={`w-3 h-3 ${i < r.rating ? 'text-yellow-400 fill-current' : 'text-gray-200'}`} />)}</div>
-                              <p className="text-sm text-gray-800">{r.comment}</p>
-                          </div>
-                      </div>
-                  ))}
-                  {reviews.length === 0 && <p className="text-gray-500 italic text-center">Chưa có đánh giá nào.</p>}
-              </div>
-          </div>
-      )}
-
-      {/* 4. INFO */}
-      {activeTab === 'info' && (
-           <div className="bg-white shadow rounded-lg p-6">
-               <h3 className="font-bold text-gray-900 mb-4 border-b pb-2">Thông tin tài khoản</h3>
-               <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
-                   <div><dt className="text-gray-500">Tên hiển thị</dt><dd className="font-medium">{profileUser.name}</dd></div>
-                   <div><dt className="text-gray-500">Trạng thái</dt><dd className={profileUser.isVerified ? "text-green-600 font-bold" : "text-gray-500"}>{profileUser.isVerified ? 'Đã xác thực MSSV' : 'Chưa xác thực'}</dd></div>
-                   {isOwnProfile && <div><dt className="text-gray-500">Email</dt><dd className="font-medium">{profileUser.email}</dd></div>}
-                   <div><dt className="text-gray-500">Vai trò</dt><dd className="uppercase font-bold text-xs bg-gray-100 inline-block px-2 py-1 rounded">{profileUser.role}</dd></div>
-               </dl>
-           </div>
-      )}
     </div>
   );
 };

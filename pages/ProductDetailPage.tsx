@@ -2,13 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import { 
   MapPin, Box, ShieldCheck, MessageCircle, AlertCircle, 
-  Send, Trash2, ArrowRight, Share2, Flag, Check, AlertTriangle, CheckCircle, XCircle 
+  Send, Trash2, ArrowRight, Share2, Flag, Check, AlertTriangle, CheckCircle, XCircle, X,
+  UserPlus, UserCheck, ChevronRight, ArrowLeft, Heart, Calendar, Eye
 } from 'lucide-react'; 
-import { Product, User, Comment, ProductStatus } from '../types'; // Import thêm ProductStatus
+import { Product, User, Comment, ProductStatus } from '../types'; 
 import { supabase } from '../services/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import ProductCard from '../components/ProductCard';
-import { useToast } from '../contexts/ToastContext'; // Thêm Toast
+import { useToast } from '../contexts/ToastContext'; 
+import { playNotificationSound } from '../utils/audio';
 
 const ProductDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -20,10 +22,18 @@ const ProductDetailPage: React.FC = () => {
   const [seller, setSeller] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   
-  // States cho tính năng phụ
+  // States tính năng phụ
   const [copied, setCopied] = useState(false); 
+  const [isFollowing, setIsFollowing] = useState(false);
+  const [isLiked, setIsLiked] = useState(false);
   
-  // Comments & Related Products State
+  // Report Modal
+  const [showReportModal, setShowReportModal] = useState(false);
+  const [reportReason, setReportReason] = useState('fraud');
+  const [reportDescription, setReportDescription] = useState('');
+  const [isSubmittingReport, setIsSubmittingReport] = useState(false);
+
+  // Comments & Related
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
   const [replyContent, setReplyContent] = useState('');
@@ -31,7 +41,7 @@ const ProductDetailPage: React.FC = () => {
   const [submitting, setSubmitting] = useState(false);
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
 
-  // State ảnh chính (để đổi khi click thumbnail)
+  // Ảnh chính
   const [mainImage, setMainImage] = useState('');
 
   useEffect(() => {
@@ -48,30 +58,48 @@ const ProductDetailPage: React.FC = () => {
     }
   }, [id]);
 
+  useEffect(() => {
+    if (currentUser && seller) checkFollowStatus();
+    if (currentUser && id) checkLikeStatus();
+  }, [currentUser, seller, id]);
+
+  const checkFollowStatus = async () => {
+    if (!seller || !currentUser) return;
+    const { data } = await supabase.from('follows').select('*').eq('follower_id', currentUser.id).eq('following_id', seller.id).single();
+    setIsFollowing(!!data);
+  };
+
+  const checkLikeStatus = async () => {
+      if (!currentUser || !id) return;
+      const { data } = await supabase.from('saved_products').select('*').eq('user_id', currentUser.id).eq('product_id', id).single();
+      setIsLiked(!!data);
+  };
+
   const fetchProductAndSeller = async () => {
       setLoading(true);
       try {
+        // Tăng view count
+        await supabase.rpc('increment_view_count', { product_id: id });
+
         const { data: pData, error: pError } = await supabase.from('products').select('*').eq('id', id).single();
         if (pError) throw pError;
         
         const mappedProduct: Product = {
             id: pData.id, sellerId: pData.seller_id, title: pData.title, description: pData.description, price: pData.price, category: pData.category, condition: pData.condition, images: pData.images || [], tradeMethod: pData.trade_method, postedAt: pData.posted_at, isLookingToBuy: pData.is_looking_to_buy,
-            status: pData.status as ProductStatus // Map status từ DB
+            status: pData.status as ProductStatus, view_count: pData.view_count || 0
         };
         setProduct(mappedProduct);
         setMainImage(mappedProduct.images[0]);
 
-        // Fetch Seller
         const { data: uData } = await supabase.from('profiles').select('*').eq('id', mappedProduct.sellerId).single();
         if (uData) setSeller({ id: uData.id, name: uData.name, studentId: uData.student_id, avatar: uData.avatar_url, isVerified: uData.is_verified, email: uData.email, role: uData.role });
 
-        // --- FETCH SẢN PHẨM TƯƠNG TỰ ---
         const { data: relatedData } = await supabase
             .from('products')
             .select('*')
             .eq('category', mappedProduct.category)
             .neq('id', mappedProduct.id)
-            .eq('status', 'available') // Chỉ lấy sp còn hàng
+            .eq('status', 'available') 
             .limit(4);
             
         if (relatedData) {
@@ -133,6 +161,7 @@ const ProductDetailPage: React.FC = () => {
           setNewComment('');
           setReplyContent('');
           setActiveReplyId(null);
+          playNotificationSound();
       }
       setSubmitting(false);
   };
@@ -145,52 +174,69 @@ const ProductDetailPage: React.FC = () => {
       navigator.clipboard.writeText(window.location.href);
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
+      addToast("Đã sao chép liên kết!", "success");
   };
 
-  const handleReport = async () => {
+  const handleReportClick = () => {
       if (!currentUser) {
           addToast("Vui lòng đăng nhập để báo cáo.", "warning");
           return navigate('/auth');
       }
-      const reason = window.prompt("Nhập lý do bạn muốn báo cáo tin này (VD: Lừa đảo, sai sự thật...):");
-      if (!reason) return; 
-
-      try {
-          const { error } = await supabase.from('reports').insert({
-              reporter_id: currentUser.id,
-              product_id: product?.id, 
-              reason: reason,
-              status: 'pending' 
-          });
-
-          if (error) throw error;
-          addToast("Đã gửi báo cáo thành công! Admin sẽ xem xét sớm.", "success");
-      } catch (err: any) {
-          console.error("Lỗi báo cáo:", err);
-          addToast("Có lỗi xảy ra: " + (err.message || "Không thể gửi báo cáo."), "error");
-      }
+      setShowReportModal(true);
   };
 
-  // --- TÍNH NĂNG MỚI: CẬP NHẬT TRẠNG THÁI ĐƠN HÀNG ---
+  const handleFollow = async () => {
+    if (!currentUser) return navigate('/auth');
+    if (!seller) return;
+
+    if (isFollowing) {
+        await supabase.from('follows').delete().eq('follower_id', currentUser.id).eq('following_id', seller.id);
+        setIsFollowing(false);
+        addToast(`Đã hủy theo dõi ${seller.name}`, "info");
+    } else {
+        await supabase.from('follows').insert({ follower_id: currentUser.id, following_id: seller.id });
+        setIsFollowing(true);
+        addToast(`Đang theo dõi ${seller.name}`, "success");
+    }
+  };
+
+  const handleToggleLike = async () => {
+      if (!currentUser) return navigate('/auth');
+      if (isLiked) {
+          await supabase.from('saved_products').delete().eq('user_id', currentUser.id).eq('product_id', id);
+      } else {
+          await supabase.from('saved_products').insert({ user_id: currentUser.id, product_id: id });
+          playNotificationSound();
+      }
+      setIsLiked(!isLiked);
+  };
+
+  const handleSubmitReport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser || !product) return;
+
+    setIsSubmittingReport(true);
+    try {
+        const finalReason = reportDescription ? `${reportReason}: ${reportDescription}` : reportReason;
+        await supabase.from('reports').insert({
+            reporter_id: currentUser.id, product_id: product.id, reason: finalReason, status: 'pending' 
+        });
+        addToast("Đã gửi báo cáo thành công!", "success");
+        setShowReportModal(false);
+        setReportDescription('');
+    } catch (err: any) {
+        addToast("Có lỗi xảy ra.", "error");
+    } finally {
+        setIsSubmittingReport(false);
+    }
+  };
+
   const handleUpdateStatus = async (newStatus: ProductStatus) => {
     if (!product || !currentUser || currentUser.id !== product.sellerId) return;
-
-    const { error } = await supabase
-        .from('products')
-        .update({ status: newStatus })
-        .eq('id', product.id);
-
-    if (error) {
-        addToast("Lỗi cập nhật: " + error.message, "error");
-    } else {
+    const { error } = await supabase.from('products').update({ status: newStatus }).eq('id', product.id);
+    if (!error) {
         setProduct({ ...product, status: newStatus });
-        if (newStatus === ProductStatus.SOLD) {
-            addToast("Đã chốt đơn! Sản phẩm đã được đánh dấu là Đã Bán.", "success");
-        } else if (newStatus === ProductStatus.PENDING) {
-            addToast("Đã chuyển sang trạng thái Đang Giao Dịch.", "info");
-        } else {
-            addToast("Sản phẩm đã được đăng bán trở lại.", "success");
-        }
+        addToast("Đã cập nhật trạng thái sản phẩm.", "success");
     }
   };
 
@@ -204,7 +250,7 @@ const ProductDetailPage: React.FC = () => {
                   <div className="flex items-center justify-between mb-1 gap-4">
                       <Link to={`/profile/${comment.userId}`} className="font-bold text-sm text-gray-900 hover:underline">
                           {comment.userName}
-                          {seller && comment.userId === seller.id && <span className="ml-2 text-[10px] bg-indigo-100 text-indigo-700 px-1.5 py-0.5 rounded border border-indigo-200 font-bold">Người bán</span>}
+                          {seller && comment.userId === seller.id && <span className="ml-2 text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200 font-bold">Người bán</span>}
                       </Link>
                       <span className="text-xs text-gray-400">{new Date(comment.createdAt).toLocaleDateString('vi-VN')}</span>
                   </div>
@@ -213,15 +259,15 @@ const ProductDetailPage: React.FC = () => {
 
               <div className="flex items-center gap-4 mt-1 ml-2">
                   {!isReply && (
-                      <button onClick={() => setActiveReplyId(activeReplyId === comment.id ? null : comment.id)} className="text-xs font-bold text-gray-500 hover:text-indigo-600 cursor-pointer">Trả lời</button>
+                      <button onClick={() => setActiveReplyId(activeReplyId === comment.id ? null : comment.id)} className="text-xs font-bold text-gray-500 hover:text-[#034EA2] cursor-pointer">Trả lời</button>
                   )}
                   {currentUser?.id === comment.userId && <button onClick={() => handleDelete(comment.id)} className="text-xs text-gray-400 hover:text-red-500">Xóa</button>}
               </div>
 
               {activeReplyId === comment.id && (
                   <form onSubmit={(e) => handleSubmit(e, comment.id)} className="flex gap-2 mt-2 max-w-lg">
-                      <input autoFocus type="text" className="flex-1 text-sm border border-gray-300 rounded-full px-4 py-1.5 focus:outline-none focus:border-indigo-500" placeholder={`Trả lời ${comment.userName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} />
-                      <button disabled={submitting} className="bg-indigo-600 text-white p-1.5 rounded-full hover:bg-indigo-700"><Send className="w-3.5 h-3.5" /></button>
+                      <input autoFocus type="text" className="flex-1 text-sm border border-gray-300 rounded-full px-4 py-1.5 focus:outline-none focus:border-[#034EA2]" placeholder={`Trả lời ${comment.userName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} />
+                      <button disabled={submitting} className="bg-[#034EA2] text-white p-1.5 rounded-full hover:bg-blue-800"><Send className="w-3.5 h-3.5" /></button>
                   </form>
               )}
 
@@ -234,120 +280,198 @@ const ProductDetailPage: React.FC = () => {
       </div>
   );
 
-  // Helper render badge trạng thái
   const renderStatusBadge = () => {
-      if (product?.status === ProductStatus.SOLD) {
-          return <span className="bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit"><XCircle className="w-4 h-4 mr-1"/> ĐÃ BÁN</span>;
-      }
-      if (product?.status === ProductStatus.PENDING) {
-          return <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit"><AlertTriangle className="w-4 h-4 mr-1"/> ĐANG GIAO DỊCH</span>;
-      }
+      if (product?.status === ProductStatus.SOLD) return <span className="bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit"><XCircle className="w-4 h-4 mr-1"/> ĐÃ BÁN</span>;
+      if (product?.status === ProductStatus.PENDING) return <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit"><AlertTriangle className="w-4 h-4 mr-1"/> ĐANG GIAO DỊCH</span>;
       return <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit"><CheckCircle className="w-4 h-4 mr-1"/> CÒN HÀNG</span>;
   };
 
-  if (loading) return <div className="py-20 text-center">Đang tải...</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center"><div className="animate-spin rounded-full h-12 w-12 border-b-2 border-[#034EA2]"></div></div>;
   if (!product) return <div className="py-20 text-center text-red-500">Sản phẩm không tồn tại</div>;
 
   return (
-    <div className="bg-white min-h-screen pb-20 relative">
+    <div className="bg-slate-50 min-h-screen pb-20 relative">
+      {/* 1. BREADCRUMB */}
+      <div className="bg-white border-b border-gray-200 sticky top-0 z-20">
+          <div className="max-w-7xl mx-auto px-4 h-14 flex items-center text-sm text-gray-500">
+              <Link to="/market" className="hover:text-[#034EA2] flex items-center font-medium"><ArrowLeft className="w-4 h-4 mr-1"/> Chợ BK</Link>
+              <ChevronRight className="w-4 h-4 mx-2 text-gray-300"/>
+              <span className="text-gray-900 font-medium truncate max-w-[200px]">{product.title}</span>
+          </div>
+      </div>
+
       <div className="pt-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
-          <div className="lg:grid lg:grid-cols-2 lg:gap-x-8">
+          <div className="lg:grid lg:grid-cols-12 lg:gap-8">
             
-            {/* CỘT TRÁI: ẢNH */}
-            <div className="flex flex-col gap-4">
-                <div className="aspect-w-4 aspect-h-3 rounded-lg bg-gray-100 overflow-hidden border border-gray-200 relative group">
-                    <img src={mainImage || product.images[0]} alt={product.title} className="w-full h-full object-contain" />
-                    {/* Tem dán trên ảnh nếu đã bán */}
-                    {product.status === ProductStatus.SOLD && (
-                        <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
-                            <span className="text-white font-bold text-3xl border-4 border-white p-4 rotate-12 rounded opacity-80 uppercase">ĐÃ BÁN</span>
-                        </div>
-                    )}
+            {/* CỘT TRÁI: ẢNH & CHI TIẾT (8 phần) */}
+            <div className="lg:col-span-8 flex flex-col gap-6">
+                {/* ẢNH CHÍNH */}
+                <div className="bg-white rounded-2xl p-2 border border-gray-200 shadow-sm">
+                    <div className="aspect-video w-full rounded-xl overflow-hidden bg-gray-100 relative group">
+                        <img src={mainImage || product.images[0]} alt={product.title} className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105" />
+                        {product.status === ProductStatus.SOLD && (
+                            <div className="absolute inset-0 bg-black/50 flex items-center justify-center backdrop-blur-sm">
+                                <span className="text-white font-black text-4xl border-4 border-white p-4 -rotate-12 rounded opacity-90 uppercase tracking-widest">ĐÃ BÁN</span>
+                            </div>
+                        )}
+                    </div>
                 </div>
-                {/* Thumbnails */}
+                
+                {/* LIST ẢNH NHỎ */}
                 {product.images.length > 1 && (
-                    <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                    <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
                         {product.images.map((img, idx) => (
-                            <button key={idx} onClick={() => setMainImage(img)} className={`w-20 h-20 flex-shrink-0 rounded-md border-2 overflow-hidden ${mainImage === img ? 'border-indigo-600 ring-2 ring-indigo-300' : 'border-transparent hover:border-gray-300'}`}>
+                            <button key={idx} onClick={() => setMainImage(img)} className={`w-20 h-20 flex-shrink-0 rounded-xl border-2 overflow-hidden transition-all ${mainImage === img ? 'border-[#034EA2] ring-2 ring-blue-100' : 'border-transparent hover:border-gray-300'}`}>
                                 <img src={img} className="w-full h-full object-cover" />
                             </button>
                         ))}
                     </div>
                 )}
-            </div>
 
-            {/* CỘT PHẢI: THÔNG TIN */}
-            <div className="mt-10 px-4 sm:px-0 sm:mt-16 lg:mt-0">
-              <div className="flex justify-between items-start">
-                 <div className="flex-1">
-                     <div className="mb-2">{renderStatusBadge()}</div>
-                     <h1 className="text-3xl font-extrabold tracking-tight text-gray-900">{product.title}</h1>
-                 </div>
-                 {/* Nút Share & Report */}
-                 <div className="flex gap-2 ml-4">
-                    <button onClick={handleCopyLink} className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-full transition-colors relative group" title="Sao chép liên kết">
-                        {copied ? <Check className="w-5 h-5 text-green-500" /> : <Share2 className="w-5 h-5" />}
-                    </button>
-                    <button onClick={handleReport} className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors" title="Báo cáo tin này">
-                        <Flag className="w-5 h-5" />
-                    </button>
-                 </div>
-              </div>
-
-              <p className="text-3xl text-indigo-600 mt-3 font-bold">{product.price.toLocaleString('vi-VN')} đ</p>
-              
-              <div className="mt-6 text-base text-gray-700 space-y-6 whitespace-pre-line" dangerouslySetInnerHTML={{ __html: product.description }} />
-              
-              <div className="mt-8 border-t border-gray-200 pt-8">
-                 <div className="flex justify-between mb-2"><span className="font-medium">Danh mục:</span><span>{product.category}</span></div>
-                 <div className="flex justify-between"><span className="font-medium">Tình trạng:</span><span className="bg-gray-100 px-2 rounded text-sm">{product.condition}</span></div>
-                 <div className="flex justify-between mt-2"><span className="font-medium">Hình thức GD:</span><span className="text-sm">{product.tradeMethod}</span></div>
-              </div>
-
-              {seller && (
-                <div className="mt-8 bg-gray-50 rounded-xl p-5 border border-gray-200 shadow-sm">
-                    <div className="flex items-center justify-between mb-4">
-                        <Link to={`/profile/${seller.id}`} className="flex items-center group">
-                            <img className="h-12 w-12 rounded-full border border-white shadow-sm object-cover" src={seller.avatar} />
-                            <div className="ml-4">
-                                <h4 className="font-bold text-gray-900 group-hover:text-indigo-600">{seller.name} {seller.isVerified && <ShieldCheck className="w-4 h-4 text-blue-600 inline" title="Đã xác thực MSSV"/>}</h4>
-                                <p className="text-xs text-gray-500">Xem trang cá nhân &rarr;</p>
-                            </div>
-                        </Link>
+                {/* MÔ TẢ CHI TIẾT */}
+                <div className="bg-white rounded-2xl p-8 border border-gray-200 shadow-sm">
+                    <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center border-l-4 border-[#034EA2] pl-3">
+                        Mô tả sản phẩm
+                    </h2>
+                    <div className="prose max-w-none text-gray-700 whitespace-pre-line leading-relaxed text-base">
+                        {product.description}
                     </div>
                     
-                    <div className="mt-4">
+                    <div className="mt-8 pt-6 border-t border-gray-100 grid grid-cols-2 md:grid-cols-4 gap-6 text-sm">
+                        <div className="bg-gray-50 p-3 rounded-lg">
+                            <span className="block text-gray-400 mb-1 text-xs uppercase">Tình trạng</span>
+                            <span className="font-bold text-gray-800">{product.condition}</span>
+                        </div>
+                        <div className="bg-gray-50 p-3 rounded-lg">
+                            <span className="block text-gray-400 mb-1 text-xs uppercase">Danh mục</span>
+                            <span className="font-bold text-[#034EA2]">{product.category}</span>
+                        </div>
+                        <div className="bg-gray-50 p-3 rounded-lg">
+                            <span className="block text-gray-400 mb-1 text-xs uppercase">Giao dịch</span>
+                            <span className="font-bold text-gray-800">{product.tradeMethod}</span>
+                        </div>
+                        <div className="bg-gray-50 p-3 rounded-lg">
+                            <span className="block text-gray-400 mb-1 text-xs uppercase">Ngày đăng</span>
+                            <span className="font-bold text-gray-800">{new Date(product.postedAt).toLocaleDateString('vi-VN')}</span>
+                        </div>
+                    </div>
+                </div>
+
+                {/* BÌNH LUẬN */}
+                <div className="bg-white rounded-2xl p-8 border border-gray-200 shadow-sm" id="comments">
+                    <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center">
+                        Hỏi đáp <span className="ml-2 bg-gray-100 text-gray-600 text-sm py-0.5 px-3 rounded-full">{comments.length}</span>
+                    </h3>
+
+                    {currentUser ? (
+                        <form onSubmit={(e) => handleSubmit(e)} className="flex gap-4 mb-8">
+                            <img src={currentUser.avatar} className="w-10 h-10 rounded-full border border-gray-200 object-cover" />
+                            <div className="flex-1 relative">
+                                <input type="text" className="w-full border border-gray-300 rounded-full py-3 px-5 pr-12 focus:outline-none focus:ring-2 focus:ring-[#034EA2] bg-gray-50 focus:bg-white transition-colors" placeholder="Bạn thắc mắc gì về sản phẩm này?" value={newComment} onChange={(e) => setNewComment(e.target.value)} />
+                                <button disabled={!newComment.trim() || submitting} className="absolute right-2 top-1.5 p-1.5 bg-[#034EA2] text-white rounded-full hover:bg-blue-800 transition-colors disabled:opacity-50"><Send className="w-4 h-4" /></button>
+                            </div>
+                        </form>
+                    ) : <div className="bg-gray-50 p-4 rounded-xl text-center mb-8 border border-dashed border-gray-300 text-sm"><Link to="/auth" className="text-[#034EA2] font-bold hover:underline">Đăng nhập</Link> để bình luận.</div>}
+                    
+                    <div className="space-y-4">
+                        {comments.length === 0 ? <p className="text-gray-400 italic text-center py-4">Chưa có câu hỏi nào. Hãy là người đầu tiên!</p> : comments.map(comment => <CommentItem key={comment.id} comment={comment} />)}
+                    </div>
+                </div>
+            </div>
+
+            {/* CỘT PHẢI: THÔNG TIN MUA BÁN (4 phần) */}
+            <div className="lg:col-span-4 space-y-6 mt-8 lg:mt-0">
+                {/* BOX GIÁ & TIÊU ĐỀ */}
+                <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-lg relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-bl-[100px] -mr-6 -mt-6 z-0"></div>
+                    <div className="relative z-10">
+                        <div className="mb-3 flex justify-between items-start">
+                            {renderStatusBadge()}
+                            <div className="text-xs text-gray-400 flex items-center bg-gray-100 px-2 py-1 rounded-full"><Eye className="w-3 h-3 mr-1"/> {product.view_count || 0} lượt xem</div>
+                        </div>
+                        <h1 className="text-2xl font-black text-gray-900 leading-tight mb-3">{product.title}</h1>
+                        <div className="text-4xl font-extrabold text-[#034EA2] mb-6 tracking-tight">
+                            {product.price === 0 ? "Miễn phí (0đ)" : product.price.toLocaleString('vi-VN') + " đ"}
+                        </div>
+                        
+                        <div className="flex gap-3">
+                            <button 
+                                onClick={handleToggleLike}
+                                className={`flex-1 py-3 rounded-xl font-bold border transition-all flex items-center justify-center gap-2 ${isLiked ? 'bg-red-50 border-red-200 text-red-500' : 'bg-white border-gray-300 text-gray-600 hover:bg-gray-50'}`}
+                            >
+                                <Heart className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} /> {isLiked ? 'Đã lưu' : 'Lưu tin'}
+                            </button>
+                            <button onClick={handleCopyLink} className="p-3 rounded-xl border border-gray-300 text-gray-600 hover:bg-gray-50 transition-colors" title="Chia sẻ">
+                                {copied ? <Check className="w-5 h-5 text-green-500"/> : <Share2 className="w-5 h-5" />}
+                            </button>
+                            <button onClick={handleReportClick} className="p-3 rounded-xl border border-gray-300 text-gray-400 hover:text-red-500 hover:bg-red-50 transition-colors" title="Báo cáo">
+                                <Flag className="w-5 h-5" />
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                {/* BOX NGƯỜI BÁN */}
+                {seller && (
+                    <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
+                        <div className="flex items-center gap-4 mb-6">
+                            <Link to={`/profile/${seller.id}`} className="relative">
+                                <img className="h-16 w-16 rounded-full border-4 border-white shadow-md object-cover" src={seller.avatar} />
+                                {seller.isVerified && <div className="absolute -bottom-1 -right-1 bg-blue-500 text-white p-1 rounded-full border-2 border-white" title="Sinh viên BK"><ShieldCheck size={12} fill="currentColor"/></div>}
+                            </Link>
+                            <div className="flex-1">
+                                <h4 className="font-bold text-lg text-gray-900 leading-tight">
+                                    <Link to={`/profile/${seller.id}`} className="hover:text-[#034EA2] transition-colors">{seller.name}</Link>
+                                </h4>
+                                <p className="text-xs text-gray-500 mb-2">Thành viên BK</p>
+                                {currentUser?.id !== seller.id && (
+                                    <button onClick={handleFollow} className={`text-xs font-bold px-3 py-1 rounded-full border transition-all ${isFollowing ? 'bg-gray-100 text-gray-600 border-gray-200' : 'bg-blue-50 text-[#034EA2] border-blue-200 hover:bg-blue-100'}`}>
+                                        {isFollowing ? 'Đang theo dõi' : '+ Theo dõi'}
+                                    </button>
+                                )}
+                            </div>
+                        </div>
+
                         {currentUser?.id !== seller.id ? (
                             <Link 
                                 to={`/chat?partnerId=${seller.id}`} 
-                                className={`w-full py-3 rounded-lg font-bold flex justify-center items-center shadow-md transition ${product.status === ProductStatus.SOLD ? 'bg-gray-300 text-gray-500 cursor-not-allowed pointer-events-none' : 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-lg'}`}
+                                className={`w-full py-4 rounded-xl font-bold flex justify-center items-center shadow-lg transition-all active:scale-95 ${product.status === ProductStatus.SOLD ? 'bg-gray-100 text-gray-400 cursor-not-allowed shadow-none' : 'bg-[#034EA2] text-white hover:bg-blue-800 shadow-blue-200'}`}
                             >
                                 <MessageCircle className="w-5 h-5 mr-2" /> 
-                                {product.status === ProductStatus.SOLD ? 'Sản phẩm đã bán' : 'Nhắn tin chốt đơn'}
+                                {product.status === ProductStatus.SOLD ? 'Đã bán' : 'Nhắn tin ngay'}
                             </Link>
                         ) : (
-                             // --- PANEL QUẢN LÝ CHO CHỦ SHOP ---
-                             <div className="bg-white p-3 rounded-lg border border-indigo-100 shadow-inner">
-                                <p className="text-xs text-gray-500 font-bold mb-2 uppercase text-center">Quản lý trạng thái đơn hàng</p>
+                            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                                <p className="text-xs font-bold text-[#034EA2] mb-3 uppercase text-center">Quản lý tin đăng</p>
                                 <div className="grid grid-cols-3 gap-2">
-                                    <button onClick={() => handleUpdateStatus(ProductStatus.AVAILABLE)} className={`py-2 text-xs font-bold rounded ${product.status === ProductStatus.AVAILABLE ? 'bg-green-600 text-white ring-2 ring-green-300' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>🟢 Đang bán</button>
-                                    <button onClick={() => handleUpdateStatus(ProductStatus.PENDING)} className={`py-2 text-xs font-bold rounded ${product.status === ProductStatus.PENDING ? 'bg-yellow-400 text-yellow-900 ring-2 ring-yellow-200' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>🟡 Đang GD</button>
-                                    <button onClick={() => handleUpdateStatus(ProductStatus.SOLD)} className={`py-2 text-xs font-bold rounded ${product.status === ProductStatus.SOLD ? 'bg-red-600 text-white ring-2 ring-red-300' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>🔴 Đã Bán</button>
+                                    <button onClick={() => handleUpdateStatus(ProductStatus.AVAILABLE)} className={`py-2 text-[10px] font-bold rounded-lg transition-all ${product.status === ProductStatus.AVAILABLE ? 'bg-green-500 text-white shadow-md' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>Đang bán</button>
+                                    <button onClick={() => handleUpdateStatus(ProductStatus.PENDING)} className={`py-2 text-[10px] font-bold rounded-lg transition-all ${product.status === ProductStatus.PENDING ? 'bg-yellow-400 text-yellow-900 shadow-md' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>Đang GD</button>
+                                    <button onClick={() => handleUpdateStatus(ProductStatus.SOLD)} className={`py-2 text-[10px] font-bold rounded-lg transition-all ${product.status === ProductStatus.SOLD ? 'bg-red-500 text-white shadow-md' : 'bg-white text-gray-600 hover:bg-gray-100'}`}>Đã Bán</button>
                                 </div>
-                             </div>
+                            </div>
                         )}
                     </div>
+                )}
+
+                {/* BOX AN TOÀN */}
+                <div className="bg-orange-50 rounded-2xl p-5 border border-orange-100 flex gap-4">
+                    <div className="bg-orange-100 p-2 rounded-full h-fit"><AlertTriangle className="w-6 h-6 text-orange-600" /></div>
+                    <div>
+                        <h4 className="font-bold text-orange-800 text-sm mb-1">Lưu ý an toàn</h4>
+                        <p className="text-xs text-orange-700 leading-relaxed">
+                            Nên giao dịch trực tiếp tại các địa điểm đông người trong trường như: <strong>Sảnh H6, Thư viện A2, hoặc Canteen B4</strong>. Không chuyển khoản trước khi nhận hàng.
+                        </p>
+                    </div>
                 </div>
-              )}
             </div>
           </div>
 
           {/* SẢN PHẨM TƯƠNG TỰ */}
           {relatedProducts.length > 0 && (
               <div className="mt-16 border-t border-gray-200 pt-10">
-                  <div className="flex justify-between items-center mb-6">
-                      <h2 className="text-xl font-bold text-gray-900">Có thể bạn cũng cần</h2>
-                      <Link to={`/market?cat=${product.category}`} className="text-indigo-600 text-sm hover:underline flex items-center font-medium">Xem thêm <ArrowRight className="w-4 h-4 ml-1"/></Link>
+                  <div className="flex justify-between items-center mb-8">
+                      <h2 className="text-2xl font-bold text-gray-900">Có thể bạn cũng thích</h2>
+                      <Link to={`/market?cat=${product.category}`} className="text-[#034EA2] text-sm hover:underline flex items-center font-bold bg-blue-50 px-4 py-2 rounded-full">Xem thêm <ArrowRight className="w-4 h-4 ml-1"/></Link>
                   </div>
                   <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
                       {relatedProducts.map(p => (
@@ -356,28 +480,58 @@ const ProductDetailPage: React.FC = () => {
                   </div>
               </div>
           )}
-
-          {/* Comments Section */}
-          <div className="mt-16 border-t border-gray-200 pt-10 max-w-4xl">
-              <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center">
-                  Hỏi đáp công khai <span className="ml-2 bg-gray-100 text-gray-600 text-sm py-0.5 px-2 rounded-full">{comments.length + comments.reduce((acc, c) => acc + (c.replies?.length||0), 0)}</span>
-              </h3>
-
-              {currentUser ? (
-                  <form onSubmit={(e) => handleSubmit(e)} className="flex gap-4 mb-8">
-                      <img src={currentUser.avatar} className="w-10 h-10 rounded-full border border-gray-200 object-cover" />
-                      <div className="flex-1 relative">
-                          <input type="text" className="w-full border border-gray-300 rounded-full py-3 px-5 pr-12 focus:outline-none focus:ring-2 focus:ring-indigo-500 shadow-sm" placeholder="Bạn thắc mắc gì về sản phẩm này?" value={newComment} onChange={(e) => setNewComment(e.target.value)} />
-                          <button disabled={!newComment.trim() || submitting} className="absolute right-2 top-1.5 p-1.5 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 transition-colors"><Send className="w-4 h-4" /></button>
-                      </div>
-                  </form>
-              ) : <div className="bg-gray-50 p-4 rounded-lg text-center mb-8 border border-dashed border-gray-300"><Link to="/auth" className="text-indigo-600 font-bold hover:underline">Đăng nhập</Link> để bình luận.</div>}
-              
-              <div className="space-y-2">
-                  {comments.length === 0 ? <p className="text-gray-400 italic">Chưa có câu hỏi nào.</p> : comments.map(comment => <CommentItem key={comment.id} comment={comment} />)}
-              </div>
-          </div>
       </div>
+
+      {/* MOBILE STICKY FOOTER (Chỉ hiện trên mobile) */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-gray-200 p-4 shadow-[0_-4px_20px_rgba(0,0,0,0.1)] z-50 flex gap-3 pb-safe">
+            <button onClick={handleToggleLike} className={`p-3.5 rounded-xl border-2 transition-all ${isLiked ? 'border-red-100 bg-red-50 text-red-500' : 'border-gray-100 bg-gray-50 text-gray-600'}`}>
+                <Heart className={`w-6 h-6 ${isLiked ? 'fill-current' : ''}`}/>
+            </button>
+            {currentUser?.id !== product.sellerId ? (
+                <button 
+                onClick={() => navigate(`/chat?partnerId=${product.sellerId}`)}
+                className={`flex-1 rounded-xl font-bold text-lg flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-transform ${product.status === ProductStatus.SOLD ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-[#034EA2] text-white'}`}
+                disabled={product.status === ProductStatus.SOLD}
+                >
+                    <MessageCircle className="w-5 h-5"/> {product.status === ProductStatus.SOLD ? 'Đã bán' : 'Chat ngay'}
+                </button>
+            ) : (
+                <button onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})} className="flex-1 bg-gray-800 text-white rounded-xl font-bold text-lg shadow-lg">Quản lý tin</button>
+            )}
+      </div>
+
+      {/* REPORT MODAL */}
+      {showReportModal && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden transform transition-all scale-100">
+                <div className="bg-red-50 p-4 border-b border-red-100 flex justify-between items-center">
+                    <div className="flex items-center text-red-700 font-bold">
+                        <AlertTriangle size={20} className="mr-2" /> Báo cáo vi phạm
+                    </div>
+                    <button onClick={() => setShowReportModal(false)} className="text-gray-400 hover:text-gray-600 p-1 rounded-full"><X size={20} /></button>
+                </div>
+                <form onSubmit={handleSubmitReport} className="p-6 space-y-4">
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">Lý do</label>
+                        <select value={reportReason} onChange={(e) => setReportReason(e.target.value)} className="w-full border-gray-300 rounded-xl p-3 bg-gray-50 border focus:ring-2 focus:ring-red-500 outline-none">
+                            <option value="fraud">Lừa đảo / Hàng giả</option>
+                            <option value="inappropriate">Nội dung thô tục</option>
+                            <option value="duplicate">Spam / Tin trùng lặp</option>
+                            <option value="other">Khác</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label className="block text-sm font-bold text-gray-700 mb-1">Chi tiết</label>
+                        <textarea rows={3} value={reportDescription} onChange={(e) => setReportDescription(e.target.value)} placeholder="Mô tả thêm..." className="w-full border-gray-300 rounded-xl p-3 border resize-none focus:ring-2 focus:ring-red-500 outline-none" />
+                    </div>
+                    <div className="flex justify-end space-x-3 pt-2">
+                        <button type="button" onClick={() => setShowReportModal(false)} className="px-4 py-2 font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition">Hủy</button>
+                        <button type="submit" disabled={isSubmittingReport} className="px-6 py-2 font-bold text-white bg-red-600 rounded-lg hover:bg-red-700 shadow-md shadow-red-200 transition">{isSubmittingReport ? 'Đang gửi...' : 'Gửi báo cáo'}</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
     </div>
   );
 };

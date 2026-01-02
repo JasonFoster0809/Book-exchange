@@ -1,80 +1,73 @@
 import OpenAI from "openai";
-import { ProductCategory } from "../types";
 
-// Sử dụng biến môi trường từ .env.local
+// 1. CẤU HÌNH API KEY & MODEL
 const apiKey = import.meta.env.VITE_GROQ_API_KEY;
 
+// Log cảnh báo nếu thiếu key
+if (!apiKey) {
+  console.warn("⚠️ CẢNH BÁO: Chưa tìm thấy VITE_GROQ_API_KEY trong file .env");
+}
+
+// --- KHAI BÁO MODEL ---
+// Model mạnh nhất (Dùng cho viết lách, suy luận, JSON)
+const GROQ_MODEL_ID = "llama-3.3-70b-versatile"; 
+// Model siêu tốc (Dùng cho các tác vụ nhẹ, realtime nếu cần sau này)
+const GROQ_TITLE_MODEL_ID = "llama-3.1-8b-instant"; 
+
+// 2. Cấu hình Client
 const client = new OpenAI({
-  apiKey: apiKey,
+  apiKey: apiKey || "dummy_key", 
   baseURL: "https://api.groq.com/openai/v1",
   dangerouslyAllowBrowser: true 
 });
 
-// 1. Tạo mô tả sản phẩm (Giữ nguyên)
-export const generateProductDescription = async (
+/**
+ * FEATURE 1: AI VIẾT HỘ (Magic Write)
+ * Sử dụng Model 70B để văn phong hay và sáng tạo nhất
+ */
+export const generateCreativeDescription = async (
   title: string,
-  condition: string,
-  category: string,
-  keyDetails: string
-): Promise<string> => {
-  if (!apiKey) return "Chưa có cấu hình API Key cho AI.";
+  category: string
+): Promise<string | null> => {
+  if (!apiKey) {
+    alert("Thiếu API Key! Hãy tạo file .env và thêm VITE_GROQ_API_KEY");
+    return null;
+  }
 
   try {
+    console.log(`🤖 Đang viết mô tả cho: ${title}...`);
+
     const prompt = `
-      You are a copywriter for a student marketplace.
-      Write a short, catchy description (max 80 words) for:
-      Item: ${title}
-      Category: ${category}
-      Condition: ${condition}
-      Details: ${keyDetails}
-      Language: Vietnamese.
-      Tone: Friendly, honest, student-focused.
-      Output: Just the text.
+      Bạn là sinh viên Bách Khoa TP.HCM (BK). 
+      Hãy viết 1 đoạn mô tả ngắn (khoảng 3 câu), văn phong vui vẻ, chân thật (dùng từ: pass lại, giá sinh viên, bao test) để bán món đồ này:
+      - Tên: "${title}"
+      - Loại: "${category}"
+      
+      Yêu cầu: Chỉ trả về nội dung văn bản, không có dấu ngoặc kép.
     `;
 
     const response = await client.chat.completions.create({
-      model: "llama3-70b-8192", 
+      model: GROQ_MODEL_ID, // Dùng model mạnh nhất
       messages: [{ role: "user", content: prompt }],
-      temperature: 0.7,
+      temperature: 0.8,
+      max_tokens: 250,
     });
 
-    return response.choices[0]?.message?.content || "Không thể tạo mô tả.";
-  } catch (error) {
-    console.error("AI Error:", error);
-    return "Lỗi kết nối AI.";
+    const content = response.choices[0]?.message?.content;
+    console.log("✅ AI đã viết xong:", content);
+    return content || null;
+
+  } catch (error: any) {
+    console.error("❌ Lỗi AI Viết Hộ:", error);
+    handleError(error);
+    return null;
   }
 };
 
-// 2. Tìm kiếm thông minh (Giữ nguyên)
-export const smartSearchInterpreter = async (query: string): Promise<{
-    category?: ProductCategory,
-    keywords: string[]
-} | null> => {
-    if (!apiKey) return null;
-
-    try {
-        const prompt = `
-          Analyze search query: "${query}". 
-          Return JSON with 'category' (Textbook, Electronics, School Supplies, Clothing, Other) 
-          and 'keywords' (3-5 items).
-          Example: { "category": "Textbook", "keywords": ["Calculus", "Math"] }
-        `;
-
-        const response = await client.chat.completions.create({
-            model: "llama3-70b-8192",
-            messages: [{ role: "user", content: prompt }],
-            response_format: { type: "json_object" },
-            temperature: 0,
-        });
-        
-        const content = response.choices[0]?.message?.content;
-        return content ? JSON.parse(content) : null;
-    } catch (e) {
-        return null;
-    }
-}
-
-// 3. [MỚI] Gợi ý giá bán
+/**
+ * FEATURE 2: GỢI Ý GIÁ (Price Estimate)
+ * Sử dụng Model 70B để suy luận giá cả chính xác hơn
+ */
 export const estimatePrice = async (
   title: string, 
   category: string, 
@@ -83,27 +76,73 @@ export const estimatePrice = async (
   if (!apiKey) return "";
 
   try {
-     const prompt = `
-      Bạn là chuyên gia định giá đồ cũ cho sinh viên tại Việt Nam.
-      Hãy gợi ý một mức giá hợp lý (bằng VND) cho sản phẩm sau:
-      - Tên: ${title}
-      - Loại: ${category}
+    console.log(`💰 Đang định giá: ${title}...`);
+
+    const prompt = `
+      Đóng vai chuyên gia định giá đồ cũ tại Việt Nam.
+      Hãy gợi ý mức giá bán (VNĐ) hợp lý cho sinh viên mua lại món đồ này:
+      - Món: ${title} (${category})
       - Tình trạng: ${condition}
       
-      Trả lời NGẮN GỌN duy nhất một con số gợi ý (ví dụ: 50000) hoặc một khoảng giá (ví dụ: 50000 - 100000). 
-      Không giải thích thêm.
+      Yêu cầu: Chỉ trả về duy nhất con số hoặc khoảng giá (Ví dụ: "50.000" hoặc "1.000.000 - 1.200.000"). Không giải thích thêm.
     `;
 
     const response = await client.chat.completions.create({
-      model: "llama3-70b-8192",
+      model: GROQ_MODEL_ID, // Dùng model mạnh nhất
       messages: [{ role: "user", content: prompt }],
-      temperature: 0.5,
+      temperature: 0.4,
       max_tokens: 50
     });
 
-    return response.choices[0]?.message?.content?.trim() || "";
+    const price = response.choices[0]?.message?.content?.trim();
+    console.log("✅ Gợi ý giá:", price);
+    return price || "";
+
   } catch (e) {
-    console.error("Price estimate error", e);
+    console.error("Lỗi định giá:", e);
     return "";
   }
+}
+
+/**
+ * FEATURE 3: TÌM KIẾM THÔNG MINH (Smart Search)
+ * Sử dụng Model 70B để đảm bảo trả về đúng định dạng JSON (Model nhỏ dễ bị sai format)
+ */
+export const smartSearchInterpreter = async (query: string): Promise<{
+    category?: string,
+    maxPrice?: number,
+    keywords: string[]
+} | null> => {
+    if (!apiKey) return null;
+
+    try {
+        const prompt = `
+          Analyze search query: "${query}".
+          Return JSON object with:
+          1. "category": Best guess from [Giáo trình, Đồ điện tử, Gia dụng, Thời trang, Dụng cụ học tập, Khác].
+          2. "maxPrice": Detected budget in VND (number only). If none, null.
+          3. "keywords": Array of 3-5 keywords.
+        `;
+
+        const response = await client.chat.completions.create({
+            model: GROQ_MODEL_ID, // Dùng 70b để đảm bảo JSON chuẩn
+            messages: [{ role: "user", content: prompt }],
+            response_format: { type: "json_object" },
+            temperature: 0.1,
+        });
+        
+        const content = response.choices[0]?.message?.content;
+        return content ? JSON.parse(content) : null;
+    } catch (e) {
+        console.error("Smart Search Error:", e);
+        return null;
+    }
+}
+
+// Hàm xử lý lỗi chung
+const handleError = (error: any) => {
+    if (error?.status === 400) alert("Model AI bị lỗi cấu hình. Hãy kiểm tra lại tên model trong code.");
+    else if (error?.status === 401) alert("API Key Groq không hợp lệ.");
+    else if (error?.status === 404) alert("Model không tồn tại (Sai tên model).");
+    else alert("Lỗi kết nối AI: " + (error.message || "Không xác định"));
 }
