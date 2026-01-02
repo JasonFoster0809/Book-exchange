@@ -4,14 +4,12 @@ import { supabase } from '../services/supabase';
 import { useNavigate, Link } from 'react-router-dom';
 import { 
   Trash2, ShieldCheck, Users, Package, Flag, XCircle, AlertTriangle, 
-  ExternalLink, RefreshCw, Check, X, Clock, BarChart3, Search, Ban, Lock, Unlock, 
-  TrendingUp, Download, PieChart, DollarSign, Activity
+  ExternalLink, RefreshCw, Check, X, Clock, BarChart3, Search, Ban, Unlock, 
+  TrendingUp, Activity, Loader2, Filter
 } from 'lucide-react';
 import { Product, DBProfile } from '../types';
+import { useToast } from '../contexts/ToastContext';
 
-// --- INTERFACES MỞ RỘNG CHO ADMIN ---
-
-// [FIX] Thêm email vào đây để sửa lỗi Property 'email' does not exist
 interface AdminUserProfile extends DBProfile {
   banned?: boolean; 
   email?: string;
@@ -27,428 +25,346 @@ interface VerificationRequest {
   profiles: { name: string; email: string; student_id: string; avatar_url: string; };
 }
 
-interface ChartData { date: string; count: number; fullDate: string; }
-
 const AdminPage: React.FC = () => {
-  const { user, loading } = useAuth();
+  const { user, loading, isAdmin } = useAuth();
+  const { addToast } = useToast();
   const navigate = useNavigate();
-  
-  // [FIX] Bỏ check user_metadata để tránh lỗi TS2339
-  const isAdmin = user?.role === 'admin';
 
-  // --- STATES ---
   const [products, setProducts] = useState<Product[]>([]);
   const [usersList, setUsersList] = useState<AdminUserProfile[]>([]);
   const [reports, setReports] = useState<ReportData[]>([]);
   const [verifications, setVerifications] = useState<VerificationRequest[]>([]);
-  const [weeklyStats, setWeeklyStats] = useState<ChartData[]>([]);
   
   const [activeTab, setActiveTab] = useState<'dashboard' | 'reports' | 'products' | 'users' | 'verifications'>('dashboard');
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // --- DERIVED STATS ---
-  const totalRevenue = useMemo(() => {
-      return products.filter(p => p.status === 'sold').reduce((sum, p) => sum + p.price, 0);
-  }, [products]);
-
-  const categoryStats = useMemo(() => {
-      const stats: Record<string, number> = {};
-      products.forEach(p => {
-          const catName = String(p.category);
-          stats[catName] = (stats[catName] || 0) + 1;
-      });
-      return Object.entries(stats).sort((a, b) => b[1] - a[1]);
-  }, [products]);
-
-  // --- EFFECT ---
+  // --- 1. KIỂM TRA QUYỀN TRUY CẬP ---
   useEffect(() => {
-    if (loading) return;
-    if (!user || !isAdmin) { 
-        navigate('/'); 
-    } else { 
-        fetchData(); 
+    if (!loading && (!user || !isAdmin)) {
+      addToast("Bạn không có quyền truy cập trang quản trị!", "error");
+      navigate('/');
+    } else if (!loading && isAdmin) {
+      fetchData();
     }
   }, [loading, user, isAdmin, navigate]);
 
-  // --- FETCH DATA ---
+  // --- 2. LẤY DỮ LIỆU TỔNG HỢP ---
   const fetchData = async () => {
     setIsLoadingData(true);
     try {
-        // 1. REPORTS
-        const { data: rawReports } = await supabase.from('reports').select('*').order('created_at', { ascending: false });
-        if (rawReports && rawReports.length > 0) {
-            const reporterIds = [...new Set(rawReports.map(r => r.reporter_id))];
-            const productIds = [...new Set(rawReports.map(r => r.product_id))];
-            
-            const [usersRes, productsRes] = await Promise.all([
-                supabase.from('profiles').select('*').in('id', reporterIds),
-                supabase.from('products').select('*').in('id', productIds)
-            ]);
-            
-            const usersMap = new Map(usersRes.data?.map(u => [u.id, u]) || []);
-            const productsMap = new Map(productsRes.data?.map(p => [p.id, p]) || []);
-            
-            const fullReports = rawReports.map(r => {
-                const rawProduct = productsMap.get(r.product_id);
-                let mappedProduct: Product | undefined = undefined;
-                if (rawProduct) {
-                    mappedProduct = {
-                        ...rawProduct,
-                        sellerId: rawProduct.seller_id,
-                        tradeMethod: rawProduct.trade_method,
-                        postedAt: rawProduct.posted_at,
-                        isLookingToBuy: rawProduct.is_looking_to_buy,
-                        status: rawProduct.status,
-                        images: rawProduct.images || []
-                    } as Product;
-                }
-                return { ...r, reporter: usersMap.get(r.reporter_id), product: mappedProduct };
-            });
-            setReports(fullReports as ReportData[]);
-        } else { setReports([]); }
+      const [prodRes, userRes, reportRes, verifyRes] = await Promise.all([
+        supabase.from('products').select('*').order('posted_at', { ascending: false }),
+        supabase.from('profiles').select('*').order('created_at', { ascending: false }),
+        supabase.from('reports').select('*, profiles:reporter_id(*), products:product_id(*)').order('created_at', { ascending: false }),
+        supabase.from('verification_requests').select('*, profiles:user_id(name, email, student_id, avatar_url)').eq('status', 'pending')
+      ]);
 
-        // 2. PRODUCTS
-        const { data: prodData } = await supabase.from('products').select('*').order('posted_at', { ascending: false });
-        if (prodData) {
-            const mappedProds: Product[] = prodData.map((item: any) => ({
-                ...item, 
-                sellerId: item.seller_id, 
-                tradeMethod: item.trade_method, 
-                postedAt: item.posted_at, 
-                isLookingToBuy: item.is_looking_to_buy, 
-                status: item.status,
-                images: item.images || []
-            }));
-            setProducts(mappedProds);
-
-            // Weekly Stats
-            const stats: ChartData[] = [];
-            const today = new Date();
-            for (let i = 6; i >= 0; i--) {
-                const d = new Date(); d.setDate(today.getDate() - i);
-                const start = new Date(d.setHours(0, 0, 0, 0));
-                const end = new Date(d.setHours(23, 59, 59, 999));
-                const count = prodData.filter((p: any) => { const pDate = new Date(p.posted_at); return pDate >= start && pDate <= end; }).length;
-                stats.push({ date: start.toLocaleDateString('vi-VN', { weekday: 'short' }), fullDate: start.toLocaleDateString('vi-VN', { day: 'numeric', month: 'numeric' }), count });
-            }
-            setWeeklyStats(stats);
-        }
-
-        // 3. USERS
-        const { data: userData } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
-        if (userData) setUsersList(userData as AdminUserProfile[]);
-
-        // 4. VERIFICATIONS
-        const { data: verifyData } = await supabase
-            .from('verification_requests')
-            .select(`*, profiles:user_id (name, email, student_id, avatar_url)`)
-            .eq('status', 'pending')
-            .order('created_at', { ascending: false });
-            
-        if (verifyData) {
-             const mappedVerify = verifyData.map((v: any) => ({
-                 ...v,
-                 profiles: Array.isArray(v.profiles) ? v.profiles[0] : v.profiles
-             }));
-             setVerifications(mappedVerify as VerificationRequest[]);
-        }
-
-    } catch (err) { console.error("Error:", err); } finally { setIsLoadingData(false); }
-  };
-
-  const exportToCSV = (data: any[], filename: string) => {
-      if (!data.length) return alert("Không có dữ liệu để xuất!");
-      const cleanData = data.map(item => {
-          const newItem: any = {};
-          Object.keys(item).forEach(key => {
-              if (typeof item[key] !== 'object' || item[key] === null) {
-                  newItem[key] = item[key];
-              }
-          });
-          return newItem;
-      });
-      const headers = Object.keys(cleanData[0]).join(',');
-      const rows = cleanData.map(row => Object.values(row).map(value => `"${value}"`).join(',')).join('\n');
-      const blob = new Blob([`\uFEFF${headers}\n${rows}`], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `${filename}_${new Date().toISOString().slice(0,10)}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-  };
-
-  const handleResolveReport = async (reportId: string, productId: string) => {
-      if(!confirm("XÓA VĨNH VIỄN sản phẩm này?")) return;
-      await supabase.from('products').delete().eq('id', productId);
-      await supabase.from('reports').update({ status: 'resolved' }).eq('id', reportId);
-      fetchData();
-  };
-  const handleDismissReport = async (reportId: string) => {
-      await supabase.from('reports').update({ status: 'dismissed' }).eq('id', reportId);
-      fetchData();
-  };
-  const handleDeleteProduct = async (id: string) => {
-    if (window.confirm('Xóa vĩnh viễn?')) {
-      await supabase.from('products').delete().eq('id', id);
-      setProducts(products.filter(p => p.id !== id));
+      if (prodRes.data) setProducts(prodRes.data.map((p: any) => ({ ...p, sellerId: p.seller_id, postedAt: p.posted_at })));
+      if (userRes.data) setUsersList(userRes.data);
+      if (reportRes.data) setReports(reportRes.data.map((r: any) => ({ ...r, reporter: r.profiles, product: r.products })));
+      if (verifyRes.data) setVerifications(verifyRes.data);
+    } catch (err) {
+      addToast("Lỗi đồng bộ dữ liệu hệ thống", "error");
+    } finally {
+      setIsLoadingData(false);
     }
   };
-  const handleVerifyAction = async (req: VerificationRequest, action: 'approved' | 'rejected') => {
-      const { error } = await supabase.from('verification_requests').update({ status: action }).eq('id', req.id);
-      if (error) return alert(error.message);
-      if (action === 'approved') {
-          await supabase.from('profiles').update({ is_verified: true }).eq('id', req.user_id);
-          setUsersList(prev => prev.map(u => u.id === req.user_id ? { ...u, is_verified: true } : u));
-      }
-      setVerifications(prev => prev.filter(item => item.id !== req.id));
-  };
-  const handleToggleBan = async (userId: string, currentStatus: boolean) => {
-      if (!confirm(`Xác nhận ${currentStatus ? "MỞ KHÓA" : "KHÓA"} tài khoản này?`)) return;
-      const { error } = await supabase.from('profiles').update({ banned: !currentStatus }).eq('id', userId);
-      if (!error) setUsersList(prev => prev.map(u => u.id === userId ? { ...u, banned: !currentStatus } : u));
-      else alert("Lỗi: " + error.message);
+
+  // --- 3. HÀNH ĐỘNG XÓA SẢN PHẨM VĨNH VIỄN ---
+  const handleDeleteProduct = async (id: string) => {
+    if (!window.confirm("XÁC NHẬN: Xóa vĩnh viễn bài đăng này khỏi hệ thống?")) return;
+    try {
+      // Nhờ ON DELETE CASCADE trong SQL, các bảng tin lưu/báo cáo sẽ tự xóa theo
+      const { error } = await supabase.from('products').delete().eq('id', id);
+      if (error) throw error;
+      
+      setProducts(prev => prev.filter(p => p.id !== id));
+      setReports(prev => prev.filter(r => r.product_id !== id));
+      addToast("Đã xóa sản phẩm thành công", "success");
+    } catch (err: any) {
+      addToast("Lỗi xóa sản phẩm: " + err.message, "error");
+    }
   };
 
-  const maxChartValue = Math.max(...weeklyStats.map(s => s.count), 1);
+  // --- 4. HÀNH ĐỘNG XÓA NGƯỜI DÙNG VĨNH VIỄN (CASCADE) ---
+  const handleDeleteUserCompletely = async (userId: string) => {
+    if (userId === user?.id) return addToast("Bạn không thể tự xóa chính mình!", "warning");
+    
+    const confirm = window.confirm("CẢNH BÁO: Hành động này sẽ xóa sạch Profile, Toàn bộ sản phẩm, Tin nhắn và Bình luận của người dùng này. Bạn chắc chắn chứ?");
+    if (!confirm) return;
+
+    try {
+      // Chỉ cần xóa ở bảng profiles, SQL CASCADE sẽ lo phần còn lại
+      const { error } = await supabase.from('profiles').delete().eq('id', userId);
+      if (error) throw error;
+
+      setUsersList(prev => prev.filter(u => u.id !== userId));
+      // Dọn dẹp cả list sản phẩm/báo cáo đang hiển thị nếu thuộc user này
+      setProducts(prev => prev.filter(p => p.sellerId !== userId));
+      
+      addToast("Đã dọn dẹp sạch sẽ dữ liệu người dùng", "success");
+    } catch (err: any) {
+      addToast("Lỗi xóa người dùng: " + err.message, "error");
+    }
+  };
+
+  // --- 5. HÀNH ĐỘNG KHÓA (BAN) USER ---
+  const handleToggleBan = async (userId: string, currentBanned: boolean) => {
+    if (userId === user?.id) return addToast("Không thể khóa chính mình!", "warning");
+    
+    const action = currentBanned ? "Mở khóa" : "KHÓA";
+    if (!window.confirm(`Xác nhận ${action} tài khoản này?`)) return;
+    
+    try {
+      const { error } = await supabase.from('profiles').update({ banned: !currentBanned }).eq('id', userId);
+      if (error) throw error;
+      
+      setUsersList(prev => prev.map(u => u.id === userId ? { ...u, banned: !currentBanned } : u));
+      addToast(`Đã ${action} người dùng`, "success");
+    } catch (err: any) {
+      addToast("Lỗi: " + err.message, "error");
+    }
+  };
+
+  // --- 6. DUYỆT BÁO CÁO VI PHẠM ---
+  const handleResolveReport = async (reportId: string, productId: string) => {
+    try {
+      await handleDeleteProduct(productId);
+      await supabase.from('reports').update({ status: 'resolved' }).eq('id', reportId);
+      setReports(prev => prev.map(r => r.id === reportId ? { ...r, status: 'resolved' } : r));
+    } catch (err: any) {
+      addToast("Lỗi xử lý báo cáo", "error");
+    }
+  };
+
   const filteredProducts = products.filter(p => p.title.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  if (loading) return <div className="p-20 text-center text-gray-500">Đang tải...</div>;
-  if (!isAdmin) return <div className="p-20 text-center text-red-500 font-bold">Không có quyền truy cập</div>;
+  if (loading || isLoadingData) return (
+    <div className="min-h-screen flex items-center justify-center bg-white"><Loader2 className="w-10 h-10 animate-spin text-indigo-600" /></div>
+  );
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 min-h-screen bg-gray-50 font-sans">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8 gap-4">
-          <div>
-            <h1 className="text-3xl font-black text-gray-900 flex items-center text-[#034EA2]">
-                <ShieldCheck className="w-8 h-8 mr-3"/> BK ADMIN <span className="ml-3 text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded-full">v2.0</span>
-            </h1>
-            <p className="text-sm text-gray-500 mt-1 ml-11">Trung tâm kiểm soát hệ thống & Phân tích dữ liệu</p>
-          </div>
-          <div className="flex gap-3">
-              <button onClick={() => window.open('/', '_blank')} className="flex items-center px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-bold text-gray-700 hover:bg-gray-50 shadow-sm transition">
-                  <ExternalLink className="w-4 h-4 mr-2" /> Xem trang chủ
-              </button>
-              <button onClick={fetchData} className="flex items-center px-4 py-2 bg-[#034EA2] text-white rounded-lg text-sm font-bold hover:bg-[#003875] shadow-md transition active:scale-95">
-                  <RefreshCw className={`w-4 h-4 mr-2 ${isLoadingData ? 'animate-spin' : ''}`} /> Cập nhật
-              </button>
-          </div>
+    <div className="max-w-7xl mx-auto px-4 py-10 font-sans">
+      {/* HEADER QUẢN TRỊ */}
+      <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-10 gap-4">
+        <div>
+          <h1 className="text-4xl font-black text-gray-900 tracking-tight flex items-center uppercase">
+            <ShieldCheck className="w-10 h-10 mr-3 text-red-600"/> Hệ thống Admin
+          </h1>
+          <p className="text-gray-500 font-medium mt-1 ml-1">Kiểm soát nội dung và người dùng hệ thống BK Market</p>
+        </div>
+        <div className="flex gap-3">
+          <button onClick={fetchData} className="p-3 bg-gray-100 rounded-2xl hover:bg-gray-200 transition"><RefreshCw size={20}/></button>
+          <Link to="/" className="flex items-center gap-2 bg-gray-900 text-white px-6 py-3 rounded-2xl font-bold hover:bg-black transition">
+            <ExternalLink size={18}/> Ra Trang Chủ
+          </Link>
+        </div>
       </div>
 
-      <div className="bg-white rounded-xl shadow-sm p-1.5 mb-6 inline-flex border border-gray-200 overflow-x-auto max-w-full gap-1">
+      {/* TABS NAVIGATION */}
+      <div className="flex gap-2 mb-8 bg-gray-100/50 p-1.5 rounded-[2rem] w-fit overflow-x-auto max-w-full">
         {[
-            { id: 'dashboard', label: 'Tổng quan', icon: BarChart3, count: 0, color: 'text-gray-600' },
-            { id: 'reports', label: 'Báo cáo', icon: Flag, count: reports.filter(r => r.status === 'pending').length, color: 'text-red-600' },
-            { id: 'verifications', label: 'Duyệt SV', icon: ShieldCheck, count: verifications.length, color: 'text-blue-600' },
-            { id: 'products', label: 'Sản phẩm', icon: Package, count: products.length, color: 'text-indigo-600' },
-            { id: 'users', label: 'Người dùng', icon: Users, count: usersList.length, color: 'text-green-600' },
-        ].map((tab) => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`px-5 py-2.5 rounded-lg text-sm font-bold transition-all whitespace-nowrap flex items-center ${activeTab === tab.id ? 'bg-gray-100 text-gray-900 shadow-inner' : 'text-gray-500 hover:bg-gray-50 hover:text-gray-900'}`}>
-                <tab.icon className={`w-4 h-4 mr-2 ${activeTab === tab.id ? tab.color : ''}`} /> {tab.label}
-                {tab.count > 0 && tab.id !== 'dashboard' && <span className={`ml-2 px-2 py-0.5 rounded-full text-[10px] ${activeTab === tab.id ? 'bg-white shadow-sm' : 'bg-gray-100'}`}>{tab.count}</span>}
-            </button>
+          { id: 'dashboard', label: 'Bảng tin', icon: BarChart3 },
+          { id: 'reports', label: 'Báo cáo', icon: Flag, count: reports.filter(r => r.status==='pending').length },
+          { id: 'verifications', label: 'Duyệt SV', icon: ShieldCheck, count: verifications.length },
+          { id: 'products', label: 'Bài đăng', icon: Package },
+          { id: 'users', label: 'Thành viên', icon: Users },
+        ].map(tab => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id as any)}
+            className={`flex items-center gap-2 px-6 py-3 rounded-[1.5rem] font-bold text-sm transition-all whitespace-nowrap ${
+              activeTab === tab.id ? 'bg-white text-indigo-600 shadow-sm border' : 'text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            <tab.icon size={18}/> {tab.label}
+            {tab.count ? <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded-full ml-1">{tab.count}</span> : null}
+          </button>
         ))}
       </div>
 
-      <div className="bg-white shadow-xl rounded-2xl border border-gray-200 overflow-hidden min-h-[600px]">
+      <div className="bg-white rounded-[2.5rem] border shadow-sm overflow-hidden min-h-[500px]">
+        
+        {/* TAB: DASHBOARD */}
         {activeTab === 'dashboard' && (
-            <div className="p-8">
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-                    <div className="bg-white p-6 rounded-2xl border border-blue-100 shadow-sm relative overflow-hidden group">
-                        <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition"><Users size={64} className="text-blue-600"/></div>
-                        <p className="text-gray-500 text-xs font-bold uppercase mb-1">Tổng thành viên</p>
-                        <p className="text-4xl font-black text-gray-900">{usersList.length}</p>
-                    </div>
-                    <div className="bg-white p-6 rounded-2xl border border-purple-100 shadow-sm relative overflow-hidden group">
-                        <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition"><Package size={64} className="text-purple-600"/></div>
-                        <p className="text-gray-500 text-xs font-bold uppercase mb-1">Tổng tin đăng</p>
-                        <p className="text-4xl font-black text-gray-900">{products.length}</p>
-                        <p className="text-xs text-purple-600 mt-2 flex items-center font-bold">{products.filter(p => p.status === 'available').length} đang hiển thị</p>
-                    </div>
-                    <div className="bg-white p-6 rounded-2xl border border-orange-100 shadow-sm relative overflow-hidden group">
-                        <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition"><DollarSign size={64} className="text-orange-600"/></div>
-                        <p className="text-gray-500 text-xs font-bold uppercase mb-1">GMV (Tổng giao dịch)</p>
-                        <p className="text-3xl font-black text-gray-900">{totalRevenue.toLocaleString()} <span className="text-sm text-gray-400">VNĐ</span></p>
-                        <p className="text-xs text-orange-600 mt-2 flex items-center font-bold">Từ {products.filter(p => p.status === 'sold').length} đơn đã bán</p>
-                    </div>
-                    <div className="bg-gradient-to-br from-red-500 to-red-600 p-6 rounded-2xl text-white shadow-lg shadow-red-100 relative overflow-hidden">
-                        <div className="absolute right-0 top-0 p-4 opacity-20"><Activity size={64}/></div>
-                        <p className="text-red-100 text-xs font-bold uppercase mb-1">Cần xử lý gấp</p>
-                        <p className="text-4xl font-black">{reports.filter(r => r.status === 'pending').length + verifications.length}</p>
-                        <p className="text-xs text-red-100 mt-2 opacity-80">Báo cáo & Xác thực</p>
-                    </div>
-                </div>
-
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    <div className="lg:col-span-2">
-                        <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center"><BarChart3 className="w-5 h-5 mr-2 text-[#034EA2]"/> Xu hướng tin đăng mới</h3>
-                        <div className="h-72 flex items-end justify-between gap-3 p-6 border border-gray-100 rounded-2xl bg-gray-50/50 relative">
-                            {weeklyStats.map((stat, i) => (
-                                <div key={i} className="flex-1 flex flex-col items-center group relative z-10 h-full justify-end">
-                                    <div className="absolute -top-10 opacity-0 group-hover:opacity-100 transition-all bg-gray-800 text-white text-xs py-1 px-3 rounded-lg shadow-lg mb-2 font-bold z-20">
-                                        {stat.fullDate}: {stat.count} tin
-                                    </div>
-                                    <div className={`w-full max-w-[50px] rounded-t-lg transition-all duration-500 ease-out relative ${i===6 ? 'bg-[#034EA2]' : 'bg-blue-200 hover:bg-blue-300'}`} style={{ height: `${Math.max((stat.count / maxChartValue) * 100, 2)}%` }}></div>
-                                    <div className="mt-3 text-xs font-bold text-gray-400">{i===6 ? 'Hôm nay' : stat.date}</div>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-                    <div>
-                        <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center"><PieChart className="w-5 h-5 mr-2 text-purple-600"/> Phân bố danh mục</h3>
-                        <div className="bg-white border border-gray-100 rounded-2xl p-6 h-72 overflow-y-auto custom-scrollbar">
-                            <div className="space-y-4">
-                                {categoryStats.map(([cat, count], idx) => (
-                                    <div key={idx}>
-                                        <div className="flex justify-between text-xs font-bold mb-1">
-                                            <span className="text-gray-700">{cat || 'Khác'}</span>
-                                            <span className="text-gray-500">{count} ({Math.round(count/products.length*100)}%)</span>
-                                        </div>
-                                        <div className="w-full bg-gray-100 rounded-full h-2">
-                                            <div className="bg-indigo-500 h-2 rounded-full" style={{ width: `${(count/products.length)*100}%`, opacity: 1 - (idx * 0.1) }}></div>
-                                        </div>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                    </div>
-                </div>
+          <div className="p-10 grid grid-cols-1 md:grid-cols-3 gap-8">
+            <div className="p-8 bg-blue-50 rounded-[2rem] border border-blue-100">
+              <Users className="text-blue-600 mb-3" size={32} />
+              <p className="text-gray-500 text-xs font-black uppercase tracking-widest">Người dùng</p>
+              <p className="text-4xl font-black text-gray-900">{usersList.length}</p>
             </div>
+            <div className="p-8 bg-indigo-50 rounded-[2rem] border border-indigo-100">
+              <Package className="text-indigo-600 mb-3" size={32} />
+              <p className="text-gray-500 text-xs font-black uppercase tracking-widest">Sản phẩm</p>
+              <p className="text-4xl font-black text-gray-900">{products.length}</p>
+            </div>
+            <div className="p-8 bg-red-50 rounded-[2rem] border border-red-100">
+              <AlertTriangle className="text-red-600 mb-3" size={32} />
+              <p className="text-gray-500 text-xs font-black uppercase tracking-widest">Báo cáo vi phạm</p>
+              <p className="text-4xl font-black text-gray-900">{reports.length}</p>
+            </div>
+          </div>
         )}
 
+        {/* TAB: REPORTS */}
         {activeTab === 'reports' && (
-              <div className="divide-y divide-gray-100">
-                 {reports.length === 0 ? (
-                     <div className="p-20 text-center text-gray-400 flex flex-col items-center"><ShieldCheck className="w-16 h-16 mb-4 text-green-200"/><p>Không có báo cáo nào.</p></div>
-                 ) : (
-                   reports.map((report) => (
-                   <div key={report.id} className={`p-6 transition hover:bg-gray-50 ${report.status !== 'pending' ? 'opacity-60 bg-gray-50' : ''}`}>
-                       <div className="flex flex-col md:flex-row gap-6">
-                           <div className="w-24 h-24 bg-gray-100 rounded-lg overflow-hidden flex-shrink-0 border border-gray-200 relative">
-                               {report.product?.images?.[0] ? <img src={report.product.images[0]} className="w-full h-full object-cover" /> : <div className="flex flex-col items-center justify-center h-full text-[10px] text-gray-400 p-2 text-center bg-gray-50"><XCircle className="w-6 h-6 mb-1 opacity-20"/>Mất ảnh</div>}
-                           </div>
-                           <div className="flex-1">
-                               <div className="flex items-center flex-wrap gap-2 mb-2">
-                                   <span className="bg-red-100 text-red-700 px-3 py-1 rounded-full text-xs font-bold border border-red-200 flex items-center"><AlertTriangle className="w-3 h-3 mr-1"/> {report.reason}</span>
-                                   <span className={`text-xs font-mono px-2 py-0.5 rounded border uppercase ${report.status === 'pending' ? 'bg-yellow-50 text-yellow-700 border-yellow-200' : 'bg-gray-100 text-gray-500'}`}>{report.status}</span>
-                                   <span className="text-xs text-gray-400 ml-auto">{new Date(report.created_at).toLocaleString('vi-VN')}</span>
-                               </div>
-                               {report.product ? (
-                                   <Link to={`/product/${report.product.id}`} target="_blank" className="text-lg font-bold text-gray-900 hover:text-indigo-600 hover:underline flex items-center gap-2 mb-1">{report.product.title} <ExternalLink className="w-4 h-4 text-gray-400"/></Link>
-                               ) : <p className="text-gray-400 italic font-medium">Sản phẩm gốc không còn tồn tại.</p>}
-                               <div className="text-sm text-gray-500">Báo bởi: <b>{report.reporter?.name || 'Ẩn danh'}</b></div>
-                           </div>
-                           {report.status === 'pending' && report.product && (
-                               <div className="flex flex-col gap-2 min-w-[160px] justify-center border-l pl-6 border-gray-100">
-                                   <button onClick={() => handleResolveReport(report.id, report.product!.id)} className="w-full py-2 px-4 bg-red-600 hover:bg-red-700 text-white rounded-md text-xs font-bold shadow-sm transition flex items-center justify-center"><Trash2 className="w-3.5 h-3.5 mr-2" /> XÓA BÀI NÀY</button>
-                                   <button onClick={() => handleDismissReport(report.id)} className="w-full py-2 px-4 bg-white border border-gray-300 hover:bg-gray-50 text-gray-700 rounded-md text-xs font-bold transition flex items-center justify-center"><XCircle className="w-3.5 h-3.5 mr-2" /> BỎ QUA</button>
-                               </div>
-                           )}
-                       </div>
-                   </div>
-                   ))
-                 )}
-             </div>
-        )}
-
-        {activeTab === 'verifications' && (
-             <div className="divide-y divide-gray-100">
-                 {verifications.length === 0 ? (
-                     <div className="p-20 text-center text-gray-400 flex flex-col items-center"><ShieldCheck className="w-16 h-16 mb-4 text-blue-200"/><p>Không có yêu cầu xác thực mới.</p></div>
-                 ) : (
-                     verifications.map((req) => (
-                        <div key={req.id} className="p-6 transition hover:bg-gray-50 flex flex-col lg:flex-row gap-6">
-                            <div className="w-full lg:w-1/3">
-                                <p className="text-xs font-bold text-gray-500 mb-2 uppercase">Ảnh thẻ sinh viên</p>
-                                <div className="rounded-lg overflow-hidden border border-gray-200 bg-black shadow-sm group">
-                                    <img src={req.image_url} className="w-full h-auto object-contain max-h-[300px] transition-transform group-hover:scale-105" />
-                                </div>
-                            </div>
-                            <div className="flex-1 flex flex-col justify-between">
-                                <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 mb-4">
-                                    <div className="flex items-center gap-3 mb-3">
-                                        <img src={req.profiles.avatar_url || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full border border-blue-200" />
-                                        <div><p className="font-bold text-gray-900">{req.profiles.name}</p><p className="text-xs text-blue-600">{req.profiles.email}</p></div>
-                                    </div>
-                                    <div className="grid grid-cols-2 gap-4 text-sm">
-                                        <div><p className="text-gray-500 text-xs">MSSV đăng ký:</p><p className="font-mono font-bold text-lg text-gray-800">{req.profiles.student_id || 'Chưa nhập'}</p></div>
-                                        <div><p className="text-gray-500 text-xs">Ngày gửi:</p><p className="font-medium text-gray-700 flex items-center"><Clock className="w-3 h-3 mr-1"/> {new Date(req.created_at).toLocaleString('vi-VN')}</p></div>
-                                    </div>
-                                </div>
-                                <div className="flex gap-3 mt-auto pt-2">
-                                    <button onClick={() => handleVerifyAction(req, 'approved')} className="flex-1 py-3 px-4 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold shadow-sm transition flex items-center justify-center"><Check className="w-5 h-5 mr-2" /> Duyệt</button>
-                                    <button onClick={() => handleVerifyAction(req, 'rejected')} className="flex-1 py-3 px-4 bg-white border border-red-200 text-red-600 hover:bg-red-50 rounded-lg font-bold transition flex items-center justify-center"><X className="w-5 h-5 mr-2" /> Từ chối</button>
-                                </div>
-                            </div>
-                        </div>
-                     ))
-                 )}
-             </div>
-        )}
-
-        {activeTab === 'products' && (
-          <div>
-            <div className="p-4 border-b border-gray-100 bg-gray-50 flex gap-4">
-                <div className="relative flex-1">
-                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-4 h-4"/>
-                    <input type="text" placeholder="Tìm kiếm sản phẩm..." className="w-full pl-10 pr-4 py-2 rounded-lg border border-gray-300 focus:ring-2 focus:ring-blue-500 outline-none text-sm" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+          <div className="divide-y divide-gray-50">
+            {reports.length === 0 ? (
+              <div className="p-20 text-center text-gray-400 font-bold italic">Không có báo cáo nào cần xử lý.</div>
+            ) : (
+              reports.map(r => (
+                <div key={r.id} className={`p-8 flex gap-8 hover:bg-gray-50 transition ${r.status !== 'pending' ? 'opacity-40 bg-gray-50' : ''}`}>
+                  <div className="w-20 h-20 rounded-2xl bg-gray-100 overflow-hidden border flex-shrink-0">
+                    {r.product?.images?.[0] ? <img src={r.product.images[0]} className="w-full h-full object-cover"/> : <Package className="w-full h-full p-6 text-gray-300"/>}
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex gap-2 mb-2">
+                      <span className="bg-red-100 text-red-700 text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-tighter border border-red-200">{r.reason}</span>
+                      <span className="text-xs text-gray-400">{new Date(r.created_at).toLocaleDateString()}</span>
+                    </div>
+                    <h3 className="font-bold text-gray-900 text-lg">{r.product?.title || 'Sản phẩm đã bị xóa trước đó'}</h3>
+                    <p className="text-xs text-gray-500">Báo cáo bởi: <span className="font-bold text-gray-700">{r.reporter?.name}</span></p>
+                  </div>
+                  {r.status === 'pending' && r.product && (
+                    <div className="flex flex-col gap-2 min-w-[120px]">
+                      <button onClick={() => handleResolveReport(r.id, r.product_id)} className="bg-red-600 text-white py-3 rounded-2xl text-xs font-black hover:bg-red-700">XÓA BÀI</button>
+                      <button onClick={() => supabase.from('reports').update({status:'dismissed'}).eq('id', r.id).then(fetchData)} className="bg-gray-100 text-gray-500 py-3 rounded-2xl text-xs font-black hover:bg-gray-200 transition">BỎ QUA</button>
+                    </div>
+                  )}
                 </div>
-                <button onClick={() => exportToCSV(products, 'Products_Export')} className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-bold hover:bg-green-700 transition">
-                    <Download className="w-4 h-4 mr-2"/> Xuất Excel
-                </button>
+              ))
+            )}
+          </div>
+        )}
+
+        {/* TAB: PRODUCTS */}
+        {activeTab === 'products' && (
+          <div className="p-6">
+            <div className="relative mb-6">
+              <Search className="absolute left-5 top-1/2 -translate-y-1/2 text-gray-400" size={20}/>
+              <input type="text" placeholder="Tìm kiếm tên sản phẩm..." className="w-full pl-14 pr-6 py-4 bg-gray-50 rounded-2xl outline-none focus:ring-4 focus:ring-indigo-50 transition" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
             </div>
             <div className="overflow-x-auto">
-              <table className="min-w-full divide-y divide-gray-200">
-                  <thead className="bg-gray-50"><tr><th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Sản phẩm</th><th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Giá & Status</th><th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Ngày đăng</th><th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase">Hành động</th></tr></thead>
-                  <tbody className="bg-white divide-y divide-gray-200">
-                      {filteredProducts.map((product) => (
-                          <tr key={product.id} className="hover:bg-gray-50">
-                              <td className="px-6 py-4"><div className="flex items-center"><div className="h-10 w-10 flex-shrink-0 bg-gray-100 rounded overflow-hidden border border-gray-200"><img className="h-full w-full object-cover" src={product.images[0] || ''} /></div><div className="ml-4"><div className="text-sm font-medium text-gray-900 line-clamp-1 max-w-xs">{product.title}</div><div className="text-xs text-gray-500">{product.category}</div></div></div></td>
-                              <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-900 font-bold">{product.price.toLocaleString()} đ</div><span className={`px-2 text-[10px] font-semibold rounded-full ${product.status === 'sold' ? 'bg-gray-100 text-gray-500' : 'bg-green-50 text-green-700'}`}>{product.status === 'sold' ? 'Đã bán' : 'Đang bán'}</span></td>
-                              <td className="px-6 py-4 text-xs text-gray-500">{new Date(product.postedAt).toLocaleDateString('vi-VN')}</td>
-                              <td className="px-6 py-4 text-right"><button onClick={() => handleDeleteProduct(product.id)} className="text-red-600 hover:text-red-900 bg-red-50 p-2 rounded-full hover:bg-red-100 transition"><Trash2 className="w-4 h-4" /></button></td>
-                          </tr>
-                      ))}
-                  </tbody>
+              <table className="w-full text-left">
+                <thead className="bg-gray-50/50">
+                  <tr className="text-gray-400 text-[10px] font-black uppercase tracking-widest border-b">
+                    <th className="p-5">Sản phẩm</th>
+                    <th className="p-5">Giá</th>
+                    <th className="p-5">Ngày đăng</th>
+                    <th className="p-5 text-right">Hành động</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {filteredProducts.map(p => (
+                    <tr key={p.id} className="hover:bg-gray-50 transition group">
+                      <td className="p-5 flex items-center gap-4">
+                        <img src={p.images[0]} className="w-12 h-12 rounded-xl object-cover border" />
+                        <div>
+                          <p className="font-bold text-gray-900 line-clamp-1">{p.title}</p>
+                          <p className="text-[10px] text-gray-400 font-bold uppercase">{p.category}</p>
+                        </div>
+                      </td>
+                      <td className="p-5 font-bold text-indigo-600">{p.price.toLocaleString()}đ</td>
+                      <td className="p-5 text-xs text-gray-400 font-medium">{new Date(p.postedAt).toLocaleDateString()}</td>
+                      <td className="p-5 text-right">
+                        <button onClick={() => handleDeleteProduct(p.id)} className="p-3 text-red-500 hover:bg-red-50 rounded-2xl transition"><Trash2 size={20}/></button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
               </table>
             </div>
           </div>
         )}
 
+        {/* TAB: USERS */}
         {activeTab === 'users' && (
-          <div>
-            <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-end">
-                <button onClick={() => exportToCSV(usersList, 'Users_Export')} className="flex items-center px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-bold hover:bg-green-700 transition">
-                    <Download className="w-4 h-4 mr-2"/> Xuất Excel
-                </button>
-            </div>
-            <div className="overflow-x-auto">
-                <table className="min-w-full divide-y divide-gray-200">
-                    <thead className="bg-gray-50"><tr><th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">User</th><th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">MSSV</th><th className="px-6 py-3 text-left text-xs font-bold text-gray-500 uppercase">Role</th><th className="px-6 py-3 text-right text-xs font-bold text-gray-500 uppercase">Trạng thái</th></tr></thead>
-                    <tbody className="bg-white divide-y divide-gray-200">
-                        {usersList.map((usr) => (
-                            <tr key={usr.id} className={`hover:bg-gray-50 ${usr.banned ? 'bg-red-50' : ''}`}>
-                                <td className="px-6 py-4"><div className="flex items-center"><img className="h-8 w-8 rounded-full border" src={usr.avatar_url || 'https://via.placeholder.com/30'}/><div className="ml-4"><div className="text-sm font-medium text-gray-900">{usr.name}</div><div className="text-xs text-gray-500">{usr.email}</div></div></div></td>
-                                <td className="px-6 py-4 text-sm font-mono">{usr.student_id || '---'}</td>
-                                <td className="px-6 py-4 text-sm">{usr.role === 'admin' ? <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-xs font-bold">ADMIN</span> : 'User'}</td>
-                                <td className="px-6 py-4 text-right">
-                                    <div className="flex items-center justify-end gap-2">
-                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${usr.is_verified ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>{usr.is_verified ? 'Verified' : 'Unverified'}</span>
-                                        {usr.role !== 'admin' && (
-                                            <button onClick={() => handleToggleBan(usr.id, usr.banned || false)} className={`px-3 py-1 rounded-full text-xs font-bold flex items-center transition ${usr.banned ? 'bg-green-600 text-white hover:bg-green-700' : 'bg-red-100 text-red-600 hover:bg-red-200'}`}>
-                                                {usr.banned ? <><Unlock className="w-3 h-3 mr-1"/> Mở</> : <><Ban className="w-3 h-3 mr-1"/> Khóa</>}
-                                            </button>
-                                        )}
-                                    </div>
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+                <thead className="bg-gray-50/50">
+                  <tr className="text-gray-400 text-[10px] font-black uppercase tracking-widest border-b">
+                    <th className="p-6">Thành viên</th>
+                    <th className="p-6">MSSV</th>
+                    <th className="p-6">Vai trò</th>
+                    <th className="p-6 text-right">Thao tác quản trị</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-50">
+                  {usersList.map(u => (
+                    <tr key={u.id} className={`hover:bg-gray-50 transition ${u.banned ? 'bg-red-50/20' : ''}`}>
+                      <td className="p-6 flex items-center gap-4">
+                        <img src={u.avatar_url || `https://ui-avatars.com/api/?name=${u.name}`} className="w-12 h-12 rounded-full border shadow-sm"/>
+                        <div>
+                          <p className="font-bold text-gray-900">{u.name}</p>
+                          <p className="text-xs text-gray-400 font-medium italic">{u.email}</p>
+                        </div>
+                      </td>
+                      <td className="p-6 font-mono font-black text-gray-500 uppercase tracking-tighter">{u.student_id || 'Chưa cập nhật'}</td>
+                      <td className="p-6">
+                        <span className={`text-[10px] font-black px-3 py-1 rounded-full border ${u.role === 'admin' ? 'bg-purple-100 text-purple-700 border-purple-200' : 'bg-blue-50 text-blue-700 border-blue-100'}`}>
+                          {u.role?.toUpperCase()}
+                        </span>
+                      </td>
+                      <td className="p-6 text-right">
+                        <div className="flex items-center justify-end gap-2">
+                          {u.role !== 'admin' && (
+                            <>
+                              <button 
+                                onClick={() => handleToggleBan(u.id, !!u.banned)} 
+                                className={`px-5 py-2.5 rounded-2xl text-xs font-black transition shadow-sm ${
+                                  u.banned ? 'bg-green-600 text-white hover:bg-green-700 shadow-green-100' : 'bg-red-100 text-red-600 hover:bg-red-200 shadow-red-100'
+                                }`}
+                              >
+                                {u.banned ? <><Unlock className="inline mr-1" size={14}/> MỞ KHÓA</> : <><Ban className="inline mr-1" size={14}/> KHÓA</>}
+                              </button>
+                              
+                              <button 
+                                onClick={() => handleDeleteUserCompletely(u.id)}
+                                className="p-2.5 bg-gray-100 text-gray-400 hover:bg-red-600 hover:text-white rounded-2xl transition border border-transparent hover:border-red-700 shadow-sm"
+                                title="Xóa vĩnh viễn khỏi Database"
+                              >
+                                <Trash2 size={18}/>
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+            </table>
           </div>
+        )}
+
+        {/* TAB: VERIFICATIONS */}
+        {activeTab === 'verifications' && (
+           <div className="p-8">
+              {verifications.length === 0 ? (
+                <div className="text-center py-20 text-gray-400 font-bold italic">Tất cả yêu cầu đã được duyệt.</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  {verifications.map(req => (
+                    <div key={req.id} className="p-6 bg-gray-50 rounded-[2rem] border-2 border-transparent hover:border-indigo-100 transition shadow-sm">
+                      <div className="flex gap-4 mb-6">
+                         <img src={req.profiles.avatar_url} className="w-14 h-14 rounded-full border shadow-sm" />
+                         <div>
+                            <p className="font-bold text-gray-900 text-lg">{req.profiles.name}</p>
+                            <p className="text-xs text-gray-500 font-medium italic">MSSV: {req.profiles.student_id}</p>
+                         </div>
+                      </div>
+                      <div className="aspect-video bg-black rounded-3xl overflow-hidden mb-6 group cursor-zoom-in" onClick={() => window.open(req.image_url)}>
+                         <img src={req.image_url} className="w-full h-full object-contain group-hover:scale-105 transition duration-500" />
+                      </div>
+                      <div className="flex gap-3">
+                         <button onClick={() => supabase.from('verification_requests').update({status:'approved'}).eq('id', req.id).then(() => supabase.from('profiles').update({is_verified:true}).eq('id', req.user_id)).then(fetchData)} className="flex-1 bg-green-600 text-white py-4 rounded-2xl font-black text-sm hover:bg-green-700 transition shadow-lg shadow-green-100 uppercase">Duyệt</button>
+                         <button onClick={() => supabase.from('verification_requests').update({status:'rejected'}).eq('id', req.id).then(fetchData)} className="flex-1 bg-white border-2 border-red-100 text-red-600 py-4 rounded-2xl font-black text-sm hover:bg-red-50 transition uppercase">Từ chối</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+           </div>
         )}
       </div>
     </div>

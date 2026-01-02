@@ -88,7 +88,7 @@ const HeroBanner = () => {
 
 // --- MAIN PAGE ---
 const MarketplacePage: React.FC = () => {
-  const { user } = useAuth();
+  const { user, isAdmin } = useAuth(); // Lấy thêm quyền isAdmin
   const { addToast } = useToast();
   const { t } = useTranslation(); 
 
@@ -113,7 +113,6 @@ const MarketplacePage: React.FC = () => {
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [isListening, setIsListening] = useState(false);
 
-  // --- FIX 1: Định nghĩa scrollToTop để hết lỗi ReferenceError ---
   const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
   useEffect(() => {
@@ -122,7 +121,6 @@ const MarketplacePage: React.FC = () => {
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Xử lý Debounce cho việc gõ phím
   useEffect(() => {
     const timer = setTimeout(() => {
         setDebouncedSearchTerm(searchTerm.trim());
@@ -136,7 +134,15 @@ const MarketplacePage: React.FC = () => {
       let query = supabase.from('products').select('*, profiles:seller_id (name, avatar_url)', { count: 'exact' });
 
       query = query.eq('is_looking_to_buy', activeTab === 'buy');
-      if (hideSold) query = query.neq('status', ProductStatus.SOLD);
+
+      // --- FIX 1: LOẠI BỎ CÁC BÀI VIẾT ĐÃ BỊ XÓA (status = 'deleted') ---
+      // Ngay cả Admin khi xem Marketplace cũng không nên thấy bài đã xóa để tránh nhầm lẫn
+      query = query.neq('status', 'deleted'); 
+
+      if (hideSold) {
+          query = query.eq('status', ProductStatus.AVAILABLE);
+      }
+
       if (selectedCategory !== 'All') query = query.eq('category', selectedCategory);
       if (filterCondition !== 'All') query = query.eq('condition', filterCondition);
       
@@ -146,7 +152,6 @@ const MarketplacePage: React.FC = () => {
         if (priceRange.max) query = query.lte('price', Number(priceRange.max));
       }
 
-      // --- FIX 2: Cải tiến logic tìm kiếm ---
       if (debouncedSearchTerm) {
         query = query.or(`title.ilike.%${debouncedSearchTerm}%,description.ilike.%${debouncedSearchTerm}%`);
       }
@@ -176,44 +181,39 @@ const MarketplacePage: React.FC = () => {
     fetchProducts(); 
   }, [fetchProducts]);
 
-  // --- FIX 3: Sửa tìm kiếm giọng nói ---
+  // --- HÀM XÓA BÀI CHO ADMIN (GỌI TỪ CARD) ---
+  // Bạn có thể truyền hàm này xuống ProductCard nếu cần
+  const handleAdminDelete = async (productId: string) => {
+    if (!window.confirm("Xác nhận xóa bài viết này vĩnh viễn?")) return;
+    try {
+        const { error } = await supabase.from('products').update({ status: 'deleted' }).eq('id', productId);
+        if (error) throw error;
+        // Cập nhật state tại chỗ để bài viết biến mất ngay lập tức mà không cần reload
+        setProducts(prev => prev.filter(p => p.id !== productId));
+        setTotalResult(prev => prev - 1);
+        addToast("Đã xóa bài viết vi phạm", "success");
+    } catch (e: any) {
+        addToast(e.message, "error");
+    }
+  };
+
   const handleVoiceSearch = () => {
     const windowObj = window as any;
     const SpeechRecognition = windowObj.SpeechRecognition || windowObj.webkitSpeechRecognition;
-    
-    if (!SpeechRecognition) {
-      return addToast("Trình duyệt không hỗ trợ tìm kiếm giọng nói.", "error");
-    }
+    if (!SpeechRecognition) return addToast("Trình duyệt không hỗ trợ.", "error");
 
     const recognition = new SpeechRecognition();
     recognition.lang = 'vi-VN';
-    recognition.interimResults = false;
-    recognition.maxAlternatives = 1;
-
-    recognition.onstart = () => {
-      setIsListening(true);
-      addToast("Đang nghe... Mời bạn nói", "info");
-    };
-
+    recognition.onstart = () => setIsListening(true);
     recognition.onresult = (event: any) => {
       const transcript = event.results[0][0].transcript.replace(/[.?!]/g, '').trim();
       setSearchTerm(transcript);
-      setDebouncedSearchTerm(transcript); // Cập nhật ngay để tìm kiếm luôn
+      setDebouncedSearchTerm(transcript);
       setIsListening(false);
       playNotificationSound();
-      addToast(`Đang tìm: "${transcript}"`, "success");
     };
-
-    recognition.onerror = (event: any) => {
-      setIsListening(false);
-      if (event.error === 'not-allowed') {
-        addToast("Vui lòng cấp quyền Micro!", "error");
-      }
-    };
-
-    recognition.onend = () => setIsListening(false);
-
-    try { recognition.start(); } catch (e) { console.error(e); }
+    recognition.onerror = () => setIsListening(false);
+    recognition.start();
   };
 
   const handleAiSearch = async (e: React.FormEvent) => {
@@ -233,7 +233,7 @@ const MarketplacePage: React.FC = () => {
 
   const handleTrendingClick = (keyword: string) => {
     setSearchTerm(keyword);
-    setDebouncedSearchTerm(keyword); // Kích hoạt fetch ngay lập tức
+    setDebouncedSearchTerm(keyword);
     playNotificationSound();
   };
 
@@ -374,7 +374,7 @@ const MarketplacePage: React.FC = () => {
                   {[1, 2, 3, 4, 5, 6].map(n => <ProductSkeleton key={n} />)}
                 </div>
               ) : products.length === 0 ? (
-                <div className="text-center py-24 bg-white rounded-[2rem] border-2 border-dashed border-blue-100 shadow-sm">
+                <div className="text-center py-24 bg-white rounded-[2rem] border-2 border-dashed border-gray-100 shadow-sm">
                   <Search className="w-16 h-16 text-gray-200 mx-auto mb-4" />
                   <h3 className="text-xl font-bold text-gray-400">Không tìm thấy món nào khớp với yêu cầu</h3>
                   <button onClick={() => {setSearchTerm(''); setDebouncedSearchTerm(''); setSelectedCategory('All'); setPriceRange({min:'',max:''}); setFilterCondition('All');}} className="mt-4 text-[#034EA2] font-bold hover:underline">Xóa tất cả bộ lọc</button>
@@ -382,7 +382,12 @@ const MarketplacePage: React.FC = () => {
               ) : (
                 <div className={viewMode === 'grid' ? "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6" : "flex flex-col gap-4"}>
                   {products.map(product => (
-                    <ProductCard key={product.id} product={product} viewMode={viewMode} />
+                    <ProductCard 
+                      key={product.id} 
+                      product={product} 
+                      viewMode={viewMode} 
+                      onAdminDelete={isAdmin ? handleAdminDelete : undefined} // Truyền hàm xóa xuống card
+                    />
                   ))}
                 </div>
               )}

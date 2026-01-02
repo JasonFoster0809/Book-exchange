@@ -9,7 +9,6 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string, name: string, studentId: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
-  // --- THÊM 2 HÀM MỚI ---
   resetPassword: (email: string) => Promise<{ error: any }>;
   updatePassword: (newPassword: string) => Promise<{ error: any }>;
 }
@@ -22,74 +21,86 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isAdmin, setIsAdmin] = useState(false);
   const mounted = useRef(false);
 
+  // --- HÀM LẤY THÔNG TIN CHI TIẾT NGƯỜI DÙNG ---
+  const fetchProfile = async (sessionUser: any) => {
+    try {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', sessionUser.id)
+        .single();
+
+      if (data && mounted.current) {
+        const profile = data as DBProfile & { banned?: boolean };
+
+        // 1. KIỂM TRA TRẠNG THÁI BỊ KHÓA (BANNED)
+        if (profile.banned === true) {
+          await supabase.auth.signOut(); // Xóa phiên đăng nhập ngay lập tức
+          setUser(null);
+          setIsAdmin(false);
+          setLoading(false);
+          // Thông báo cho người dùng
+          alert("Tài khoản của bạn đã bị khóa do vi phạm chính sách của BK Market.");
+          return;
+        }
+
+        // 2. PHÂN QUYỀN ADMIN
+        const userRole = profile.role === 'admin' ? 'admin' : 'user';
+        
+        const userData: User = {
+          id: profile.id,
+          email: sessionUser.email,
+          name: profile.name || sessionUser.user_metadata?.name || 'User',
+          studentId: profile.student_id || '',
+          avatar: profile.avatar_url || sessionUser.user_metadata?.avatar_url || `https://ui-avatars.com/api/?name=${profile.name || 'User'}&background=random`,
+          isVerified: profile.is_verified,
+          role: userRole
+        };
+        
+        setUser(userData);
+        setIsAdmin(userRole === 'admin');
+      } else if (!data && mounted.current) {
+        // Fallback nếu không tìm thấy profile (trường hợp hiếm)
+        setUser({
+          id: sessionUser.id,
+          email: sessionUser.email,
+          name: sessionUser.user_metadata?.name || sessionUser.email?.split('@')[0],
+          studentId: '',
+          avatar: sessionUser.user_metadata?.avatar_url || 'https://via.placeholder.com/150',
+          isVerified: false,
+          role: 'user'
+        });
+        setIsAdmin(false);
+      }
+    } catch (error) {
+      console.error("Lỗi xác thực hệ thống:", error);
+    } finally {
+      if (mounted.current) setLoading(false);
+    }
+  };
+
   useEffect(() => {
     mounted.current = true;
 
-    const fetchProfile = async (sessionUser: any) => {
-      try {
-        const { data } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', sessionUser.id)
-          .single();
-
-        if (data) {
-          const profile = data as DBProfile;
-          const userData: User = {
-            id: profile.id,
-            email: sessionUser.email,
-            name: profile.name || sessionUser.user_metadata?.name || 'User',
-            studentId: profile.student_id || '',
-            avatar: profile.avatar_url || sessionUser.user_metadata?.avatar_url || `https://ui-avatars.com/api/?name=${profile.name || 'User'}`,
-            isVerified: profile.is_verified,
-            role: profile.role as 'user' | 'admin'
-          };
-          
-          if(mounted.current) {
-            setUser(userData);
-            setIsAdmin(profile.role === 'admin');
-          }
-        } else {
-            if(mounted.current) {
-                setUser({
-                    id: sessionUser.id,
-                    email: sessionUser.email,
-                    name: sessionUser.user_metadata?.name || sessionUser.email?.split('@')[0],
-                    studentId: sessionUser.user_metadata?.student_id || '',
-                    avatar: sessionUser.user_metadata?.avatar_url || 'https://via.placeholder.com/150',
-                    isVerified: false,
-                    role: 'user'
-                });
-            }
-        }
-      } catch (error) {
-        console.error("Lỗi fetch profile:", error);
-      } finally {
-        if(mounted.current) setLoading(false);
-      }
-    };
-
+    // Kiểm tra session khi ứng dụng khởi chạy
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         fetchProfile(session.user);
       } else {
-        if(mounted.current) setLoading(false);
+        if (mounted.current) setLoading(false);
       }
     });
 
+    // Lắng nghe sự thay đổi trạng thái đăng nhập (Realtime Auth)
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === 'SIGNED_IN' && session?.user) {
-        setLoading(true);
-        fetchProfile(session.user);
-      } else if (event === 'SIGNED_OUT') {
-        if(mounted.current) {
-            setUser(null);
-            setIsAdmin(false);
-            setLoading(false);
+      if (mounted.current) {
+        if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
+          fetchProfile(session.user);
+        } else if (event === 'SIGNED_OUT') {
+          setUser(null);
+          setIsAdmin(false);
+          setLoading(false);
         }
-      } else if (event === 'PASSWORD_RECOVERY') {
-        // Sự kiện này kích hoạt khi user click vào link reset password từ email
-        console.log("Đang trong chế độ khôi phục mật khẩu");
       }
     });
 
@@ -98,6 +109,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       listener.subscription.unsubscribe();
     };
   }, []);
+
+  // --- CÁC HÀM TIỆN ÍCH ---
 
   const signIn = async (email: string, password: string) => {
     return await supabase.auth.signInWithPassword({ email, password });
@@ -113,40 +126,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     if (error) return { error };
 
     if (data.user) {
-        await supabase.from('profiles').insert({
-            id: data.user.id,
-            name: name,
-            student_id: studentId,
-            email: email,
-            avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`,
-            role: 'user',
-            is_verified: false
-        });
+      // Tạo profile mặc định trong Database
+      await supabase.from('profiles').insert({
+        id: data.user.id,
+        name: name,
+        student_id: studentId,
+        email: email,
+        avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`,
+        role: 'user',
+        is_verified: false,
+        banned: false // Mặc định không bị khóa
+      });
     }
     return { error: null };
   };
 
   const signOut = async () => {
     await supabase.auth.signOut();
-    setUser(null);
-    setIsAdmin(false);
-    setLoading(false);
   };
 
-  // --- HÀM 1: GỬI EMAIL KHÔI PHỤC ---
   const resetPassword = async (email: string) => {
-    // Lưu ý: URL này phải trùng với URL bạn cài đặt trong Supabase Dashboard
     const resetUrl = `${window.location.origin}/#/reset-password`;
-    return await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: resetUrl,
-    });
+    return await supabase.auth.resetPasswordForEmail(email, { redirectTo: resetUrl });
   };
 
-  // --- HÀM 2: CẬP NHẬT MẬT KHẨU MỚI ---
   const updatePassword = async (newPassword: string) => {
-    return await supabase.auth.updateUser({
-      password: newPassword
-    });
+    return await supabase.auth.updateUser({ password: newPassword });
   };
 
   return (
@@ -155,7 +160,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         <div className="h-screen flex items-center justify-center bg-gray-50">
           <div className="flex flex-col items-center">
              <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mb-4"></div>
-             <p className="text-gray-500 text-sm">Đang tải dữ liệu...</p>
+             <p className="text-gray-500 font-bold animate-pulse">Đang xác thực hệ thống...</p>
           </div>
         </div>
       )}

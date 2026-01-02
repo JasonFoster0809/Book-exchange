@@ -4,7 +4,8 @@ import { supabase } from '../services/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { 
   Package, Heart, TrendingUp, Eye, Trash2, 
-  CheckCircle2, XCircle, ChevronRight, ShoppingBag, LayoutDashboard
+  CheckCircle2, XCircle, ChevronRight, ShoppingBag, LayoutDashboard,
+  Edit3 // Import thêm icon Edit
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Product, ProductStatus } from '../types';
@@ -19,7 +20,6 @@ const MyItemsPage: React.FC = () => {
   const [savedItems, setSavedItems] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // Stats
   const [stats, setStats] = useState({
     totalViews: 0,
     totalProducts: 0,
@@ -39,7 +39,6 @@ const MyItemsPage: React.FC = () => {
     try {
       if (!user) return;
 
-      // 1. Lấy tin mình đăng
       const { data: myProducts, error: err1 } = await supabase
         .from('products')
         .select('*')
@@ -48,7 +47,6 @@ const MyItemsPage: React.FC = () => {
 
       if (err1) throw err1;
 
-      // 2. Lấy tin đã lưu
       const { data: savedData, error: err2 } = await supabase
         .from('saved_products')
         .select('product:products(*)')
@@ -56,7 +54,6 @@ const MyItemsPage: React.FC = () => {
 
       if (err2) throw err2;
 
-      // Map dữ liệu
       const myItemsMap = (myProducts || []).map((p: any) => ({
         ...p, sellerId: p.seller_id, postedAt: p.posted_at, tradeMethod: p.trade_method
       }));
@@ -72,7 +69,6 @@ const MyItemsPage: React.FC = () => {
       setSellingItems(myItemsMap);
       setSavedItems(savedItemsMap);
 
-      // Tính Stats
       const totalViews = myItemsMap.reduce((acc: number, cur: any) => acc + (cur.view_count || 0), 0);
       const soldCount = myItemsMap.filter((p: any) => p.status === ProductStatus.SOLD).length;
 
@@ -84,7 +80,6 @@ const MyItemsPage: React.FC = () => {
 
     } catch (error) {
       console.error(error);
-      // addToast("Lỗi tải dữ liệu", "error");
     } finally {
       setLoading(false);
     }
@@ -111,7 +106,7 @@ const MyItemsPage: React.FC = () => {
 
   const handleStatusToggle = async (product: Product) => {
       const newStatus = product.status === ProductStatus.SOLD ? 'available' : 'sold';
-      // @ts-ignore - Supabase status type mapping workaround
+      // @ts-ignore
       const { error } = await supabase.from('products').update({ status: newStatus }).eq('id', product.id);
       
       if (!error) {
@@ -126,7 +121,6 @@ const MyItemsPage: React.FC = () => {
     <div className="min-h-screen bg-[#F8FAFC] pb-20 pt-6">
       <div className="max-w-5xl mx-auto px-4">
         
-        {/* HEADER & STATS */}
         <div className="mb-10">
             <h1 className="text-3xl font-black text-[#034EA2] mb-6 flex items-center">
                 <LayoutDashboard className="w-8 h-8 mr-3"/> Góc Của Tôi
@@ -157,7 +151,6 @@ const MyItemsPage: React.FC = () => {
             </div>
         </div>
 
-        {/* TABS */}
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 overflow-hidden min-h-[500px]">
             <div className="flex border-b border-gray-100">
                 <button 
@@ -174,7 +167,6 @@ const MyItemsPage: React.FC = () => {
                 </button>
             </div>
 
-            {/* LIST CONTENT */}
             <div className="p-6">
                 {(activeTab === 'selling' ? sellingItems : savedItems).length === 0 ? (
                     <div className="text-center py-20">
@@ -190,7 +182,6 @@ const MyItemsPage: React.FC = () => {
                     <div className="space-y-4">
                         {(activeTab === 'selling' ? sellingItems : savedItems).map((item) => (
                             <div key={item.id} className="flex flex-col md:flex-row gap-4 bg-white border border-gray-100 p-4 rounded-xl hover:shadow-md transition-shadow group">
-                                {/* Ảnh */}
                                 <Link to={`/product/${item.id}`} className="w-full md:w-32 h-32 flex-shrink-0 bg-gray-100 rounded-lg overflow-hidden relative">
                                     <img src={item.images?.[0] || 'https://via.placeholder.com/150'} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/>
                                     {item.status === ProductStatus.SOLD && (
@@ -200,7 +191,6 @@ const MyItemsPage: React.FC = () => {
                                     )}
                                 </Link>
 
-                                {/* Thông tin */}
                                 <div className="flex-1 flex flex-col justify-between">
                                     <div>
                                         <div className="flex justify-between items-start">
@@ -215,18 +205,27 @@ const MyItemsPage: React.FC = () => {
                                         </div>
                                     </div>
 
-                                    {/* Actions */}
-                                    <div className="mt-4 pt-4 border-t border-gray-50 flex justify-end gap-3">
+                                    {/* Actions Section */}
+                                    <div className="mt-4 pt-4 border-t border-gray-50 flex justify-end items-center gap-2">
                                         {activeTab === 'selling' ? (
                                             <>
+                                                {/* NÚT CHỈNH SỬA - MỚI THÊM */}
+                                                <button 
+                                                    onClick={() => navigate(`/edit-item/${item.id}`)}
+                                                    className="text-xs font-bold px-3 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center transition-colors"
+                                                >
+                                                    <Edit3 className="w-3.5 h-3.5 mr-1"/> Sửa tin
+                                                </button>
+
                                                 <button 
                                                     onClick={() => handleStatusToggle(item)}
                                                     className={`text-xs font-bold px-3 py-2 rounded-lg flex items-center transition ${item.status === ProductStatus.SOLD ? 'bg-green-50 text-green-600 hover:bg-green-100' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
                                                 >
-                                                    {item.status === ProductStatus.SOLD ? <><CheckCircle2 className="w-3 h-3 mr-1"/> Đăng bán lại</> : <><XCircle className="w-3 h-3 mr-1"/> Đánh dấu đã bán</>}
+                                                    {item.status === ProductStatus.SOLD ? <><CheckCircle2 className="w-3 h-3 mr-1"/> Đăng bán lại</> : <><XCircle className="w-3 h-3 mr-1"/> Đã bán</>}
                                                 </button>
-                                                <button onClick={() => handleDelete(item.id, false)} className="text-xs font-bold px-3 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 flex items-center">
-                                                    <Trash2 className="w-3 h-3 mr-1"/> Xóa
+                                                
+                                                <button onClick={() => handleDelete(item.id, false)} className="p-2 text-gray-400 hover:text-red-500 transition-colors" title="Xóa tin">
+                                                    <Trash2 className="w-4 h-4"/>
                                                 </button>
                                             </>
                                         ) : (
@@ -234,8 +233,11 @@ const MyItemsPage: React.FC = () => {
                                                 <Heart className="w-3 h-3 mr-1 fill-current"/> Bỏ lưu
                                             </button>
                                         )}
+                                        
+                                        <div className="w-[1px] h-4 bg-gray-200 mx-1"></div>
+                                        
                                         <Link to={`/product/${item.id}`} className="text-xs font-bold px-4 py-2 rounded-lg bg-[#034EA2] text-white hover:bg-[#003875] flex items-center">
-                                            Chi tiết <ChevronRight className="w-3 h-3 ml-1"/>
+                                            Xem <ChevronRight className="w-3 h-3 ml-1"/>
                                         </Link>
                                     </div>
                                 </div>
