@@ -17,7 +17,7 @@ import { playNotificationSound } from '../utils/audio';
 
 // --- TRENDING & HELPER ---
 const TRENDING_KEYWORDS = [
-  "Giải tích 1", "Casio 580VN X", "Áo Bách Khoa", "Giáo trình Triết", 
+  "Giải tích 1", "Casio 580", "Áo Bách Khoa", "Giáo trình Triết", 
   "Bàn học", "Quạt máy", "Tai nghe", "Laptop cũ"
 ];
 
@@ -39,7 +39,7 @@ const HeroBanner = () => {
     {
       id: 1,
       title: "Mùa Thi Sắp Đến!",
-      desc: "Săn ngay tài liệu, phao thi giá rẻ.",
+      desc: "Săn ngay tài liệu, giáo trình giá rẻ.",
       bg: "bg-gradient-to-r from-[#034EA2] to-[#0073e6]",
       icon: <GraduationCap className="w-32 h-32 text-white/20 absolute -bottom-4 -right-4 rotate-12" />
     },
@@ -113,14 +113,20 @@ const MarketplacePage: React.FC = () => {
   const [showScrollTop, setShowScrollTop] = useState(false);
   const [isListening, setIsListening] = useState(false);
 
+  // --- FIX 1: Định nghĩa scrollToTop để hết lỗi ReferenceError ---
+  const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
+
   useEffect(() => {
     const handleScroll = () => setShowScrollTop(window.scrollY > 300);
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
+  // Xử lý Debounce cho việc gõ phím
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), 500);
+    const timer = setTimeout(() => {
+        setDebouncedSearchTerm(searchTerm.trim());
+    }, 500);
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
@@ -140,7 +146,10 @@ const MarketplacePage: React.FC = () => {
         if (priceRange.max) query = query.lte('price', Number(priceRange.max));
       }
 
-      if (debouncedSearchTerm) query = query.or(`title.ilike.%${debouncedSearchTerm}%,description.ilike.%${debouncedSearchTerm}%`);
+      // --- FIX 2: Cải tiến logic tìm kiếm ---
+      if (debouncedSearchTerm) {
+        query = query.or(`title.ilike.%${debouncedSearchTerm}%,description.ilike.%${debouncedSearchTerm}%`);
+      }
 
       if (sortBy === 'newest') query = query.order('posted_at', { ascending: false });
       if (sortBy === 'price_asc') query = query.order('price', { ascending: true });
@@ -151,27 +160,23 @@ const MarketplacePage: React.FC = () => {
       
       setTotalResult(count || 0);
       
-      let likedProductIds = new Set<string>();
-      if (user) {
-        const { data: savedData } = await supabase.from('saved_products').select('product_id').eq('user_id', user.id);
-        if (savedData) savedData.forEach(item => likedProductIds.add(item.product_id));
-      }
-
       setProducts((data || []).map((item: any) => ({
         ...item, sellerId: item.seller_id, tradeMethod: item.trade_method, postedAt: item.posted_at, 
-        status: item.status || ProductStatus.AVAILABLE, isLiked: likedProductIds.has(item.id), 
-        view_count: item.view_count || 0, seller: item.profiles 
+        status: item.status || ProductStatus.AVAILABLE, seller: item.profiles 
       })));
     } catch (err) {
-      addToast("Lỗi tải danh sách sản phẩm", "error");
+      console.error(err);
+      addToast("Lỗi tải sản phẩm", "error");
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearchTerm, selectedCategory, activeTab, hideSold, onlyFree, priceRange, filterCondition, sortBy, user, addToast]);
+  }, [debouncedSearchTerm, selectedCategory, activeTab, hideSold, onlyFree, priceRange, filterCondition, sortBy, addToast]);
 
-  useEffect(() => { fetchProducts(); }, [fetchProducts]);
+  useEffect(() => { 
+    fetchProducts(); 
+  }, [fetchProducts]);
 
-  // --- FIXED VOICE SEARCH LOGIC ---
+  // --- FIX 3: Sửa tìm kiếm giọng nói ---
   const handleVoiceSearch = () => {
     const windowObj = window as any;
     const SpeechRecognition = windowObj.SpeechRecognition || windowObj.webkitSpeechRecognition;
@@ -191,7 +196,7 @@ const MarketplacePage: React.FC = () => {
     };
 
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript.replace(/[.?!]/g, '');
+      const transcript = event.results[0][0].transcript.replace(/[.?!]/g, '').trim();
       setSearchTerm(transcript);
       setDebouncedSearchTerm(transcript); // Cập nhật ngay để tìm kiếm luôn
       setIsListening(false);
@@ -203,18 +208,12 @@ const MarketplacePage: React.FC = () => {
       setIsListening(false);
       if (event.error === 'not-allowed') {
         addToast("Vui lòng cấp quyền Micro!", "error");
-      } else {
-        addToast("Không nghe rõ, vui lòng thử lại.", "warning");
       }
     };
 
     recognition.onend = () => setIsListening(false);
 
-    try {
-      recognition.start();
-    } catch (e) {
-      console.error(e);
-    }
+    try { recognition.start(); } catch (e) { console.error(e); }
   };
 
   const handleAiSearch = async (e: React.FormEvent) => {
@@ -234,6 +233,7 @@ const MarketplacePage: React.FC = () => {
 
   const handleTrendingClick = (keyword: string) => {
     setSearchTerm(keyword);
+    setDebouncedSearchTerm(keyword); // Kích hoạt fetch ngay lập tức
     playNotificationSound();
   };
 
@@ -283,10 +283,8 @@ const MarketplacePage: React.FC = () => {
   return (
     <div className="min-h-screen relative pb-20 pt-6 bg-[#F8FAFC]">
       <div className="max-w-7xl mx-auto px-4 py-6">
-          {/* BANNER NỔI BẬT */}
           <HeroBanner />
 
-          {/* THANH TÌM KIẾM CẢI TIẾN */}
           <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-6">
             <div className="space-y-1">
               <h1 className="text-3xl md:text-4xl font-black text-[#034EA2] tracking-tight flex items-center">
@@ -325,7 +323,6 @@ const MarketplacePage: React.FC = () => {
             </form>
           </div>
 
-          {/* HOT KEYWORDS */}
           <div className="flex flex-wrap items-center gap-2 mb-8">
             <span className="flex items-center text-xs font-bold text-gray-400 uppercase tracking-wider mr-2"><TrendingUp className="w-3 h-3 mr-1"/> Hot Search:</span>
             {TRENDING_KEYWORDS.map(keyword => (
@@ -336,7 +333,6 @@ const MarketplacePage: React.FC = () => {
           </div>
 
           <div className="flex flex-col lg:flex-row gap-10 items-start">
-            {/* FILTER SIDEBAR (DESKTOP) */}
             <div className="hidden lg:block w-72 flex-shrink-0 sticky top-24">
               <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100">
                 <div className="mb-6">
@@ -354,7 +350,6 @@ const MarketplacePage: React.FC = () => {
               </div>
             </div>
 
-            {/* PRODUCT GRID */}
             <div className="flex-1 w-full">
               <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
@@ -379,9 +374,10 @@ const MarketplacePage: React.FC = () => {
                   {[1, 2, 3, 4, 5, 6].map(n => <ProductSkeleton key={n} />)}
                 </div>
               ) : products.length === 0 ? (
-                <div className="text-center py-24 bg-white rounded-[2rem] border-2 border-dashed border-gray-100 shadow-sm">
+                <div className="text-center py-24 bg-white rounded-[2rem] border-2 border-dashed border-blue-100 shadow-sm">
                   <Search className="w-16 h-16 text-gray-200 mx-auto mb-4" />
                   <h3 className="text-xl font-bold text-gray-400">Không tìm thấy món nào khớp với yêu cầu</h3>
+                  <button onClick={() => {setSearchTerm(''); setDebouncedSearchTerm(''); setSelectedCategory('All'); setPriceRange({min:'',max:''}); setFilterCondition('All');}} className="mt-4 text-[#034EA2] font-bold hover:underline">Xóa tất cả bộ lọc</button>
                 </div>
               ) : (
                 <div className={viewMode === 'grid' ? "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6" : "flex flex-col gap-4"}>
@@ -394,21 +390,14 @@ const MarketplacePage: React.FC = () => {
           </div>
       </div>
 
-      {/* MOBILE FILTERS MODAL & HUNT MODAL & SCROLL TOP (Giữ nguyên logic JSX cũ của bạn bên dưới...) */}
-      {showMobileFilters && (
-        <div className="fixed inset-0 z-[100] lg:hidden animate-fadeIn">
-          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowMobileFilters(false)}></div>
-          <div className="absolute right-0 top-0 bottom-0 w-80 bg-white p-6 overflow-y-auto shadow-2xl">
-            <div className="flex justify-between items-center mb-8">
-              <h2 className="text-xl font-black text-[#034EA2]">Bộ lọc</h2>
-              <button onClick={() => setShowMobileFilters(false)} className="p-2 bg-gray-50 rounded-full"><X className="w-5 h-5"/></button>
-            </div>
-            <FilterPanel />
-            <button onClick={() => setShowMobileFilters(false)} className="w-full mt-8 bg-[#034EA2] text-white py-4 rounded-xl font-bold shadow-lg">Áp dụng</button>
-          </div>
-        </div>
-      )}
+      <button 
+        onClick={scrollToTop}
+        className={`fixed bottom-24 right-6 p-4 bg-[#034EA2] text-white rounded-full shadow-xl z-40 transition-all duration-300 ${showScrollTop ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0'}`}
+      >
+        <ChevronUp size={24} />
+      </button>
 
+      {/* HUNT MODAL */}
       {showHuntModal && (
         <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
           <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 relative overflow-hidden border border-blue-100">
@@ -416,7 +405,7 @@ const MarketplacePage: React.FC = () => {
             <div className="text-center mb-6">
               <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4"><BellPlus size={32} className="text-[#034EA2]" /></div>
               <h3 className="text-2xl font-black text-[#034EA2]">Đăng ký săn tin BK</h3>
-              <p className="text-gray-500 text-sm mt-2">Tụi mình sẽ báo ngay khi có món đồ bạn cần xuất hiện!</p>
+              <p className="text-gray-500 text-sm mt-2">Báo ngay khi có món đồ bạn cần xuất hiện!</p>
             </div>
             <form onSubmit={(e) => { e.preventDefault(); playNotificationSound(); addToast("Đã bật chế độ săn tin!", "success"); setShowHuntModal(false); }}>
               <input type="text" required className="block w-full border border-gray-100 bg-gray-50 rounded-xl p-4 focus:ring-4 focus:ring-blue-100 outline-none font-bold mb-6" placeholder="Tên món đồ (VD: Casio 580)" />
@@ -425,13 +414,6 @@ const MarketplacePage: React.FC = () => {
           </div>
         </div>
       )}
-
-      <button 
-        onClick={scrollToTop}
-        className={`fixed bottom-24 right-6 p-4 bg-[#034EA2] text-white rounded-full shadow-xl z-40 transition-all duration-300 ${showScrollTop ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0'}`}
-      >
-        <ChevronUp size={24} />
-      </button>
     </div>
   );
 };

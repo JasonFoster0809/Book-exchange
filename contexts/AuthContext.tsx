@@ -9,6 +9,9 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string, name: string, studentId: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
+  // --- THÊM 2 HÀM MỚI ---
+  resetPassword: (email: string) => Promise<{ error: any }>;
+  updatePassword: (newPassword: string) => Promise<{ error: any }>;
 }
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
@@ -47,7 +50,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             setIsAdmin(profile.role === 'admin');
           }
         } else {
-            console.warn("Chưa tìm thấy profile, dùng thông tin meta tạm thời");
             if(mounted.current) {
                 setUser({
                     id: sessionUser.id,
@@ -77,19 +79,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_IN' && session?.user) {
-        setUser((prev) => {
-            if (!prev || prev.id !== session.user.id) {
-                setLoading(true);
-                fetchProfile(session.user);
-            }
-            return prev;
-        });
+        setLoading(true);
+        fetchProfile(session.user);
       } else if (event === 'SIGNED_OUT') {
         if(mounted.current) {
             setUser(null);
             setIsAdmin(false);
             setLoading(false);
         }
+      } else if (event === 'PASSWORD_RECOVERY') {
+        // Sự kiện này kích hoạt khi user click vào link reset password từ email
+        console.log("Đang trong chế độ khôi phục mật khẩu");
       }
     });
 
@@ -100,29 +100,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
-    return { error };
+    return await supabase.auth.signInWithPassword({ email, password });
   };
 
-  // --- HÀM SIGN UP ĐÃ ĐƯỢC SỬA ---
   const signUp = async (email: string, password: string, name: string, studentId: string) => {
-    // 1. Tạo tài khoản Auth
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: {
-        data: { name, student_id: studentId },
-      },
+      options: { data: { name, student_id: studentId } },
     });
 
     if (error) return { error };
 
-    // 2. Tự động chèn thông tin vào bảng profiles
     if (data.user) {
-        const { error: profileError } = await supabase.from('profiles').insert({
+        await supabase.from('profiles').insert({
             id: data.user.id,
             name: name,
             student_id: studentId,
@@ -131,12 +122,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
             role: 'user',
             is_verified: false
         });
-
-        if (profileError) {
-            console.error("Lỗi tạo profile DB:", profileError);
-        }
     }
-
     return { error: null };
   };
 
@@ -147,8 +133,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     setLoading(false);
   };
 
+  // --- HÀM 1: GỬI EMAIL KHÔI PHỤC ---
+  const resetPassword = async (email: string) => {
+    // Lưu ý: URL này phải trùng với URL bạn cài đặt trong Supabase Dashboard
+    const resetUrl = `${window.location.origin}/#/reset-password`;
+    return await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: resetUrl,
+    });
+  };
+
+  // --- HÀM 2: CẬP NHẬT MẬT KHẨU MỚI ---
+  const updatePassword = async (newPassword: string) => {
+    return await supabase.auth.updateUser({
+      password: newPassword
+    });
+  };
+
   return (
-    <AuthContext.Provider value={{ user, loading, isAdmin, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={{ user, loading, isAdmin, signIn, signUp, signOut, resetPassword, updatePassword }}>
       {!loading ? children : (
         <div className="h-screen flex items-center justify-center bg-gray-50">
           <div className="flex flex-col items-center">

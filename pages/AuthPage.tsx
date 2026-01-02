@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
-import { BookOpen, Mail, Lock, User, ArrowRight, Loader } from 'lucide-react';
+import { BookOpen, Mail, Lock, User, ArrowRight, Loader, ChevronLeft } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 
 const AuthPage: React.FC = () => {
   const [isLogin, setIsLogin] = useState(true);
+  const [isForgotPassword, setIsForgotPassword] = useState(false); // Trạng thái quên mật khẩu
   const [loading, setLoading] = useState(false);
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, resetPassword } = useAuth(); // Lấy thêm hàm resetPassword
   const { addToast } = useToast();
   const navigate = useNavigate();
 
@@ -15,14 +16,11 @@ const AuthPage: React.FC = () => {
     email: '',
     password: '',
     name: '',
-    // studentId đã bị xóa khỏi đây, sẽ hỏi sau
   });
 
+  // Xử lý Đăng nhập / Đăng ký
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    
-    // --- ĐÃ BỎ VALIDATE DUÔI EMAIL ---
-    
     if (formData.password.length < 6) {
         addToast("Mật khẩu phải có ít nhất 6 ký tự.", "warning");
         return;
@@ -40,19 +38,37 @@ const AuthPage: React.FC = () => {
             setLoading(false);
             return;
         }
-        // Lưu ý: Hàm signUp cần sửa lại trong AuthContext để cho phép studentId là null hoặc string rỗng
-        // Hoặc bạn truyền tạm string rỗng vào đây
         const { error } = await signUp(formData.email, formData.password, formData.name, ""); 
         if (error) throw error;
         addToast("Đăng ký thành công! Hãy kiểm tra email để xác thực.", "success");
       }
       navigate('/');
     } catch (error: any) {
-      console.error(error);
       let msg = error.message;
       if (msg.includes("Invalid login credentials")) msg = "Sai email hoặc mật khẩu.";
       if (msg.includes("User already registered")) msg = "Email này đã được đăng ký.";
       addToast(msg, "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Xử lý Gửi email khôi phục mật khẩu
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.email) {
+      addToast("Vui lòng nhập email của bạn.", "warning");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await resetPassword(formData.email);
+      if (error) throw error;
+      addToast("Link khôi phục mật khẩu đã được gửi vào Email của bạn!", "success");
+      setIsForgotPassword(false); // Quay lại màn hình đăng nhập
+    } catch (error: any) {
+      addToast(error.message, "error");
     } finally {
       setLoading(false);
     }
@@ -65,53 +81,80 @@ const AuthPage: React.FC = () => {
              <BookOpen className="h-10 w-10 text-white" />
         </div>
         <h2 className="text-3xl font-extrabold text-gray-900">
-          {isLogin ? 'Chào mừng trở lại' : 'Gia nhập UniMarket'}
+          {isForgotPassword ? 'Khôi phục mật khẩu' : isLogin ? 'Chào mừng trở lại' : 'Gia nhập UniMarket'}
         </h2>
         <p className="mt-2 text-sm text-gray-600">
-          Cộng đồng trao đổi giáo trình & đồ dùng sinh viên
+          {isForgotPassword ? 'Nhập email để nhận link đặt lại mật khẩu' : 'Cộng đồng trao đổi giáo trình & đồ dùng sinh viên'}
         </p>
       </div>
 
       <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
         <div className="bg-white py-8 px-4 shadow-xl shadow-gray-100 sm:rounded-xl sm:px-10 border border-gray-100">
-          <form className="space-y-5" onSubmit={handleSubmit}>
-            {!isLogin && (
+          
+          {/* MÀN HÌNH QUÊN MẬT KHẨU */}
+          {isForgotPassword ? (
+            <form className="space-y-5" onSubmit={handleResetPassword}>
               <div>
-                <label className="block text-sm font-medium text-gray-700">Họ và tên</label>
+                <label className="block text-sm font-medium text-gray-700">Email đã đăng ký</label>
                 <div className="mt-1 relative rounded-md shadow-sm">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><User className="h-5 w-5 text-gray-400" /></div>
-                  <input type="text" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="Nguyễn Văn A" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Mail className="h-5 w-5 text-gray-400" /></div>
+                  <input type="email" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2.5" placeholder="example@gmail.com" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} />
                 </div>
               </div>
-              // --- ĐÃ XÓA Ô NHẬP MSSV TẠI ĐÂY ---
-            )}
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Email</label>
-              <div className="mt-1 relative rounded-md shadow-sm">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Mail className="h-5 w-5 text-gray-400" /></div>
-                <input type="email" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="example@gmail.com" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700">Mật khẩu</label>
-              <div className="mt-1 relative rounded-md shadow-sm">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock className="h-5 w-5 text-gray-400" /></div>
-                <input type="password" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="••••••••" value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} />
-              </div>
-            </div>
-
-            <div>
-              <button 
-                type="submit" 
-                disabled={loading}
-                className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
-              >
-                {loading ? <Loader className="animate-spin h-5 w-5" /> : (isLogin ? 'Đăng Nhập' : 'Đăng Ký')}
+              <button type="submit" disabled={loading} className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition-all">
+                {loading ? <Loader className="animate-spin h-5 w-5" /> : 'Gửi link khôi phục'}
               </button>
-            </div>
-          </form>
+              <button type="button" onClick={() => setIsForgotPassword(false)} className="w-full flex justify-center items-center text-sm text-gray-500 hover:text-indigo-600 transition-colors">
+                <ChevronLeft size={16} /> Quay lại đăng nhập
+              </button>
+            </form>
+          ) : (
+            /* MÀN HÌNH ĐĂNG NHẬP / ĐĂNG KÝ */
+            <form className="space-y-5" onSubmit={handleSubmit}>
+              {!isLogin && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700">Họ và tên</label>
+                  <div className="mt-1 relative rounded-md shadow-sm">
+                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><User className="h-5 w-5 text-gray-400" /></div>
+                    <input type="text" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="Nguyễn Văn A" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
+                  </div>
+                </div>
+              )}
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Email</label>
+                <div className="mt-1 relative rounded-md shadow-sm">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Mail className="h-5 w-5 text-gray-400" /></div>
+                  <input type="email" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="example@gmail.com" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} />
+                </div>
+              </div>
+
+              <div>
+                <div className="flex justify-between">
+                  <label className="block text-sm font-medium text-gray-700">Mật khẩu</label>
+                  {isLogin && (
+                    <button type="button" onClick={() => setIsForgotPassword(true)} className="text-xs font-semibold text-indigo-600 hover:text-indigo-500">
+                      Quên mật khẩu?
+                    </button>
+                  )}
+                </div>
+                <div className="mt-1 relative rounded-md shadow-sm">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock className="h-5 w-5 text-gray-400" /></div>
+                  <input type="password" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="••••••••" value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} />
+                </div>
+              </div>
+
+              <div>
+                <button 
+                  type="submit" 
+                  disabled={loading}
+                  className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+                >
+                  {loading ? <Loader className="animate-spin h-5 w-5" /> : (isLogin ? 'Đăng Nhập' : 'Đăng Ký')}
+                </button>
+              </div>
+            </form>
+          )}
 
           <div className="mt-6">
             <div className="relative">
@@ -122,8 +165,9 @@ const AuthPage: React.FC = () => {
             <div className="mt-6 grid grid-cols-1 gap-3">
               <button 
                 onClick={() => {
-                    setFormData({ email: '', password: '', name: '' }); // Reset form
+                    setFormData({ email: '', password: '', name: '' });
                     setIsLogin(!isLogin);
+                    setIsForgotPassword(false);
                 }}
                 className="w-full flex justify-center items-center py-2.5 px-4 border border-gray-300 rounded-lg shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all group"
               >
