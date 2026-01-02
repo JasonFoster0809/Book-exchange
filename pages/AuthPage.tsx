@@ -2,31 +2,27 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { BookOpen, Mail, Lock, User, ArrowRight, Loader } from 'lucide-react';
-// Import Toast
 import { useToast } from '../contexts/ToastContext';
 
 const AuthPage: React.FC = () => {
   const [isLogin, setIsLogin] = useState(true);
   const [loading, setLoading] = useState(false);
   const { signIn, signUp } = useAuth();
-  const { addToast } = useToast(); // Hook thông báo
+  const { addToast } = useToast();
   const navigate = useNavigate();
 
   const [formData, setFormData] = useState({
     email: '',
     password: '',
     name: '',
-    studentId: ''
+    // studentId đã bị xóa khỏi đây, sẽ hỏi sau
   });
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Validate cơ bản
-    if (!formData.email.endsWith('@hcmut.edu.vn') && !formData.email.endsWith('@vnu.edu.vn')) {
-        addToast("Vui lòng sử dụng email sinh viên (@hcmut.edu.vn hoặc @vnu.edu.vn) để tham gia.", "warning");
-        return;
-    }
+    // --- ĐÃ BỎ VALIDATE DUÔI EMAIL ---
+    
     if (formData.password.length < 6) {
         addToast("Mật khẩu phải có ít nhất 6 ký tự.", "warning");
         return;
@@ -39,23 +35,23 @@ const AuthPage: React.FC = () => {
         if (error) throw error;
         addToast("Chào mừng bạn quay trở lại! 🎉", "success");
       } else {
-        if (!formData.name || !formData.studentId) {
-            addToast("Vui lòng điền Tên và MSSV.", "warning");
+        if (!formData.name) {
+            addToast("Vui lòng điền Họ và tên.", "warning");
             setLoading(false);
             return;
         }
-        const { error } = await signUp(formData.email, formData.password, formData.name, formData.studentId);
+        // Lưu ý: Hàm signUp cần sửa lại trong AuthContext để cho phép studentId là null hoặc string rỗng
+        // Hoặc bạn truyền tạm string rỗng vào đây
+        const { error } = await signUp(formData.email, formData.password, formData.name, ""); 
         if (error) throw error;
         addToast("Đăng ký thành công! Hãy kiểm tra email để xác thực.", "success");
       }
       navigate('/');
     } catch (error: any) {
       console.error(error);
-      // Xử lý lỗi cụ thể để thông báo thân thiện hơn
       let msg = error.message;
       if (msg.includes("Invalid login credentials")) msg = "Sai email hoặc mật khẩu.";
       if (msg.includes("User already registered")) msg = "Email này đã được đăng ký.";
-      
       addToast(msg, "error");
     } finally {
       setLoading(false);
@@ -80,29 +76,21 @@ const AuthPage: React.FC = () => {
         <div className="bg-white py-8 px-4 shadow-xl shadow-gray-100 sm:rounded-xl sm:px-10 border border-gray-100">
           <form className="space-y-5" onSubmit={handleSubmit}>
             {!isLogin && (
-              <>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Họ và tên</label>
-                  <div className="mt-1 relative rounded-md shadow-sm">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><User className="h-5 w-5 text-gray-400" /></div>
-                    <input type="text" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="Nguyễn Văn A" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
-                  </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700">Họ và tên</label>
+                <div className="mt-1 relative rounded-md shadow-sm">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><User className="h-5 w-5 text-gray-400" /></div>
+                  <input type="text" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="Nguyễn Văn A" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
                 </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">MSSV</label>
-                  <div className="mt-1 relative rounded-md shadow-sm">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><span className="text-gray-400 font-bold text-xs">ID</span></div>
-                    <input type="text" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="201xxxx" value={formData.studentId} onChange={(e) => setFormData({...formData, studentId: e.target.value})} />
-                  </div>
-                </div>
-              </>
+              </div>
+              // --- ĐÃ XÓA Ô NHẬP MSSV TẠI ĐÂY ---
             )}
 
             <div>
-              <label className="block text-sm font-medium text-gray-700">Email sinh viên</label>
+              <label className="block text-sm font-medium text-gray-700">Email</label>
               <div className="mt-1 relative rounded-md shadow-sm">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Mail className="h-5 w-5 text-gray-400" /></div>
-                <input type="email" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="ten.ho@hcmut.edu.vn" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} />
+                <input type="email" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="example@gmail.com" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} />
               </div>
             </div>
 
@@ -134,7 +122,7 @@ const AuthPage: React.FC = () => {
             <div className="mt-6 grid grid-cols-1 gap-3">
               <button 
                 onClick={() => {
-                    setFormData({ email: '', password: '', name: '', studentId: '' });
+                    setFormData({ email: '', password: '', name: '' }); // Reset form
                     setIsLogin(!isLogin);
                 }}
                 className="w-full flex justify-center items-center py-2.5 px-4 border border-gray-300 rounded-lg shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all group"

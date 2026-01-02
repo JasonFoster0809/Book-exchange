@@ -1,23 +1,24 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
-import { useSearchParams, Link } from 'react-router-dom';
-import { Send, Image as ImageIcon, MoreVertical, MapPin, Clock, Calendar, CheckCircle, MessageCircle } from 'lucide-react'; 
-// 1. IMPORT HÀM PHÁT ÂM THANH
+import { useSearchParams, Link, useNavigate } from 'react-router-dom';
+import { useToast } from '../contexts/ToastContext';
+import { 
+  Send, Image as ImageIcon, MoreVertical, MapPin, 
+  Calendar, CheckCircle, MessageCircle, Phone, ArrowLeft, X, Loader 
+} from 'lucide-react'; 
 import { playMessageSound } from '../utils/audio';
 
-// Danh sách địa điểm an toàn
-const SAFE_LOCATIONS = [
-    "Thư viện Trung tâm",
-    "Canteen B1",
-    "Sảnh tòa nhà A",
-    "Cổng chính (Cổng 1)",
-    "Nhà xe sinh viên",
-    "Ghế đá hồ nước"
+// Danh sách địa điểm gợi ý (Vẫn giữ để tiện chọn nhanh)
+const SUGGESTED_LOCATIONS = [
+    "Thư viện Trung tâm", "Canteen B1", "Sảnh tòa nhà A", 
+    "Cổng chính (Lý Thường Kiệt)", "Nhà xe sinh viên", "Ghế đá hồ nước"
 ];
 
 const ChatPage: React.FC = () => {
   const { user } = useAuth();
+  const { addToast } = useToast();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const partnerId = searchParams.get('partnerId');
   
@@ -27,78 +28,51 @@ const ChatPage: React.FC = () => {
   const [newMessage, setNewMessage] = useState('');
   const [partnerProfile, setPartnerProfile] = useState<any>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // State cho Modal Hẹn gặp
-  const [showMeetupModal, setShowMeetupModal] = useState(false);
-  const [meetupLocation, setMeetupLocation] = useState(SAFE_LOCATIONS[0]);
-  const [meetupTime, setMeetupTime] = useState('');
+  // State mới: Upload & Location
+  const [uploadingImg, setUploadingImg] = useState(false);
+  const [showLocationModal, setShowLocationModal] = useState(false);
+  const [customLocation, setCustomLocation] = useState('');
+
+  // --- 1. LOGIC KHỞI TẠO & REALTIME ---
+  useEffect(() => { if(user) fetchConversations(); }, [user]);
 
   useEffect(() => {
-     if(user) fetchConversations();
-  }, [user]);
-
-  // Logic kiểm tra khi có partnerId từ URL
-  useEffect(() => {
-     if (partnerId && user) {
-         checkAndCreateConversation(partnerId);
-     }
+      if (partnerId && user) checkAndCreateConversation(partnerId);
   }, [partnerId, user, conversations.length]);
 
-  // --- LOGIC REALTIME NHẬN TIN NHẮN & ÂM THANH ---
   useEffect(() => {
     if (activeConversation) {
         fetchMessages(activeConversation);
-        
         const channel = supabase.channel(`chat:${activeConversation}`)
             .on('postgres_changes', { 
-                event: 'INSERT', 
-                schema: 'public', 
-                table: 'messages', 
+                event: 'INSERT', schema: 'public', table: 'messages', 
                 filter: `conversation_id=eq.${activeConversation}` 
-            }, 
-            (payload) => {
-                const newMsg = payload.new;
-                setMessages(prev => [...prev, newMsg]);
-
-                // 2. KÍCH HOẠT ÂM THANH
-                // Chỉ kêu nếu người gửi KHÔNG PHẢI LÀ MÌNH
-                if (user && newMsg.sender_id !== user.id) {
-                    console.log("🔊 Tin nhắn mới -> Ting!");
+            }, (payload) => {
+                setMessages(prev => [...prev, payload.new]);
+                if (user && payload.new.sender_id !== user.id) {
                     playMessageSound();
                 }
             })
             .subscribe();
-            
         return () => { supabase.removeChannel(channel); };
     }
-  }, [activeConversation, user]); // Thêm user vào dependency
+  }, [activeConversation, user]);
 
-  useEffect(() => {
-      scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
+  // --- 2. CÁC HÀM API ---
   const fetchConversations = async () => {
       if (!user) return;
-      
-      const { data } = await supabase
-          .from('conversations')
-          .select(`
-            *, 
-            p1:profiles!participant1(name, avatar_url), 
-            p2:profiles!participant2(name, avatar_url)
-          `)
+      const { data } = await supabase.from('conversations')
+          .select(`*, p1:profiles!participant1(name, avatar_url), p2:profiles!participant2(name, avatar_url)`)
           .or(`participant1.eq.${user.id},participant2.eq.${user.id}`);
       
       if(data) {
           const formatted = data.map((c: any) => {
               const isP1 = c.participant1 === user.id;
-              const partnerData = isP1 ? c.p2 : c.p1;
-              return {
-                  ...c,
-                  partnerName: partnerData?.name || "Người dùng",
-                  partnerAvatar: partnerData?.avatar_url || "https://via.placeholder.com/40",
-                  partnerId: isP1 ? c.participant2 : c.participant1
-              };
+              return { ...c, partnerName: isP1 ? c.p2?.name : c.p1?.name, partnerAvatar: isP1 ? c.p2?.avatar_url : c.p1?.avatar_url, partnerId: isP1 ? c.participant2 : c.participant1 };
           });
           setConversations(formatted);
           return formatted;
@@ -108,34 +82,18 @@ const ChatPage: React.FC = () => {
 
   const checkAndCreateConversation = async (pId: string) => {
       if (!user || user.id === pId) return;
-
-      let currentList = conversations;
-      if (currentList.length === 0) {
-          currentList = await fetchConversations() || [];
-      }
-
-      const existing = currentList.find((c: any) => 
-          (c.participant1 === user.id && c.participant2 === pId) ||
-          (c.participant1 === pId && c.participant2 === user.id)
-      );
+      let currentList = conversations.length === 0 ? await fetchConversations() || [] : conversations;
+      const existing = currentList.find((c: any) => (c.participant1 === user.id && c.participant2 === pId) || (c.participant1 === pId && c.participant2 === user.id));
 
       if (existing) {
           setActiveConversation(existing.id);
           fetchPartnerInfo(pId);
       } else {
-          const { data: newConv, error } = await supabase
-              .from('conversations')
-              .insert({ participant1: user.id, participant2: pId })
-              .select()
-              .single();
-          
+          const { data: newConv } = await supabase.from('conversations').insert({ participant1: user.id, participant2: pId }).select().single();
           if (newConv) {
               await fetchConversations();
               setActiveConversation(newConv.id);
               fetchPartnerInfo(pId);
-          } else if (error) {
-              console.error("Lỗi tạo chat:", error);
-              fetchConversations();
           }
       }
   };
@@ -150,63 +108,68 @@ const ChatPage: React.FC = () => {
       if (data) setMessages(data);
   };
 
+  // --- 3. XỬ LÝ GỬI TIN NHẮN (TEXT / ẢNH / LOCATION) ---
+  
+  // Gửi Text
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!newMessage.trim() || !activeConversation || !user) return;
-
-    await supabase.from('messages').insert({
-        conversation_id: activeConversation,
-        sender_id: user.id,
-        content: newMessage,
-        type: 'text'
-    });
+    await supabase.from('messages').insert({ conversation_id: activeConversation, sender_id: user.id, content: newMessage, type: 'text' });
     setNewMessage('');
   };
 
-  const handleSendMeetup = async () => {
-      if (!activeConversation || !user || !meetupTime) {
-          alert("Vui lòng chọn thời gian!");
-          return;
-      }
-      
-      const meetupContent = `📅 LỊCH HẸN GIAO DỊCH\n📍 Tại: ${meetupLocation}\n⏰ Lúc: ${meetupTime}`;
+  // Gửi Ảnh (MỚI)
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (!e.target.files?.[0] || !activeConversation || !user) return;
+    setUploadingImg(true);
+    try {
+        const file = e.target.files[0];
+        const fileName = `${activeConversation}/${Date.now()}-${Math.random()}`;
+        // Dùng bucket 'chat-images' (nhớ tạo bucket này trong Supabase)
+        // Hoặc dùng tạm 'product-images' nếu lười tạo
+        await supabase.storage.from('product-images').upload(fileName, file);
+        const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
+        
+        await supabase.from('messages').insert({
+            conversation_id: activeConversation,
+            sender_id: user.id,
+            content: 'Đã gửi một ảnh',
+            type: 'image',
+            image_url: data.publicUrl // Lưu link ảnh vào cột image_url
+        });
+    } catch (error: any) {
+        addToast('Lỗi upload ảnh: ' + error.message, 'error');
+    } finally {
+        setUploadingImg(false);
+        if(fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
+  // Gửi Địa điểm (MỚI - Hỗ trợ cả gợi ý và nhập tay)
+  const handleSendLocation = async (loc: string) => {
+      if (!activeConversation || !user || !loc.trim()) return;
       await supabase.from('messages').insert({
           conversation_id: activeConversation,
           sender_id: user.id,
-          content: meetupContent,
-          type: 'text'
+          content: loc, // Lưu địa điểm vào content
+          type: 'location' // Đánh dấu loại tin nhắn
       });
-
-      setShowMeetupModal(false);
-      setMeetupTime('');
+      setShowLocationModal(false);
+      setCustomLocation('');
+      addToast('Đã gửi vị trí', 'success');
   };
 
-  const isMeetupMessage = (content: string) => content.startsWith('📅 LỊCH HẸN GIAO DỊCH');
-
   return (
-    <div className="max-w-6xl mx-auto h-[calc(100vh-64px)] flex bg-white border-x border-gray-200">
+    <div className="max-w-6xl mx-auto h-[calc(100vh-64px)] flex bg-white border-x border-gray-200 font-sans">
       
-      {/* SIDEBAR DANH SÁCH CHAT */}
+      {/* SIDEBAR */}
       <div className={`w-full md:w-1/3 border-r border-gray-200 flex flex-col ${activeConversation ? 'hidden md:flex' : 'flex'}`}>
-         <div className="p-4 border-b border-gray-100 bg-gray-50">
-             <h2 className="font-bold text-lg text-gray-800">Tin nhắn</h2>
-         </div>
+         <div className="p-4 border-b border-gray-100 bg-gray-50"><h2 className="font-bold text-lg text-gray-800">Tin nhắn</h2></div>
          <div className="flex-1 overflow-y-auto">
              {conversations.map(conv => (
-                 <div 
-                    key={conv.id} 
-                    onClick={() => { 
-                        setActiveConversation(conv.id); 
-                        fetchPartnerInfo(conv.partnerId); 
-                    }}
-                    className={`p-4 flex items-center gap-3 cursor-pointer hover:bg-gray-50 transition ${activeConversation === conv.id ? 'bg-indigo-50' : ''}`}
-                 >
+                 <div key={conv.id} onClick={() => { setActiveConversation(conv.id); fetchPartnerInfo(conv.partnerId); }} className={`p-4 flex items-center gap-3 cursor-pointer hover:bg-gray-50 transition ${activeConversation === conv.id ? 'bg-indigo-50' : ''}`}>
                      <img src={conv.partnerAvatar} className="w-12 h-12 rounded-full border border-gray-200 object-cover"/>
-                     <div>
-                         <p className="font-bold text-gray-900">{conv.partnerName}</p>
-                         <p className="text-xs text-gray-500 truncate">Bấm để xem tin nhắn</p>
-                     </div>
+                     <div><p className="font-bold text-gray-900">{conv.partnerName}</p><p className="text-xs text-gray-500 truncate">Bấm để xem tin nhắn</p></div>
                  </div>
              ))}
              {conversations.length === 0 && <p className="text-gray-400 text-center mt-10 text-sm">Chưa có tin nhắn nào</p>}
@@ -220,54 +183,59 @@ const ChatPage: React.FC = () => {
                   {/* Chat Header */}
                   <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-white shadow-sm z-10">
                       <div className="flex items-center gap-3">
-                          <button onClick={() => setActiveConversation(null)} className="md:hidden text-gray-500 mr-2">←</button>
+                          <button onClick={() => setActiveConversation(null)} className="md:hidden text-gray-500 mr-2"><ArrowLeft/></button>
                           {partnerProfile && (
                               <Link to={`/profile/${partnerProfile.id}`} className="flex items-center gap-3 hover:opacity-80">
                                   <img src={partnerProfile.avatar_url || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full border" />
                                   <div>
-                                      <p className="font-bold text-gray-900">{partnerProfile.name}</p>
-                                      {partnerProfile.is_verified && <span className="text-[10px] text-blue-600 bg-blue-50 px-1.5 rounded border border-blue-100">Đã xác thực</span>}
+                                      <p className="font-bold text-gray-900 flex items-center">{partnerProfile.name} {partnerProfile.is_verified && <CheckCircle size={14} className="ml-1 text-blue-500"/>}</p>
+                                      <span className="text-xs text-green-600 flex items-center"><div className="w-2 h-2 bg-green-500 rounded-full mr-1"></div>Online</span>
                                   </div>
                               </Link>
                           )}
                       </div>
-                      <button className="text-gray-400 hover:text-gray-600"><MoreVertical size={20}/></button>
+                      <div className="flex gap-2">
+                          <button className="p-2 hover:bg-gray-100 rounded-full"><Phone size={20} className="text-gray-500"/></button>
+                          <button className="p-2 hover:bg-gray-100 rounded-full"><MoreVertical size={20} className="text-gray-500"/></button>
+                      </div>
                   </div>
 
                   {/* Messages List */}
-                  <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-gray-50">
+                  <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-[#F2F4F7]">
                       {messages.map((msg, idx) => {
                           const isMe = msg.sender_id === user?.id;
-                          const isMeetup = isMeetupMessage(msg.content);
+                          // Kiểm tra loại tin nhắn để render
+                          const isImage = msg.type === 'image' || msg.image_url;
+                          const isLocation = msg.type === 'location';
 
                           return (
                               <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'}`}>
-                                  {!isMe && <img src={partnerProfile?.avatar_url} className="w-8 h-8 rounded-full mr-2 mt-1"/>}
+                                  {!isMe && <img src={partnerProfile?.avatar_url} className="w-8 h-8 rounded-full mr-2 mt-1 self-end"/>}
                                   
-                                  <div className={`max-w-[70%] rounded-2xl px-4 py-2 shadow-sm ${
-                                      isMeetup 
-                                        ? (isMe ? 'bg-indigo-600 text-white' : 'bg-white border-2 border-indigo-100 text-gray-800') 
-                                        : (isMe ? 'bg-blue-600 text-white' : 'bg-white border border-gray-200 text-gray-800')
+                                  <div className={`max-w-[75%] rounded-2xl px-4 py-2 shadow-sm relative text-sm ${
+                                      isMe ? 'bg-[#0084FF] text-white rounded-br-none' : 'bg-white text-gray-800 rounded-bl-none border border-gray-200'
                                   }`}>
-                                      {isMeetup ? (
-                                          <div className="flex flex-col gap-1">
-                                              <div className="flex items-center font-bold border-b border-white/20 pb-1 mb-1">
-                                                  <Calendar className="w-4 h-4 mr-2"/> LỜI MỜI GIAO DỊCH
-                                              </div>
-                                              <div className="text-sm">
-                                                  {msg.content.replace('📅 LỊCH HẸN GIAO DỊCH\n', '').split('\n').map((line:string, i:number) => (
-                                                      <p key={i} className="mb-0.5">{line}</p>
-                                                  ))}
-                                              </div>
-                                              {!isMe && (
-                                                  <div className="mt-2 pt-2 border-t border-gray-100 text-center">
-                                                      <span className="text-xs font-bold text-indigo-600 bg-indigo-50 px-2 py-1 rounded-full">Hãy xác nhận lại với người bán</span>
-                                                  </div>
-                                              )}
+                                      {/* A. Render Ảnh */}
+                                      {isImage ? (
+                                          <div className="-mx-2 -my-1">
+                                              <img src={msg.image_url} className="rounded-xl max-w-full h-auto max-h-64 object-cover cursor-pointer hover:opacity-95" onClick={() => window.open(msg.image_url)} />
                                           </div>
-                                      ) : (
-                                          <p className="whitespace-pre-wrap text-sm">{msg.content}</p>
+                                      ) : 
+                                      /* B. Render Địa điểm */
+                                      isLocation ? (
+                                          <div className="flex items-center gap-2">
+                                              <div className={`p-2 rounded-full ${isMe ? 'bg-white/20' : 'bg-red-50 text-red-500'}`}><MapPin size={20}/></div>
+                                              <div>
+                                                  <span className="block text-[10px] uppercase opacity-75 font-bold mb-0.5">Địa điểm hẹn</span>
+                                                  <span className="font-semibold text-base">{msg.content}</span>
+                                              </div>
+                                          </div>
+                                      ) : 
+                                      /* C. Render Text thường */
+                                      (
+                                          <p className="whitespace-pre-wrap">{msg.content}</p>
                                       )}
+                                      
                                       <p className={`text-[10px] mt-1 text-right ${isMe ? 'text-blue-100' : 'text-gray-400'}`}>
                                           {new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                       </p>
@@ -278,37 +246,45 @@ const ChatPage: React.FC = () => {
                       <div ref={scrollRef} />
                   </div>
 
-                  {/* Input Area */}
-                  <div className="p-3 bg-white border-t border-gray-200">
-                      <form onSubmit={handleSendMessage} className="flex gap-2 items-end">
-                          <button 
-                            type="button" 
-                            className="p-3 text-gray-500 hover:bg-gray-100 rounded-full transition"
-                            title="Gửi ảnh (Demo)"
-                          >
-                              <ImageIcon size={20}/>
-                          </button>
+                  {/* Input Area (ĐÃ NÂNG CẤP) */}
+                  <div className="p-3 bg-white border-t border-gray-200 relative">
+                      {/* Modal Chọn Địa Điểm (Popup ngay trên input) */}
+                      {showLocationModal && (
+                          <div className="absolute bottom-20 left-4 right-4 md:left-12 md:w-80 bg-white shadow-xl rounded-xl border border-gray-200 p-4 z-20 animate-in slide-in-from-bottom-5">
+                              <div className="flex justify-between items-center mb-3">
+                                  <h4 className="font-bold text-gray-800 flex items-center"><MapPin size={16} className="mr-2 text-red-500"/> Gửi vị trí</h4>
+                                  <button onClick={() => setShowLocationModal(false)} className="text-gray-400 hover:text-gray-600"><X size={18}/></button>
+                              </div>
+                              <div className="space-y-2 mb-3 max-h-40 overflow-y-auto custom-scrollbar">
+                                  {SUGGESTED_LOCATIONS.map(loc => (
+                                      <button key={loc} onClick={() => handleSendLocation(loc)} className="w-full text-left px-3 py-2 text-sm bg-gray-50 hover:bg-blue-50 hover:text-blue-600 rounded-lg transition text-gray-700 truncate">📍 {loc}</button>
+                                  ))}
+                              </div>
+                              <div className="flex gap-2 border-t border-gray-100 pt-3">
+                                  <input type="text" placeholder="Nhập địa điểm khác..." className="flex-1 text-sm border border-gray-300 rounded-lg px-3 py-2 outline-none focus:border-blue-500" value={customLocation} onChange={(e) => setCustomLocation(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleSendLocation(customLocation)} />
+                                  <button onClick={() => handleSendLocation(customLocation)} disabled={!customLocation} className="bg-blue-600 text-white p-2 rounded-lg disabled:opacity-50"><Send size={16}/></button>
+                              </div>
+                          </div>
+                      )}
+
+                      <form onSubmit={handleSendMessage} className="flex gap-2 items-end max-w-4xl mx-auto">
+                          {/* Nút Upload Ảnh */}
+                          <label className={`p-2.5 text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-full cursor-pointer transition ${uploadingImg ? 'opacity-50 cursor-not-allowed' : ''}`}>
+                              {uploadingImg ? <Loader size={20} className="animate-spin"/> : <ImageIcon size={20}/>}
+                              <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} disabled={uploadingImg} ref={fileInputRef} />
+                          </label>
                           
-                          <button 
-                            type="button" 
-                            onClick={() => setShowMeetupModal(true)}
-                            className="p-3 text-indigo-600 hover:bg-indigo-50 rounded-full transition"
-                            title="Tạo lịch hẹn giao dịch"
-                          >
-                              <Calendar size={20}/>
+                          {/* Nút Vị trí */}
+                          <button type="button" onClick={() => setShowLocationModal(!showLocationModal)} className={`p-2.5 rounded-full transition ${showLocationModal ? 'bg-red-100 text-red-500' : 'text-gray-500 bg-gray-100 hover:bg-gray-200'}`}>
+                              <MapPin size={20}/>
                           </button>
 
                           <div className="flex-1 relative">
-                              <input 
-                                  type="text" 
-                                  value={newMessage}
-                                  onChange={(e) => setNewMessage(e.target.value)}
-                                  placeholder="Nhập tin nhắn..." 
-                                  className="w-full border border-gray-300 rounded-full py-3 px-4 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 bg-gray-50"
-                              />
+                              <input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Nhập tin nhắn..." className="w-full border-none bg-gray-100 rounded-full py-2.5 px-4 focus:outline-none focus:ring-2 focus:ring-blue-500/20 text-sm text-gray-800" />
                           </div>
-                          <button type="submit" disabled={!newMessage.trim()} className="p-3 bg-indigo-600 text-white rounded-full hover:bg-indigo-700 disabled:opacity-50 transition shadow-md">
-                              <Send size={20} />
+                          
+                          <button type="submit" disabled={!newMessage.trim()} className="p-2.5 bg-[#0084FF] text-white rounded-full hover:bg-blue-600 disabled:opacity-50 transition shadow-sm">
+                              <Send size={18} className="ml-0.5" />
                           </button>
                       </form>
                   </div>
@@ -316,52 +292,10 @@ const ChatPage: React.FC = () => {
           ) : (
               <div className="flex-1 flex flex-col items-center justify-center text-gray-300 bg-gray-50">
                   <MessageCircle size={64} className="mb-4 opacity-50"/>
-                  <p className="text-lg">Chọn một cuộc hội thoại để bắt đầu</p>
+                  <p className="text-lg font-medium">Chọn một cuộc hội thoại để bắt đầu</p>
               </div>
           )}
       </div>
-
-      {/* MODAL TẠO LỊCH HẸN */}
-      {showMeetupModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black bg-opacity-50 animate-in fade-in duration-200">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-sm overflow-hidden">
-                <div className="bg-indigo-600 p-4 text-white flex justify-between items-center">
-                    <h3 className="font-bold flex items-center"><Calendar className="mr-2"/> Hẹn gặp giao dịch</h3>
-                    <button onClick={() => setShowMeetupModal(false)} className="hover:bg-indigo-700 p-1 rounded"><span className="text-xl">&times;</span></button>
-                </div>
-                
-                <div className="p-5 space-y-4">
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1 flex items-center"><MapPin size={16} className="mr-1"/> Địa điểm</label>
-                        <select 
-                            value={meetupLocation}
-                            onChange={(e) => setMeetupLocation(e.target.value)}
-                            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-                        >
-                            {SAFE_LOCATIONS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
-                        </select>
-                    </div>
-
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1 flex items-center"><Clock size={16} className="mr-1"/> Thời gian</label>
-                        <input 
-                            type="time" 
-                            value={meetupTime}
-                            onChange={(e) => setMeetupTime(e.target.value)}
-                            className="w-full p-2 border border-gray-300 rounded-lg focus:ring-indigo-500 focus:border-indigo-500"
-                        />
-                    </div>
-                    
-                    <button 
-                        onClick={handleSendMeetup}
-                        className="w-full bg-indigo-600 text-white font-bold py-3 rounded-lg hover:bg-indigo-700 transition flex justify-center items-center shadow-md mt-2"
-                    >
-                        <Send size={18} className="mr-2"/> Gửi lời mời
-                    </button>
-                </div>
-            </div>
-        </div>
-      )}
     </div>
   );
 };
