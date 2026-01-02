@@ -1,16 +1,22 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
-import { BookOpen, LogIn, Bell, MessageCircle, PlusCircle, Home, ShoppingBag, User, LogOut, ShieldCheck, Heart, Package } from 'lucide-react';
+import { 
+  BookOpen, LogIn, Bell, MessageCircle, PlusCircle, Home, ShoppingBag, 
+  User, LogOut, ShieldCheck, Heart, Package, Info 
+} from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
 import { useTranslation } from 'react-i18next';
 import LanguageSwitcher from './LanguageSwitcher'; 
+// --- 1. IMPORT HÀM PHÁT ÂM THANH ---
+import { playNotificationSound } from '../utils/audio';
 
 interface Notification {
   id: string;
   content: string;
   link: string;
   is_read: boolean;
+  type?: 'system' | 'comment' | 'offer' | 'verification';
   created_at: string;
 }
 
@@ -66,6 +72,7 @@ const Navbar: React.FC = () => {
 
     fetchNotifications();
 
+    // --- LOGIC REALTIME VỚI ÂM THANH ---
     const channel = supabase.channel(`noti-${user.id}`)
       .on('postgres_changes', { 
         event: 'INSERT', 
@@ -74,6 +81,10 @@ const Navbar: React.FC = () => {
         filter: `user_id=eq.${user.id}` 
       }, (payload) => {
         setNotifications(prev => [payload.new as Notification, ...prev]);
+        
+        // --- 2. KÍCH HOẠT ÂM THANH ---
+        playNotificationSound(); 
+        // ----------------------------
       })
       .subscribe();
 
@@ -91,10 +102,26 @@ const Navbar: React.FC = () => {
     if (noti.link) navigate(noti.link);
   };
 
+  const handleMarkAllRead = async () => {
+    if (!user) return;
+    await supabase.from('notifications').update({ is_read: true }).eq('user_id', user.id).eq('is_read', false);
+    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
+  };
+
   const handleLogout = async () => {
     await signOut();
     setShowUserMenu(false);
     navigate('/auth');
+  };
+
+  // Helper để lấy Icon tương ứng với loại thông báo
+  const getNotiIcon = (type?: string) => {
+    switch(type) {
+      case 'verification': return <ShieldCheck className="w-5 h-5 text-green-600" />;
+      case 'comment': return <MessageCircle className="w-5 h-5 text-blue-600" />;
+      case 'offer': return <ShoppingBag className="w-5 h-5 text-yellow-600" />;
+      default: return <Info className="w-5 h-5 text-gray-500" />;
+    }
   };
 
   return (
@@ -133,7 +160,7 @@ const Navbar: React.FC = () => {
             {user ? (
               <div className="flex items-center gap-1 sm:gap-3">
                 
-                {/* Nút Tin đã lưu (Desktop) - SỬA LOGIC TO TẠI ĐÂY */}
+                {/* Nút Tin đã lưu */}
                 <Link 
                   to={location.pathname === '/saved' ? '/market' : '/saved'} 
                   className="hidden sm:block p-2 rounded-full text-gray-500 hover:bg-gray-100 transition-colors" 
@@ -142,6 +169,7 @@ const Navbar: React.FC = () => {
                   <Heart className={`h-6 w-6 ${location.pathname === '/saved' ? 'text-red-500 fill-red-500' : ''}`} />
                 </Link>
 
+                {/* --- NOTIFICATIONS --- */}
                 <div className="relative" ref={notiMenuRef}>
                   <button 
                     onClick={() => {
@@ -158,17 +186,28 @@ const Navbar: React.FC = () => {
 
                   {showNotiMenu && (
                     <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl py-2 ring-1 ring-black ring-opacity-5 max-h-[450px] overflow-y-auto z-50 border border-gray-100 animate-in fade-in slide-in-from-top-2">
-                      <div className="px-4 py-2 border-b border-gray-50 flex justify-between items-center">
+                      <div className="px-4 py-2 border-b border-gray-50 flex justify-between items-center bg-gray-50/50">
                         <span className="font-bold text-gray-900">Thông báo</span>
-                        {unreadCount > 0 && <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">{unreadCount} mới</span>}
+                        {unreadCount > 0 && (
+                            <div className="flex gap-2">
+                                <span className="text-[10px] bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full font-bold">{unreadCount} mới</span>
+                                <button onClick={handleMarkAllRead} className="text-[10px] text-gray-500 hover:text-indigo-600 underline">Đọc hết</button>
+                            </div>
+                        )}
                       </div>
                       {notifications.length === 0 ? (
                         <div className="px-4 py-8 text-center text-sm text-gray-400">Chưa có thông báo nào</div>
                       ) : (
                         notifications.map(n => (
-                          <div key={n.id} onClick={() => handleRead(n)} className={`px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0 transition-colors ${!n.is_read ? 'bg-indigo-50/40' : ''}`}>
-                            <p className={`text-sm ${!n.is_read ? 'text-gray-900 font-medium' : 'text-gray-600'}`}>{n.content}</p>
-                            <p className="text-[10px] text-gray-400 mt-1">{new Date(n.created_at).toLocaleString('vi-VN')}</p>
+                          <div key={n.id} onClick={() => handleRead(n)} className={`px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0 transition-colors flex gap-3 ${!n.is_read ? 'bg-indigo-50/30' : ''}`}>
+                            <div className="mt-0.5 flex-shrink-0">
+                                {getNotiIcon(n.type)}
+                            </div>
+                            <div>
+                                <p className={`text-sm ${!n.is_read ? 'text-gray-900 font-medium' : 'text-gray-600'}`}>{n.content}</p>
+                                <p className="text-[10px] text-gray-400 mt-1">{new Date(n.created_at).toLocaleString('vi-VN')}</p>
+                            </div>
+                            {!n.is_read && <div className="w-2 h-2 bg-indigo-600 rounded-full mt-2 flex-shrink-0 ml-auto"></div>}
                           </div>
                         ))
                       )}
@@ -251,7 +290,6 @@ const Navbar: React.FC = () => {
           <span className="text-[10px] mt-1 font-bold text-indigo-600">{t('nav.post')}</span>
         </Link>
 
-        {/* Nút Tin đã lưu (Mobile) - SỬA LOGIC TO TẠI ĐÂY */}
         <Link 
           to={location.pathname === '/saved' ? '/market' : '/saved'} 
           className={`flex flex-col items-center p-2 transition-colors ${location.pathname === '/saved' ? 'text-indigo-600' : 'text-gray-400'}`}
