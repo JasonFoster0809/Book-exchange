@@ -11,9 +11,10 @@ import { Product, DBProfile } from '../types';
 
 // --- INTERFACES MỞ RỘNG CHO ADMIN ---
 
-// [FIX] Mở rộng DBProfile để thêm trường banned (nếu DB có) mà không cần sửa file types.ts gốc
+// [FIX] Thêm email vào đây để sửa lỗi Property 'email' does not exist
 interface AdminUserProfile extends DBProfile {
   banned?: boolean; 
+  email?: string;
 }
 
 interface ReportData {
@@ -29,12 +30,11 @@ interface VerificationRequest {
 interface ChartData { date: string; count: number; fullDate: string; }
 
 const AdminPage: React.FC = () => {
-  // [FIX] Lấy user từ useAuth thay vì isAdmin (vì useAuth thường không trả về isAdmin trực tiếp)
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   
-  // [FIX] Tự tính toán isAdmin dựa trên role của user
-  const isAdmin = user?.role === 'admin' || user?.user_metadata?.role === 'admin';
+  // [FIX] Bỏ check user_metadata để tránh lỗi TS2339
+  const isAdmin = user?.role === 'admin';
 
   // --- STATES ---
   const [products, setProducts] = useState<Product[]>([]);
@@ -47,16 +47,14 @@ const AdminPage: React.FC = () => {
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // --- DERIVED STATS (Tính toán số liệu) ---
+  // --- DERIVED STATS ---
   const totalRevenue = useMemo(() => {
-      // Tính tổng giá trị các món ĐÃ BÁN (status = 'sold')
       return products.filter(p => p.status === 'sold').reduce((sum, p) => sum + p.price, 0);
   }, [products]);
 
   const categoryStats = useMemo(() => {
       const stats: Record<string, number> = {};
       products.forEach(p => {
-          // Ép kiểu string để tránh lỗi nếu category là Enum
           const catName = String(p.category);
           stats[catName] = (stats[catName] || 0) + 1;
       });
@@ -66,7 +64,6 @@ const AdminPage: React.FC = () => {
   // --- EFFECT ---
   useEffect(() => {
     if (loading) return;
-    // Nếu không phải admin thì đá về trang chủ
     if (!user || !isAdmin) { 
         navigate('/'); 
     } else { 
@@ -94,7 +91,6 @@ const AdminPage: React.FC = () => {
             
             const fullReports = rawReports.map(r => {
                 const rawProduct = productsMap.get(r.product_id);
-                // Map dữ liệu product từ DB sang chuẩn Product interface
                 let mappedProduct: Product | undefined = undefined;
                 if (rawProduct) {
                     mappedProduct = {
@@ -103,22 +99,16 @@ const AdminPage: React.FC = () => {
                         tradeMethod: rawProduct.trade_method,
                         postedAt: rawProduct.posted_at,
                         isLookingToBuy: rawProduct.is_looking_to_buy,
-                        // Fix lỗi: status có thể khác biệt giữa DB và Type
                         status: rawProduct.status,
                         images: rawProduct.images || []
                     } as Product;
                 }
-
-                return { 
-                    ...r, 
-                    reporter: usersMap.get(r.reporter_id), 
-                    product: mappedProduct 
-                };
+                return { ...r, reporter: usersMap.get(r.reporter_id), product: mappedProduct };
             });
             setReports(fullReports as ReportData[]);
         } else { setReports([]); }
 
-        // 2. PRODUCTS & CHART
+        // 2. PRODUCTS
         const { data: prodData } = await supabase.from('products').select('*').order('posted_at', { ascending: false });
         if (prodData) {
             const mappedProds: Product[] = prodData.map((item: any) => ({
@@ -132,7 +122,7 @@ const AdminPage: React.FC = () => {
             }));
             setProducts(mappedProds);
 
-            // Calculate Weekly Stats
+            // Weekly Stats
             const stats: ChartData[] = [];
             const today = new Date();
             for (let i = 6; i >= 0; i--) {
@@ -145,22 +135,18 @@ const AdminPage: React.FC = () => {
             setWeeklyStats(stats);
         }
 
-        // 3. USERS & VERIFICATIONS
+        // 3. USERS
         const { data: userData } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
         if (userData) setUsersList(userData as AdminUserProfile[]);
 
-        // Fix query verification: Dùng cú pháp chuẩn của Supabase join
+        // 4. VERIFICATIONS
         const { data: verifyData } = await supabase
             .from('verification_requests')
-            .select(`
-                *,
-                profiles:user_id (name, email, student_id, avatar_url)
-            `)
+            .select(`*, profiles:user_id (name, email, student_id, avatar_url)`)
             .eq('status', 'pending')
             .order('created_at', { ascending: false });
             
         if (verifyData) {
-             // Ép kiểu an toàn
              const mappedVerify = verifyData.map((v: any) => ({
                  ...v,
                  profiles: Array.isArray(v.profiles) ? v.profiles[0] : v.profiles
@@ -171,10 +157,8 @@ const AdminPage: React.FC = () => {
     } catch (err) { console.error("Error:", err); } finally { setIsLoadingData(false); }
   };
 
-  // --- EXPORT FUNCTION ---
   const exportToCSV = (data: any[], filename: string) => {
       if (!data.length) return alert("Không có dữ liệu để xuất!");
-      // Loại bỏ các field object phức tạp trước khi xuất để tránh lỗi [object Object]
       const cleanData = data.map(item => {
           const newItem: any = {};
           Object.keys(item).forEach(key => {
@@ -184,10 +168,8 @@ const AdminPage: React.FC = () => {
           });
           return newItem;
       });
-
       const headers = Object.keys(cleanData[0]).join(',');
       const rows = cleanData.map(row => Object.values(row).map(value => `"${value}"`).join(',')).join('\n');
-      
       const blob = new Blob([`\uFEFF${headers}\n${rows}`], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
@@ -198,7 +180,6 @@ const AdminPage: React.FC = () => {
       document.body.removeChild(link);
   };
 
-  // --- ACTIONS HANDLERS ---
   const handleResolveReport = async (reportId: string, productId: string) => {
       if(!confirm("XÓA VĨNH VIỄN sản phẩm này?")) return;
       await supabase.from('products').delete().eq('id', productId);
@@ -226,7 +207,6 @@ const AdminPage: React.FC = () => {
   };
   const handleToggleBan = async (userId: string, currentStatus: boolean) => {
       if (!confirm(`Xác nhận ${currentStatus ? "MỞ KHÓA" : "KHÓA"} tài khoản này?`)) return;
-      // Lưu ý: Cần đảm bảo cột 'banned' tồn tại trong bảng profiles trên Supabase
       const { error } = await supabase.from('profiles').update({ banned: !currentStatus }).eq('id', userId);
       if (!error) setUsersList(prev => prev.map(u => u.id === userId ? { ...u, banned: !currentStatus } : u));
       else alert("Lỗi: " + error.message);
@@ -240,8 +220,6 @@ const AdminPage: React.FC = () => {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 min-h-screen bg-gray-50 font-sans">
-      
-      {/* HEADER */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8 gap-4">
           <div>
             <h1 className="text-3xl font-black text-gray-900 flex items-center text-[#034EA2]">
@@ -259,7 +237,6 @@ const AdminPage: React.FC = () => {
           </div>
       </div>
 
-      {/* TABS */}
       <div className="bg-white rounded-xl shadow-sm p-1.5 mb-6 inline-flex border border-gray-200 overflow-x-auto max-w-full gap-1">
         {[
             { id: 'dashboard', label: 'Tổng quan', icon: BarChart3, count: 0, color: 'text-gray-600' },
@@ -276,11 +253,8 @@ const AdminPage: React.FC = () => {
       </div>
 
       <div className="bg-white shadow-xl rounded-2xl border border-gray-200 overflow-hidden min-h-[600px]">
-        
-        {/* --- TAB 0: DASHBOARD --- */}
         {activeTab === 'dashboard' && (
             <div className="p-8">
-                {/* Stats Cards */}
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
                     <div className="bg-white p-6 rounded-2xl border border-blue-100 shadow-sm relative overflow-hidden group">
                         <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition"><Users size={64} className="text-blue-600"/></div>
@@ -308,13 +282,9 @@ const AdminPage: React.FC = () => {
                 </div>
 
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-                    {/* Chart: Activity */}
                     <div className="lg:col-span-2">
                         <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center"><BarChart3 className="w-5 h-5 mr-2 text-[#034EA2]"/> Xu hướng tin đăng mới</h3>
                         <div className="h-72 flex items-end justify-between gap-3 p-6 border border-gray-100 rounded-2xl bg-gray-50/50 relative">
-                            <div className="absolute inset-0 flex flex-col justify-between p-6 pointer-events-none opacity-10">
-                                <div className="border-t border-gray-400 w-full"></div><div className="border-t border-gray-400 w-full"></div><div className="border-t border-gray-400 w-full"></div><div className="border-t border-gray-400 w-full"></div>
-                            </div>
                             {weeklyStats.map((stat, i) => (
                                 <div key={i} className="flex-1 flex flex-col items-center group relative z-10 h-full justify-end">
                                     <div className="absolute -top-10 opacity-0 group-hover:opacity-100 transition-all bg-gray-800 text-white text-xs py-1 px-3 rounded-lg shadow-lg mb-2 font-bold z-20">
@@ -326,8 +296,6 @@ const AdminPage: React.FC = () => {
                             ))}
                         </div>
                     </div>
-
-                    {/* Chart: Categories */}
                     <div>
                         <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center"><PieChart className="w-5 h-5 mr-2 text-purple-600"/> Phân bố danh mục</h3>
                         <div className="bg-white border border-gray-100 rounded-2xl p-6 h-72 overflow-y-auto custom-scrollbar">
@@ -350,7 +318,6 @@ const AdminPage: React.FC = () => {
             </div>
         )}
 
-        {/* --- TAB 1: REPORTS --- */}
         {activeTab === 'reports' && (
               <div className="divide-y divide-gray-100">
                  {reports.length === 0 ? (
@@ -386,7 +353,6 @@ const AdminPage: React.FC = () => {
              </div>
         )}
 
-        {/* --- TAB 2: VERIFICATIONS --- */}
         {activeTab === 'verifications' && (
              <div className="divide-y divide-gray-100">
                  {verifications.length === 0 ? (
@@ -422,7 +388,6 @@ const AdminPage: React.FC = () => {
              </div>
         )}
 
-        {/* --- TAB 3: PRODUCTS --- */}
         {activeTab === 'products' && (
           <div>
             <div className="p-4 border-b border-gray-100 bg-gray-50 flex gap-4">
@@ -452,7 +417,6 @@ const AdminPage: React.FC = () => {
           </div>
         )}
 
-        {/* --- TAB 4: USERS --- */}
         {activeTab === 'users' && (
           <div>
             <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-end">
