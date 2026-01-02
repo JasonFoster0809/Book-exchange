@@ -9,7 +9,13 @@ import {
 } from 'lucide-react';
 import { Product, DBProfile } from '../types';
 
-// --- INTERFACES ---
+// --- INTERFACES MỞ RỘNG CHO ADMIN ---
+
+// [FIX] Mở rộng DBProfile để thêm trường banned (nếu DB có) mà không cần sửa file types.ts gốc
+interface AdminUserProfile extends DBProfile {
+  banned?: boolean; 
+}
+
 interface ReportData {
   id: string; reporter_id: string; product_id: string; reason: string; status: 'pending' | 'resolved' | 'dismissed'; created_at: string;
   reporter?: DBProfile; product?: Product;
@@ -23,12 +29,16 @@ interface VerificationRequest {
 interface ChartData { date: string; count: number; fullDate: string; }
 
 const AdminPage: React.FC = () => {
-  const { isAdmin, loading } = useAuth();
+  // [FIX] Lấy user từ useAuth thay vì isAdmin (vì useAuth thường không trả về isAdmin trực tiếp)
+  const { user, loading } = useAuth();
   const navigate = useNavigate();
   
+  // [FIX] Tự tính toán isAdmin dựa trên role của user
+  const isAdmin = user?.role === 'admin' || user?.user_metadata?.role === 'admin';
+
   // --- STATES ---
   const [products, setProducts] = useState<Product[]>([]);
-  const [usersList, setUsersList] = useState<DBProfile[]>([]);
+  const [usersList, setUsersList] = useState<AdminUserProfile[]>([]);
   const [reports, setReports] = useState<ReportData[]>([]);
   const [verifications, setVerifications] = useState<VerificationRequest[]>([]);
   const [weeklyStats, setWeeklyStats] = useState<ChartData[]>([]);
@@ -39,24 +49,30 @@ const AdminPage: React.FC = () => {
 
   // --- DERIVED STATS (Tính toán số liệu) ---
   const totalRevenue = useMemo(() => {
-      // Tính tổng giá trị các món ĐÃ BÁN (Giả định giá bán = giá đăng)
-      return products.filter(p => p.isSold).reduce((sum, p) => sum + p.price, 0);
+      // Tính tổng giá trị các món ĐÃ BÁN (status = 'sold')
+      return products.filter(p => p.status === 'sold').reduce((sum, p) => sum + p.price, 0);
   }, [products]);
 
   const categoryStats = useMemo(() => {
       const stats: Record<string, number> = {};
       products.forEach(p => {
-          stats[p.category] = (stats[p.category] || 0) + 1;
+          // Ép kiểu string để tránh lỗi nếu category là Enum
+          const catName = String(p.category);
+          stats[catName] = (stats[catName] || 0) + 1;
       });
-      // Sắp xếp giảm dần
       return Object.entries(stats).sort((a, b) => b[1] - a[1]);
   }, [products]);
 
   // --- EFFECT ---
   useEffect(() => {
-    if (!loading && !isAdmin) { navigate('/'); } 
-    else if (isAdmin) { fetchData(); }
-  }, [loading, isAdmin, navigate]);
+    if (loading) return;
+    // Nếu không phải admin thì đá về trang chủ
+    if (!user || !isAdmin) { 
+        navigate('/'); 
+    } else { 
+        fetchData(); 
+    }
+  }, [loading, user, isAdmin, navigate]);
 
   // --- FETCH DATA ---
   const fetchData = async () => {
@@ -67,17 +83,37 @@ const AdminPage: React.FC = () => {
         if (rawReports && rawReports.length > 0) {
             const reporterIds = [...new Set(rawReports.map(r => r.reporter_id))];
             const productIds = [...new Set(rawReports.map(r => r.product_id))];
+            
             const [usersRes, productsRes] = await Promise.all([
                 supabase.from('profiles').select('*').in('id', reporterIds),
                 supabase.from('products').select('*').in('id', productIds)
             ]);
+            
             const usersMap = new Map(usersRes.data?.map(u => [u.id, u]) || []);
             const productsMap = new Map(productsRes.data?.map(p => [p.id, p]) || []);
+            
             const fullReports = rawReports.map(r => {
                 const rawProduct = productsMap.get(r.product_id);
-                // @ts-ignore
-                const mappedProduct: Product | undefined = rawProduct ? { ...rawProduct, sellerId: rawProduct.seller_id, tradeMethod: rawProduct.trade_method, postedAt: rawProduct.posted_at, isLookingToBuy: rawProduct.is_looking_to_buy, isSold: rawProduct.is_sold, status: rawProduct.status } : undefined;
-                return { ...r, reporter: usersMap.get(r.reporter_id), product: mappedProduct };
+                // Map dữ liệu product từ DB sang chuẩn Product interface
+                let mappedProduct: Product | undefined = undefined;
+                if (rawProduct) {
+                    mappedProduct = {
+                        ...rawProduct,
+                        sellerId: rawProduct.seller_id,
+                        tradeMethod: rawProduct.trade_method,
+                        postedAt: rawProduct.posted_at,
+                        isLookingToBuy: rawProduct.is_looking_to_buy,
+                        // Fix lỗi: status có thể khác biệt giữa DB và Type
+                        status: rawProduct.status,
+                        images: rawProduct.images || []
+                    } as Product;
+                }
+
+                return { 
+                    ...r, 
+                    reporter: usersMap.get(r.reporter_id), 
+                    product: mappedProduct 
+                };
             });
             setReports(fullReports as ReportData[]);
         } else { setReports([]); }
@@ -86,7 +122,13 @@ const AdminPage: React.FC = () => {
         const { data: prodData } = await supabase.from('products').select('*').order('posted_at', { ascending: false });
         if (prodData) {
             const mappedProds: Product[] = prodData.map((item: any) => ({
-                ...item, sellerId: item.seller_id, tradeMethod: item.trade_method, postedAt: item.posted_at, isLookingToBuy: item.is_looking_to_buy, isSold: item.is_sold, status: item.status
+                ...item, 
+                sellerId: item.seller_id, 
+                tradeMethod: item.trade_method, 
+                postedAt: item.posted_at, 
+                isLookingToBuy: item.is_looking_to_buy, 
+                status: item.status,
+                images: item.images || []
             }));
             setProducts(mappedProds);
 
@@ -105,23 +147,48 @@ const AdminPage: React.FC = () => {
 
         // 3. USERS & VERIFICATIONS
         const { data: userData } = await supabase.from('profiles').select('*').order('created_at', { ascending: false });
-        if (userData) setUsersList(userData as DBProfile[]);
+        if (userData) setUsersList(userData as AdminUserProfile[]);
 
-        const { data: verifyData } = await supabase.from('verification_requests').select('*, profiles:user_id(name, email, student_id, avatar_url)').eq('status', 'pending').order('created_at', { ascending: false });
-        if (verifyData) setVerifications(verifyData as any[]);
+        // Fix query verification: Dùng cú pháp chuẩn của Supabase join
+        const { data: verifyData } = await supabase
+            .from('verification_requests')
+            .select(`
+                *,
+                profiles:user_id (name, email, student_id, avatar_url)
+            `)
+            .eq('status', 'pending')
+            .order('created_at', { ascending: false });
+            
+        if (verifyData) {
+             // Ép kiểu an toàn
+             const mappedVerify = verifyData.map((v: any) => ({
+                 ...v,
+                 profiles: Array.isArray(v.profiles) ? v.profiles[0] : v.profiles
+             }));
+             setVerifications(mappedVerify as VerificationRequest[]);
+        }
 
     } catch (err) { console.error("Error:", err); } finally { setIsLoadingData(false); }
   };
 
-  // --- EXPORT FUNCTION (NEW) ---
+  // --- EXPORT FUNCTION ---
   const exportToCSV = (data: any[], filename: string) => {
       if (!data.length) return alert("Không có dữ liệu để xuất!");
-      // Lấy headers từ keys của object đầu tiên
-      const headers = Object.keys(data[0]).join(',');
-      // Map dữ liệu thành các dòng CSV
-      const rows = data.map(row => Object.values(row).map(value => `"${value}"`).join(',')).join('\n');
+      // Loại bỏ các field object phức tạp trước khi xuất để tránh lỗi [object Object]
+      const cleanData = data.map(item => {
+          const newItem: any = {};
+          Object.keys(item).forEach(key => {
+              if (typeof item[key] !== 'object' || item[key] === null) {
+                  newItem[key] = item[key];
+              }
+          });
+          return newItem;
+      });
+
+      const headers = Object.keys(cleanData[0]).join(',');
+      const rows = cleanData.map(row => Object.values(row).map(value => `"${value}"`).join(',')).join('\n');
       
-      const blob = new Blob([`\uFEFF${headers}\n${rows}`], { type: 'text/csv;charset=utf-8;' }); // Thêm BOM để Excel đọc được tiếng Việt
+      const blob = new Blob([`\uFEFF${headers}\n${rows}`], { type: 'text/csv;charset=utf-8;' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;
@@ -131,7 +198,7 @@ const AdminPage: React.FC = () => {
       document.body.removeChild(link);
   };
 
-  // --- ACTIONS HANDLERS (Keep existing logic) ---
+  // --- ACTIONS HANDLERS ---
   const handleResolveReport = async (reportId: string, productId: string) => {
       if(!confirm("XÓA VĨNH VIỄN sản phẩm này?")) return;
       await supabase.from('products').delete().eq('id', productId);
@@ -159,8 +226,10 @@ const AdminPage: React.FC = () => {
   };
   const handleToggleBan = async (userId: string, currentStatus: boolean) => {
       if (!confirm(`Xác nhận ${currentStatus ? "MỞ KHÓA" : "KHÓA"} tài khoản này?`)) return;
+      // Lưu ý: Cần đảm bảo cột 'banned' tồn tại trong bảng profiles trên Supabase
       const { error } = await supabase.from('profiles').update({ banned: !currentStatus }).eq('id', userId);
       if (!error) setUsersList(prev => prev.map(u => u.id === userId ? { ...u, banned: !currentStatus } : u));
+      else alert("Lỗi: " + error.message);
   };
 
   const maxChartValue = Math.max(...weeklyStats.map(s => s.count), 1);
@@ -208,7 +277,7 @@ const AdminPage: React.FC = () => {
 
       <div className="bg-white shadow-xl rounded-2xl border border-gray-200 overflow-hidden min-h-[600px]">
         
-        {/* --- TAB 0: DASHBOARD (UPGRADED) --- */}
+        {/* --- TAB 0: DASHBOARD --- */}
         {activeTab === 'dashboard' && (
             <div className="p-8">
                 {/* Stats Cards */}
@@ -217,7 +286,6 @@ const AdminPage: React.FC = () => {
                         <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition"><Users size={64} className="text-blue-600"/></div>
                         <p className="text-gray-500 text-xs font-bold uppercase mb-1">Tổng thành viên</p>
                         <p className="text-4xl font-black text-gray-900">{usersList.length}</p>
-                        <p className="text-xs text-green-600 mt-2 flex items-center"><TrendingUp size={12} className="mr-1"/> +{usersList.filter(u => new Date(u.created_at).getTime() > Date.now() - 7*24*60*60*1000).length} trong tuần</p>
                     </div>
                     <div className="bg-white p-6 rounded-2xl border border-purple-100 shadow-sm relative overflow-hidden group">
                         <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition"><Package size={64} className="text-purple-600"/></div>
@@ -229,7 +297,7 @@ const AdminPage: React.FC = () => {
                         <div className="absolute right-0 top-0 p-4 opacity-10 group-hover:opacity-20 transition"><DollarSign size={64} className="text-orange-600"/></div>
                         <p className="text-gray-500 text-xs font-bold uppercase mb-1">GMV (Tổng giao dịch)</p>
                         <p className="text-3xl font-black text-gray-900">{totalRevenue.toLocaleString()} <span className="text-sm text-gray-400">VNĐ</span></p>
-                        <p className="text-xs text-orange-600 mt-2 flex items-center font-bold">Từ {products.filter(p => p.isSold).length} đơn đã bán</p>
+                        <p className="text-xs text-orange-600 mt-2 flex items-center font-bold">Từ {products.filter(p => p.status === 'sold').length} đơn đã bán</p>
                     </div>
                     <div className="bg-gradient-to-br from-red-500 to-red-600 p-6 rounded-2xl text-white shadow-lg shadow-red-100 relative overflow-hidden">
                         <div className="absolute right-0 top-0 p-4 opacity-20"><Activity size={64}/></div>
@@ -244,7 +312,6 @@ const AdminPage: React.FC = () => {
                     <div className="lg:col-span-2">
                         <h3 className="text-lg font-bold text-gray-800 mb-4 flex items-center"><BarChart3 className="w-5 h-5 mr-2 text-[#034EA2]"/> Xu hướng tin đăng mới</h3>
                         <div className="h-72 flex items-end justify-between gap-3 p-6 border border-gray-100 rounded-2xl bg-gray-50/50 relative">
-                            {/* Grid lines */}
                             <div className="absolute inset-0 flex flex-col justify-between p-6 pointer-events-none opacity-10">
                                 <div className="border-t border-gray-400 w-full"></div><div className="border-t border-gray-400 w-full"></div><div className="border-t border-gray-400 w-full"></div><div className="border-t border-gray-400 w-full"></div>
                             </div>
@@ -336,7 +403,7 @@ const AdminPage: React.FC = () => {
                             <div className="flex-1 flex flex-col justify-between">
                                 <div className="bg-blue-50 p-4 rounded-lg border border-blue-100 mb-4">
                                     <div className="flex items-center gap-3 mb-3">
-                                        <img src={req.profiles.avatar_url} className="w-10 h-10 rounded-full border border-blue-200" />
+                                        <img src={req.profiles.avatar_url || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full border border-blue-200" />
                                         <div><p className="font-bold text-gray-900">{req.profiles.name}</p><p className="text-xs text-blue-600">{req.profiles.email}</p></div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-4 text-sm">
@@ -355,7 +422,7 @@ const AdminPage: React.FC = () => {
              </div>
         )}
 
-        {/* --- TAB 3: PRODUCTS (With Export & Search) --- */}
+        {/* --- TAB 3: PRODUCTS --- */}
         {activeTab === 'products' && (
           <div>
             <div className="p-4 border-b border-gray-100 bg-gray-50 flex gap-4">
@@ -374,7 +441,7 @@ const AdminPage: React.FC = () => {
                       {filteredProducts.map((product) => (
                           <tr key={product.id} className="hover:bg-gray-50">
                               <td className="px-6 py-4"><div className="flex items-center"><div className="h-10 w-10 flex-shrink-0 bg-gray-100 rounded overflow-hidden border border-gray-200"><img className="h-full w-full object-cover" src={product.images[0] || ''} /></div><div className="ml-4"><div className="text-sm font-medium text-gray-900 line-clamp-1 max-w-xs">{product.title}</div><div className="text-xs text-gray-500">{product.category}</div></div></div></td>
-                              <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-900 font-bold">{product.price.toLocaleString()} đ</div><span className={`px-2 text-[10px] font-semibold rounded-full ${product.isSold ? 'bg-gray-100 text-gray-500' : 'bg-green-50 text-green-700'}`}>{product.isSold ? 'Đã bán' : 'Đang bán'}</span></td>
+                              <td className="px-6 py-4 whitespace-nowrap"><div className="text-sm text-gray-900 font-bold">{product.price.toLocaleString()} đ</div><span className={`px-2 text-[10px] font-semibold rounded-full ${product.status === 'sold' ? 'bg-gray-100 text-gray-500' : 'bg-green-50 text-green-700'}`}>{product.status === 'sold' ? 'Đã bán' : 'Đang bán'}</span></td>
                               <td className="px-6 py-4 text-xs text-gray-500">{new Date(product.postedAt).toLocaleDateString('vi-VN')}</td>
                               <td className="px-6 py-4 text-right"><button onClick={() => handleDeleteProduct(product.id)} className="text-red-600 hover:text-red-900 bg-red-50 p-2 rounded-full hover:bg-red-100 transition"><Trash2 className="w-4 h-4" /></button></td>
                           </tr>
@@ -385,7 +452,7 @@ const AdminPage: React.FC = () => {
           </div>
         )}
 
-        {/* --- TAB 4: USERS (With Export & Ban) --- */}
+        {/* --- TAB 4: USERS --- */}
         {activeTab === 'users' && (
           <div>
             <div className="p-4 border-b border-gray-100 bg-gray-50 flex justify-end">
@@ -399,7 +466,7 @@ const AdminPage: React.FC = () => {
                     <tbody className="bg-white divide-y divide-gray-200">
                         {usersList.map((usr) => (
                             <tr key={usr.id} className={`hover:bg-gray-50 ${usr.banned ? 'bg-red-50' : ''}`}>
-                                <td className="px-6 py-4"><div className="flex items-center"><img className="h-8 w-8 rounded-full border" src={usr.avatar_url || ''}/><div className="ml-4"><div className="text-sm font-medium text-gray-900">{usr.name}</div><div className="text-xs text-gray-500">{usr.email}</div></div></div></td>
+                                <td className="px-6 py-4"><div className="flex items-center"><img className="h-8 w-8 rounded-full border" src={usr.avatar_url || 'https://via.placeholder.com/30'}/><div className="ml-4"><div className="text-sm font-medium text-gray-900">{usr.name}</div><div className="text-xs text-gray-500">{usr.email}</div></div></div></td>
                                 <td className="px-6 py-4 text-sm font-mono">{usr.student_id || '---'}</td>
                                 <td className="px-6 py-4 text-sm">{usr.role === 'admin' ? <span className="bg-purple-100 text-purple-800 px-2 py-0.5 rounded text-xs font-bold">ADMIN</span> : 'User'}</td>
                                 <td className="px-6 py-4 text-right">

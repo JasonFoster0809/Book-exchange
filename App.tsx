@@ -42,9 +42,10 @@ function App() {
   const { t } = useTranslation();
 
   return (
-    <AuthProvider>
-      <ToastProvider>
-        <HashRouter>
+    // [FIX] Đưa HashRouter ra ngoài cùng để AuthProvider có thể dùng useNavigate
+    <HashRouter>
+      <AuthProvider>
+        <ToastProvider>
           <div className="flex flex-col min-h-screen font-sans text-gray-900 bg-gray-50">
             <ScrollToTop />
             <Navbar />
@@ -70,7 +71,7 @@ function App() {
                 {/* Quản lý tin đăng (Góc của tôi) */}
                 <Route path="/my-items" element={<PrivateRoute><MyItemsPage /></PrivateRoute>} />
                 
-                {/* --- SỬA Ở ĐÂY: Thêm ?tab=saved để MyItemsPage biết đường mở đúng tab --- */}
+                {/* --- Redirect trang Saved cũ sang My Items tab saved --- */}
                 <Route path="/saved" element={<Navigate to="/my-items?tab=saved" replace />} />
                 
                 <Route path="/admin" element={<PrivateRoute><AdminPage /></PrivateRoute>} />
@@ -83,9 +84,9 @@ function App() {
               </Routes>
             </main>
           </div>
-        </HashRouter>
-      </ToastProvider>
-    </AuthProvider>
+        </ToastProvider>
+      </AuthProvider>
+    </HashRouter>
   );
 }
 

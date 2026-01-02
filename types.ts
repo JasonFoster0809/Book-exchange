@@ -73,8 +73,11 @@ export interface Product {
   status: ProductStatus | string; 
   buyerId?: string;
   
-  // Địa điểm cơ sở đào tạo (Bắt buộc để lọc thuận tiện)
-  campus: Campus | string; 
+  // [FIX] Thêm dấu ? để không báo lỗi khi dữ liệu thiếu campus
+  campus?: Campus | string; 
+
+  // [FIX] Thêm trường seller để sửa lỗi ở ProfilePage khi gọi product.seller
+  seller?: User | any;
 
   isLiked?: boolean; // Để UI hiện nút Tim đỏ hay xám
   view_count?: number; // Số lượt xem tin
