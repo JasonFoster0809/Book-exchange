@@ -15,11 +15,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useTranslation } from 'react-i18next';
 import { playNotificationSound } from '../utils/audio';
 
-interface IWindow extends Window {
-  webkitSpeechRecognition: any;
-  SpeechRecognition: any;
-}
-
+// --- TRENDING & HELPER ---
 const TRENDING_KEYWORDS = [
   "Giải tích 1", "Casio 580VN X", "Áo Bách Khoa", "Giáo trình Triết", 
   "Bàn học", "Quạt máy", "Tai nghe", "Laptop cũ"
@@ -36,13 +32,14 @@ const getCategoryIcon = (cat: string) => {
   }
 };
 
+// --- HERO BANNER COMPONENT ---
 const HeroBanner = () => {
   const [currentSlide, setCurrentSlide] = useState(0);
   const slides = [
     {
       id: 1,
       title: "Mùa Thi Sắp Đến!",
-      desc: "Săn ngay tài liệu, phao thi (đùa thôi) giá rẻ.",
+      desc: "Săn ngay tài liệu, phao thi giá rẻ.",
       bg: "bg-gradient-to-r from-[#034EA2] to-[#0073e6]",
       icon: <GraduationCap className="w-32 h-32 text-white/20 absolute -bottom-4 -right-4 rotate-12" />
     },
@@ -89,6 +86,7 @@ const HeroBanner = () => {
   );
 };
 
+// --- MAIN PAGE ---
 const MarketplacePage: React.FC = () => {
   const { user } = useAuth();
   const { addToast } = useToast();
@@ -106,7 +104,7 @@ const MarketplacePage: React.FC = () => {
   const [onlyFree, setOnlyFree] = useState(false);
   const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
   const [sortBy, setSortBy] = useState<'newest' | 'price_asc' | 'price_desc'>('newest');
-  const [priceRange, setPriceRange] = useState<{min: string, max: string}>({ min: '', max: '' });
+  const [priceRange, setPriceRange] = useState({ min: '', max: '' });
   const [filterCondition, setFilterCondition] = useState<string>('All');
 
   const [isAiProcessing, setIsAiProcessing] = useState(false);
@@ -120,8 +118,6 @@ const MarketplacePage: React.FC = () => {
     window.addEventListener('scroll', handleScroll);
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
-
-  const scrollToTop = () => window.scrollTo({ top: 0, behavior: 'smooth' });
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearchTerm(searchTerm), 500);
@@ -167,32 +163,58 @@ const MarketplacePage: React.FC = () => {
         view_count: item.view_count || 0, seller: item.profiles 
       })));
     } catch (err) {
-      addToast(t('market.error'), "error");
+      addToast("Lỗi tải danh sách sản phẩm", "error");
     } finally {
       setLoading(false);
     }
-  }, [debouncedSearchTerm, selectedCategory, activeTab, hideSold, onlyFree, priceRange, filterCondition, sortBy, user, addToast, t]);
+  }, [debouncedSearchTerm, selectedCategory, activeTab, hideSold, onlyFree, priceRange, filterCondition, sortBy, user, addToast]);
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
+  // --- FIXED VOICE SEARCH LOGIC ---
   const handleVoiceSearch = () => {
-    const windowObj = window as unknown as IWindow;
+    const windowObj = window as any;
     const SpeechRecognition = windowObj.SpeechRecognition || windowObj.webkitSpeechRecognition;
-    if (!SpeechRecognition) return addToast("Trình duyệt không hỗ trợ.", "error");
+    
+    if (!SpeechRecognition) {
+      return addToast("Trình duyệt không hỗ trợ tìm kiếm giọng nói.", "error");
+    }
 
     const recognition = new SpeechRecognition();
     recognition.lang = 'vi-VN';
-    setIsListening(true);
-    recognition.start();
+    recognition.interimResults = false;
+    recognition.maxAlternatives = 1;
+
+    recognition.onstart = () => {
+      setIsListening(true);
+      addToast("Đang nghe... Mời bạn nói", "info");
+    };
 
     recognition.onresult = (event: any) => {
-      const transcript = event.results[0][0].transcript;
+      const transcript = event.results[0][0].transcript.replace(/[.?!]/g, '');
       setSearchTerm(transcript);
+      setDebouncedSearchTerm(transcript); // Cập nhật ngay để tìm kiếm luôn
       setIsListening(false);
-      addToast(`Đang tìm: "${transcript}"`, "info");
+      playNotificationSound();
+      addToast(`Đang tìm: "${transcript}"`, "success");
     };
-    recognition.onspeechend = () => { recognition.stop(); setIsListening(false); };
-    recognition.onerror = () => setIsListening(false);
+
+    recognition.onerror = (event: any) => {
+      setIsListening(false);
+      if (event.error === 'not-allowed') {
+        addToast("Vui lòng cấp quyền Micro!", "error");
+      } else {
+        addToast("Không nghe rõ, vui lòng thử lại.", "warning");
+      }
+    };
+
+    recognition.onend = () => setIsListening(false);
+
+    try {
+      recognition.start();
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   const handleAiSearch = async (e: React.FormEvent) => {
@@ -260,33 +282,18 @@ const MarketplacePage: React.FC = () => {
 
   return (
     <div className="min-h-screen relative pb-20 pt-6 bg-[#F8FAFC]">
-      <div className="fixed inset-0 z-0 pointer-events-none overflow-hidden">
-        <div className="absolute inset-0 bg-cover bg-center opacity-[0.03] blur-[1px]" style={{ backgroundImage: "url('https://upload.wikimedia.org/wikipedia/commons/thumb/e/e8/Hcmut_official.jpg/1200px-Hcmut_official.jpg')" }} ></div>
-      </div>
+      <div className="max-w-7xl mx-auto px-4 py-6">
+          {/* BANNER NỔI BẬT */}
+          <HeroBanner />
 
-      <div className="relative z-10">
-        <div className="sticky top-16 z-30 bg-white/90 backdrop-blur-md border-b border-gray-200 shadow-sm">
-          <div className="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
-            <div className="flex gap-8 h-full">
-              <button onClick={() => setActiveTab('sell')} className={`flex items-center h-full border-b-4 px-1 text-sm font-bold transition-all ${activeTab === 'sell' ? 'border-[#034EA2] text-[#034EA2]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                <ShoppingBag className="w-4 h-4 mr-2" /> Sàn Đồ Cũ
-              </button>
-              <button onClick={() => setActiveTab('buy')} className={`flex items-center h-full border-b-4 px-1 text-sm font-bold transition-all ${activeTab === 'buy' ? 'border-[#034EA2] text-[#034EA2]' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-                <HandCoins className="w-4 h-4 mr-2" /> Tin Cần Mua
-              </button>
-            </div>
-            <button onClick={() => setShowMobileFilters(true)} className="lg:hidden p-2 text-gray-500 bg-gray-100 rounded-xl"><FilterIcon className="w-5 h-5"/></button>
-          </div>
-        </div>
-
-        <div className="max-w-7xl mx-auto px-4 py-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-6">
+          {/* THANH TÌM KIẾM CẢI TIẾN */}
+          <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-6">
             <div className="space-y-1">
               <h1 className="text-3xl md:text-4xl font-black text-[#034EA2] tracking-tight flex items-center">
                 {activeTab === 'sell' ? 'Chợ Bách Khoa' : 'Cần Mua Gì?'} 
                 <GraduationCap className="ml-3 w-8 h-8 md:w-10 md:h-10 text-[#00B0F0] animate-bounce"/>
               </h1>
-              <p className="text-gray-600 font-medium text-sm md:text-base">Kết nối sinh viên BK - Uy tín - Giá rẻ</p>
+              <p className="text-gray-600 font-medium text-sm md:text-base">Giao dịch an toàn trong cộng đồng sinh viên</p>
             </div>
             
             <form onSubmit={handleAiSearch} className="flex-1 max-w-2xl w-full flex gap-3">
@@ -294,53 +301,50 @@ const MarketplacePage: React.FC = () => {
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-5 w-5 text-gray-400 group-focus-within:text-[#034EA2] transition-colors" />
                 <input 
                   type="text" 
-                  className="block w-full pl-12 pr-12 py-4 bg-white border border-gray-200 rounded-2xl focus:ring-4 focus:ring-blue-100 focus:border-[#034EA2] shadow-sm transition-all outline-none font-medium text-gray-700" 
-                  placeholder={isListening ? "Đang nghe..." : "Thử: 'Giáo trình', 'Casio 580', 'Quạt máy'..."}
+                  className={`block w-full pl-12 pr-12 py-4 bg-white border border-gray-200 rounded-2xl focus:ring-4 focus:ring-blue-100 focus:border-[#034EA2] shadow-sm transition-all outline-none font-medium text-gray-700 ${isListening ? 'ring-4 ring-red-100 border-red-300' : ''}`}
+                  placeholder={isListening ? "Đang nghe giọng nói của bạn..." : "Tìm giáo trình, máy tính, quạt..."}
                   value={searchTerm} 
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
-                <button type="button" onClick={handleVoiceSearch} className={`absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all ${isListening ? 'bg-red-50 text-red-500 animate-pulse ring-2 ring-red-200' : 'text-gray-400 hover:text-[#034EA2] hover:bg-blue-50'}`}>
-                  {isListening ? <MicOff className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
+                <button 
+                  type="button" 
+                  onClick={handleVoiceSearch} 
+                  className={`absolute right-4 top-1/2 -translate-y-1/2 p-2 rounded-full transition-all 
+                    ${isListening 
+                      ? 'bg-red-500 text-white animate-pulse ring-4 ring-red-200' 
+                      : 'text-gray-400 hover:text-[#034EA2] hover:bg-blue-50'
+                    }`}
+                >
+                  {isListening ? <Mic className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
                 </button>
                 {isAiProcessing && <Loader2 className="absolute right-14 top-1/2 -translate-y-1/2 w-5 h-5 text-[#034EA2] animate-spin" />}
               </div>
-              <button onClick={() => setShowHuntModal(true)} type="button" className="bg-[#00B0F0] text-white px-5 md:px-6 py-4 rounded-2xl font-bold hover:bg-[#0095da] shadow-lg shadow-blue-200 transition-all active:scale-95">
+              <button onClick={() => setShowHuntModal(true)} type="button" className="bg-[#00B0F0] text-white px-5 py-4 rounded-2xl font-bold hover:bg-[#0095da] shadow-lg transition-all active:scale-95">
                   <BellPlus className="w-5 h-5" />
               </button>
             </form>
           </div>
 
-          <div className="flex flex-wrap items-center gap-2 mb-8 animate-fadeIn">
-            <span className="flex items-center text-xs font-bold text-gray-500 uppercase tracking-wider mr-2"><TrendingUp className="w-3 h-3 mr-1"/> Hot Search:</span>
+          {/* HOT KEYWORDS */}
+          <div className="flex flex-wrap items-center gap-2 mb-8">
+            <span className="flex items-center text-xs font-bold text-gray-400 uppercase tracking-wider mr-2"><TrendingUp className="w-3 h-3 mr-1"/> Hot Search:</span>
             {TRENDING_KEYWORDS.map(keyword => (
-              <button key={keyword} onClick={() => handleTrendingClick(keyword)} className="px-3 py-1 bg-white border border-gray-200 rounded-full text-xs font-medium text-gray-600 hover:border-[#034EA2] hover:text-[#034EA2] transition-colors">
+              <button key={keyword} onClick={() => handleTrendingClick(keyword)} className="px-4 py-1.5 bg-white border border-gray-100 rounded-full text-xs font-bold text-gray-500 hover:border-[#034EA2] hover:text-[#034EA2] hover:shadow-sm transition-all">
                 {keyword}
               </button>
             ))}
           </div>
 
-          <HeroBanner />
-
-          <div className="flex gap-4 overflow-x-auto pb-4 mb-8 no-scrollbar md:hidden">
-             {Object.values(ProductCategory).map(cat => (
-               <button key={cat} onClick={() => setSelectedCategory(cat)} className={`flex-shrink-0 flex flex-col items-center justify-center p-3 rounded-xl bg-white border shadow-sm min-w-[80px] transition-all ${selectedCategory === cat ? 'border-[#034EA2] bg-blue-50' : 'border-gray-100'}`}>
-                 <div className={`p-2 rounded-full mb-1 ${selectedCategory === cat ? 'bg-[#034EA2] text-white' : 'bg-gray-100 text-gray-500'}`}>
-                    {getCategoryIcon(cat)}
-                 </div>
-                 <span className={`text-[10px] font-bold text-center ${selectedCategory === cat ? 'text-[#034EA2]' : 'text-gray-600'}`}>{cat}</span>
-               </button>
-             ))}
-          </div>
-
           <div className="flex flex-col lg:flex-row gap-10 items-start">
-            <div className="hidden lg:block w-72 flex-shrink-0 sticky top-40">
-              <div className="bg-white/95 backdrop-blur-sm p-6 rounded-[1.5rem] shadow-sm border border-blue-100">
+            {/* FILTER SIDEBAR (DESKTOP) */}
+            <div className="hidden lg:block w-72 flex-shrink-0 sticky top-24">
+              <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100">
                 <div className="mb-6">
-                  <h3 className="font-bold text-[#034EA2] mb-3 text-xs uppercase tracking-widest">Danh mục</h3>
+                  <h3 className="font-bold text-[#034EA2] mb-4 text-xs uppercase tracking-widest">Danh mục</h3>
                   <div className="flex flex-col gap-1.5">
-                    <button onClick={() => setSelectedCategory('All')} className={`text-left px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${selectedCategory === 'All' ? 'bg-[#034EA2] text-white shadow-md' : 'hover:bg-blue-50 text-gray-600'}`}>Tất cả</button>
+                    <button onClick={() => setSelectedCategory('All')} className={`text-left px-4 py-3 rounded-xl text-sm font-bold transition-all ${selectedCategory === 'All' ? 'bg-[#034EA2] text-white shadow-md' : 'hover:bg-blue-50 text-gray-600'}`}>Tất cả</button>
                     {Object.values(ProductCategory).map(cat => (
-                      <button key={cat} onClick={() => setSelectedCategory(cat)} className={`flex items-center text-left px-4 py-2.5 rounded-xl text-sm font-bold transition-all ${selectedCategory === cat ? 'bg-[#034EA2] text-white shadow-md' : 'hover:bg-blue-50 text-gray-600'}`}>
+                      <button key={cat} onClick={() => setSelectedCategory(cat)} className={`flex items-center text-left px-4 py-3 rounded-xl text-sm font-bold transition-all ${selectedCategory === cat ? 'bg-[#034EA2] text-white shadow-md' : 'hover:bg-blue-50 text-gray-600'}`}>
                         <span className="mr-2 opacity-80">{getCategoryIcon(cat)}</span> {cat}
                       </button>
                     ))}
@@ -350,18 +354,19 @@ const MarketplacePage: React.FC = () => {
               </div>
             </div>
 
+            {/* PRODUCT GRID */}
             <div className="flex-1 w-full">
               <div className="mb-6 flex flex-wrap items-center justify-between gap-4">
                 <div className="flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-orange-500 animate-pulse" />
-                  <p className="text-sm text-gray-600 font-semibold">Tìm thấy <span className="text-[#034EA2] font-bold text-lg">{totalResult}</span> món đồ</p>
+                  <Sparkles className="w-5 h-5 text-orange-500" />
+                  <p className="text-sm text-gray-600 font-bold">Tìm thấy <span className="text-[#034EA2] text-lg">{totalResult}</span> món đồ</p>
                 </div>
-                <div className="flex items-center gap-3 ml-auto">
-                  <div className="flex bg-white border border-gray-200 rounded-xl p-1 shadow-sm">
-                    <button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg transition-all ${viewMode === 'grid' ? 'bg-[#034EA2] text-white shadow-md' : 'text-gray-400 hover:bg-gray-50'}`}><LayoutGrid className="w-4 h-4" /></button>
-                    <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-[#034EA2] text-white shadow-md' : 'text-gray-400 hover:bg-gray-50'}`}><ListIcon className="w-4 h-4" /></button>
+                <div className="flex items-center gap-3">
+                  <div className="flex bg-white border border-gray-100 rounded-xl p-1 shadow-sm">
+                    <button onClick={() => setViewMode('grid')} className={`p-2 rounded-lg ${viewMode === 'grid' ? 'bg-[#034EA2] text-white' : 'text-gray-400'}`}><LayoutGrid size={18} /></button>
+                    <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg ${viewMode === 'list' ? 'bg-[#034EA2] text-white' : 'text-gray-400'}`}><ListIcon size={18} /></button>
                   </div>
-                  <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} className="text-xs border-none rounded-xl bg-white font-bold text-[#034EA2] py-3 px-8 shadow-sm outline-none ring-1 ring-blue-100 transition-all cursor-pointer hover:shadow-md">
+                  <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} className="text-xs border-none rounded-xl bg-white font-bold text-[#034EA2] py-3 px-4 shadow-sm outline-none ring-1 ring-blue-50 transition-all">
                     <option value="newest">MỚI NHẤT</option>
                     <option value="price_asc">GIÁ TĂNG DẦN</option>
                     <option value="price_desc">GIÁ GIẢM DẦN</option>
@@ -374,11 +379,9 @@ const MarketplacePage: React.FC = () => {
                   {[1, 2, 3, 4, 5, 6].map(n => <ProductSkeleton key={n} />)}
                 </div>
               ) : products.length === 0 ? (
-                <div className="text-center py-20 bg-white/80 rounded-[2rem] border-2 border-dashed border-blue-100 shadow-sm">
-                  <Search className="w-20 h-20 text-blue-200 mx-auto mb-6" />
-                  <h3 className="text-2xl font-black text-[#034EA2] mb-2">Không tìm thấy món nào</h3>
-                  <p className="text-gray-500 mb-8 max-w-xs mx-auto">Thử đổi từ khóa hoặc dùng AI Search xem sao!</p>
-                  <button onClick={() => {setSearchTerm(''); setDebouncedSearchTerm(''); setSelectedCategory('All'); setPriceRange({min:'', max:''}); setFilterCondition('All'); setOnlyFree(false);}} className="bg-[#034EA2] text-white px-8 py-3 rounded-xl font-bold shadow-lg hover:bg-blue-800 transition-all">Xóa bộ lọc</button>
+                <div className="text-center py-24 bg-white rounded-[2rem] border-2 border-dashed border-gray-100 shadow-sm">
+                  <Search className="w-16 h-16 text-gray-200 mx-auto mb-4" />
+                  <h3 className="text-xl font-bold text-gray-400">Không tìm thấy món nào khớp với yêu cầu</h3>
                 </div>
               ) : (
                 <div className={viewMode === 'grid' ? "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-6" : "flex flex-col gap-4"}>
@@ -389,53 +392,46 @@ const MarketplacePage: React.FC = () => {
               )}
             </div>
           </div>
-        </div>
-
-        {showMobileFilters && (
-          <div className="fixed inset-0 z-[100] lg:hidden animate-fadeIn">
-            <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowMobileFilters(false)}></div>
-            <div className="absolute right-0 top-0 bottom-0 w-80 bg-white p-6 overflow-y-auto shadow-2xl">
-              <div className="flex justify-between items-center mb-8">
-                <h2 className="text-xl font-black text-[#034EA2]">Bộ lọc tìm kiếm</h2>
-                <button onClick={() => setShowMobileFilters(false)} className="p-2 bg-gray-100 rounded-full hover:bg-red-50 hover:text-red-500 transition-colors"><X className="w-5 h-5"/></button>
-              </div>
-              <FilterPanel />
-              <button onClick={() => setShowMobileFilters(false)} className="w-full mt-8 bg-[#034EA2] text-white py-4 rounded-xl font-bold shadow-lg shadow-blue-200 active:scale-95 transition-transform">Áp dụng bộ lọc</button>
-            </div>
-          </div>
-        )}
-
-        {showHuntModal && (
-          <div className="fixed inset-0 bg-[#034EA2]/20 backdrop-blur-sm flex items-center justify-center z-[100] p-4 animate-fadeIn">
-            <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 relative overflow-hidden border border-blue-100">
-              <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-[#034EA2] to-[#00B0F0]"></div>
-              <button onClick={() => setShowHuntModal(false)} className="absolute top-6 right-6 text-gray-400 hover:text-red-500 p-2 hover:bg-red-50 rounded-full transition-all"><X className="w-6 h-6"/></button>
-              <div className="text-center mb-8">
-                <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4 shadow-inner"><BellPlus className="w-8 h-8 text-[#034EA2]" /></div>
-                <h3 className="text-2xl font-black text-[#034EA2]">Đăng ký săn tin BK</h3>
-                <p className="text-gray-500 text-sm mt-2 px-4">Nhập tên món đồ, tụi mình sẽ báo ngay khi có người bán!</p>
-              </div>
-              <form onSubmit={(e) => { 
-                  e.preventDefault(); 
-                  playNotificationSound();
-                  addToast("Đã kích hoạt chế độ săn tin!", "success"); 
-                  setShowHuntModal(false); 
-              }}>
-                <input type="text" required className="block w-full border border-gray-200 bg-gray-50 rounded-xl p-4 focus:ring-4 focus:ring-blue-100 focus:bg-white outline-none transition-all font-bold mb-6 text-[#034EA2]" placeholder="VD: Giáo trình Giải Tích 1..." />
-                <button type="submit" className="w-full py-4 bg-[#00B0F0] text-white rounded-xl font-black hover:bg-[#0095da] shadow-lg shadow-blue-200 transition-all active:scale-95 uppercase tracking-widest">Bật thông báo</button>
-              </form>
-            </div>
-          </div>
-        )}
-
-        <button 
-          onClick={scrollToTop}
-          className={`fixed bottom-24 right-6 p-4 bg-[#034EA2] text-white rounded-full shadow-xl z-40 transition-all duration-300 hover:bg-[#003875] hover:-translate-y-1 ${showScrollTop ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0'}`}
-        >
-          <ChevronUp className="w-6 h-6" />
-        </button>
-
       </div>
+
+      {/* MOBILE FILTERS MODAL & HUNT MODAL & SCROLL TOP (Giữ nguyên logic JSX cũ của bạn bên dưới...) */}
+      {showMobileFilters && (
+        <div className="fixed inset-0 z-[100] lg:hidden animate-fadeIn">
+          <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={() => setShowMobileFilters(false)}></div>
+          <div className="absolute right-0 top-0 bottom-0 w-80 bg-white p-6 overflow-y-auto shadow-2xl">
+            <div className="flex justify-between items-center mb-8">
+              <h2 className="text-xl font-black text-[#034EA2]">Bộ lọc</h2>
+              <button onClick={() => setShowMobileFilters(false)} className="p-2 bg-gray-50 rounded-full"><X className="w-5 h-5"/></button>
+            </div>
+            <FilterPanel />
+            <button onClick={() => setShowMobileFilters(false)} className="w-full mt-8 bg-[#034EA2] text-white py-4 rounded-xl font-bold shadow-lg">Áp dụng</button>
+          </div>
+        </div>
+      )}
+
+      {showHuntModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100] p-4">
+          <div className="bg-white rounded-[2rem] shadow-2xl w-full max-w-md p-8 relative overflow-hidden border border-blue-100">
+            <button onClick={() => setShowHuntModal(false)} className="absolute top-6 right-6 text-gray-400"><X size={24}/></button>
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 bg-blue-50 rounded-full flex items-center justify-center mx-auto mb-4"><BellPlus size={32} className="text-[#034EA2]" /></div>
+              <h3 className="text-2xl font-black text-[#034EA2]">Đăng ký săn tin BK</h3>
+              <p className="text-gray-500 text-sm mt-2">Tụi mình sẽ báo ngay khi có món đồ bạn cần xuất hiện!</p>
+            </div>
+            <form onSubmit={(e) => { e.preventDefault(); playNotificationSound(); addToast("Đã bật chế độ săn tin!", "success"); setShowHuntModal(false); }}>
+              <input type="text" required className="block w-full border border-gray-100 bg-gray-50 rounded-xl p-4 focus:ring-4 focus:ring-blue-100 outline-none font-bold mb-6" placeholder="Tên món đồ (VD: Casio 580)" />
+              <button type="submit" className="w-full py-4 bg-[#00B0F0] text-white rounded-xl font-black shadow-lg">BẬT THÔNG BÁO</button>
+            </form>
+          </div>
+        </div>
+      )}
+
+      <button 
+        onClick={scrollToTop}
+        className={`fixed bottom-24 right-6 p-4 bg-[#034EA2] text-white rounded-full shadow-xl z-40 transition-all duration-300 ${showScrollTop ? 'translate-y-0 opacity-100' : 'translate-y-20 opacity-0'}`}
+      >
+        <ChevronUp size={24} />
+      </button>
     </div>
   );
 };

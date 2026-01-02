@@ -1,31 +1,27 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom'; // <--- Thêm useParams để lấy ID sửa
+import { useNavigate, useParams } from 'react-router-dom';
 import {
-  Camera, Info, X, CheckCircle2, Wand2, Calculator,
-  Upload, Loader2, Sparkles, ArrowLeft, Banknote, ChevronDown, Save
+  Camera, Info, X, CheckCircle2,
+  Upload, Loader2, Sparkles, ArrowLeft, Banknote, ChevronDown, Save, Tag
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import { ProductCategory, ProductCondition, TradeMethod } from '../types';
-// Import đúng service Gemini của bạn
-import { generateCreativeDescription, estimatePrice } from '../services/geminiService'; 
 import confetti from 'canvas-confetti';
 
 const PostItemPage = () => {
   const { user } = useAuth();
   const { addToast } = useToast();
   const navigate = useNavigate();
-  const { id } = useParams<{ id: string }>(); // Lấy ID từ URL (nếu có)
+  const { id } = useParams<{ id: string }>();
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const descriptionRef = useRef<HTMLTextAreaElement>(null);
 
   // --- STATES ---
-  const isEditing = Boolean(id); // Kiểm tra đang Sửa hay Đăng mới
+  const isEditing = Boolean(id);
   const [loading, setLoading] = useState(false);
-  const [isAiWriting, setIsAiWriting] = useState(false);
-  const [isEstimating, setIsEstimating] = useState(false);
   const [dragActive, setDragActive] = useState(false);
 
   // Preview chứa cả URL ảnh cũ (string) và Blob ảnh mới
@@ -63,7 +59,6 @@ const PostItemPage = () => {
             return;
         }
 
-        // Điền dữ liệu cũ vào form
         setForm({
             title: data.title,
             description: data.description,
@@ -76,7 +71,6 @@ const PostItemPage = () => {
         
         setDisplayPrice(formatCurrency(data.price.toString()));
 
-        // Load ảnh cũ (chỉ là URL)
         if (data.images && data.images.length > 0) {
             setPreviews(data.images);
         }
@@ -131,70 +125,17 @@ const PostItemPage = () => {
   };
 
   const removeImg = (index: number) => {
-    // Xóa khỏi preview
     const urlToRemove = previews[index];
     setPreviews(prev => prev.filter((_, i) => i !== index));
 
-    // Nếu là ảnh mới (blob:...), cần xóa trong mảng images
     if (urlToRemove.startsWith('blob:')) {
-        // Tính toán xem ảnh bị xóa là ảnh mới thứ mấy
-        const oldImagesCount = previews.filter(url => !url.startsWith('blob:')).length;
-        
-        // Nếu xóa một ảnh cũ, oldImagesCount sẽ giảm, nhưng index của blob trong mảng images không đổi
-        // Nếu xóa một ảnh mới, index cần trừ đi số lượng ảnh cũ hiện tại (trước khi xóa)
-        // Cách an toàn nhất cho UX đơn giản:
-        // Lọc lại mảng images dựa trên URL blob (nhưng ko map ngược dc).
-        // => Reset lại images: Cách này hơi cồng kềnh nhưng chính xác: 
-        // Logic đơn giản: 
-        // 1. Lấy tất cả ảnh mới còn lại trong previews
-        // 2. Filter images sao cho URL object của nó nằm trong danh sách previews còn lại
-        // Tuy nhiên URL.createObjectURL tạo ra string khác nhau mỗi lần.
-        
-        // Giải pháp nhanh: Đếm số ảnh cũ đứng trước nó
         const numOldBefore = previews.slice(0, index).filter(u => !u.startsWith('blob:')).length;
-        // Nếu bản thân nó là blob
         const indexInNewArray = index - numOldBefore;
         setImages(prev => prev.filter((_, i) => i !== indexInNewArray));
     }
   };
 
-  // --- AI FEATURES (Dùng geminiService) ---
-  const handleMagicWrite = async () => {
-    if (!form.title.trim()) return addToast("Nhập tên món đồ trước đã nhé!", "warning");
-
-    setIsAiWriting(true);
-    try {
-      const text = await generateCreativeDescription(form.title, form.category);
-      if (text) {
-        setForm(prev => ({ ...prev, description: text }));
-        addToast("AI đã viết xong!", "success");
-      } else {
-        addToast("AI đang bận, thử lại sau nhé!", "error");
-      }
-    } catch (e) { console.error(e); } finally { setIsAiWriting(false); }
-  };
-
-  const handleEstimatePrice = async () => {
-    if (!form.title.trim()) return addToast("Nhập tên món đồ để định giá!", "warning");
-
-    setIsEstimating(true);
-    try {
-      const priceHint = await estimatePrice(form.title, form.category, form.condition);
-      if (priceHint) {
-        const numericPrice = priceHint.replace(/\D/g, '');
-        if (numericPrice) {
-            const formatted = formatCurrency(numericPrice);
-            setDisplayPrice(formatted);
-            setForm(prev => ({ ...prev, price: numericPrice }));
-            addToast(`Gợi ý giá: ${priceHint} VNĐ`, "success");
-        } else {
-            addToast(`Gợi ý: ${priceHint}`, "info");
-        }
-      }
-    } catch (e) { console.error(e); } finally { setIsEstimating(false); }
-  };
-
-  // --- SUBMIT (XỬ LÝ CẢ INSERT VÀ UPDATE) ---
+  // --- SUBMIT ---
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user) return addToast("Vui lòng đăng nhập!", "error");
@@ -204,12 +145,9 @@ const PostItemPage = () => {
     try {
       // 1. Upload ảnh mới & Giữ lại ảnh cũ
       const finalImageUrls: string[] = [];
-      
-      // Giữ lại ảnh cũ (URL từ supabase)
       const oldImages = previews.filter(url => !url.startsWith('blob:'));
       finalImageUrls.push(...oldImages);
 
-      // Upload ảnh mới
       if (images.length > 0) {
           const newUrls = await Promise.all(images.map(async (file) => {
             const path = `${user.id}/${Date.now()}_${Math.random().toString(36).substring(7)}`;
@@ -219,7 +157,7 @@ const PostItemPage = () => {
           finalImageUrls.push(...newUrls);
       }
 
-      // Chuẩn bị data
+      // 2. Insert/Update DB
       const productData = {
         title: form.title,
         description: form.description,
@@ -230,16 +168,14 @@ const PostItemPage = () => {
         is_looking_to_buy: form.isLookingToBuy,
         images: finalImageUrls,
         seller_id: user.id,
-        status: 'available' // Mặc định available
+        status: 'available'
       };
 
       if (isEditing) {
-          // --- UPDATE ---
           const { error } = await supabase.from('products').update(productData).eq('id', id);
           if (error) throw error;
           addToast("Cập nhật tin thành công!", "success");
       } else {
-          // --- INSERT ---
           const { error } = await supabase.from('products').insert([productData]);
           if (error) throw error;
           try { confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } }); } catch (e) { }
@@ -347,15 +283,7 @@ const PostItemPage = () => {
             </div>
 
             <div>
-              <label className={labelClass}>
-                <div className="flex justify-between items-center">
-                  Giá mong muốn (VNĐ)
-                  <button type="button" onClick={handleEstimatePrice} className="text-[11px] bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full flex items-center hover:bg-yellow-200 transition-colors disabled:opacity-50 font-bold animate-pulse" disabled={isEstimating}>
-                    {isEstimating ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Calculator className="w-3 h-3 mr-1" />}
-                    Định giá
-                  </button>
-                </div>
-              </label>
+              <label className={labelClass}>Giá mong muốn (VNĐ)</label>
               <div className="relative">
                 <Banknote className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
                 <input
@@ -383,15 +311,7 @@ const PostItemPage = () => {
             </div>
 
             <div className="relative">
-              <label className={labelClass}>
-                <div className="flex justify-between items-center">
-                  Mô tả chi tiết
-                  <button type="button" onClick={handleMagicWrite} className="text-[11px] bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-3 py-1 rounded-full flex items-center shadow-md hover:shadow-lg transition-all active:scale-95 disabled:opacity-50 font-bold animate-pulse" disabled={isAiWriting}>
-                    {isAiWriting ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : <Wand2 className="w-3 h-3 mr-1" />}
-                    AI Viết Hộ
-                  </button>
-                </div>
-              </label>
+              <label className={labelClass}>Mô tả chi tiết</label>
               <textarea
                 ref={descriptionRef}
                 rows={4}
@@ -403,7 +323,7 @@ const PostItemPage = () => {
             </div>
 
             <button disabled={loading} className="w-full py-5 bg-[#034EA2] text-white rounded-[1.5rem] font-black text-lg hover:bg-[#003875] shadow-xl shadow-blue-200 disabled:opacity-50 disabled:cursor-not-allowed transition-all active:scale-95 flex items-center justify-center group">
-              {loading ? <Loader2 className="w-6 h-6 animate-spin mr-2" /> : (isEditing ? <Save className="w-6 h-6 mr-2" /> : <Sparkles className="w-6 h-6 mr-2 group-hover:animate-spin" />)}
+              {loading ? <Loader2 className="w-6 h-6 animate-spin mr-2" /> : (isEditing ? <Save className="w-6 h-6 mr-2" /> : <Tag className="w-6 h-6 mr-2" />)}
               {loading ? "Đang xử lý..." : (isEditing ? "LƯU THAY ĐỔI" : "ĐĂNG TIN NGAY")}
             </button>
 
