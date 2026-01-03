@@ -21,25 +21,23 @@ const ProductDetailPage: React.FC = () => {
   const [product, setProduct] = useState<Product | null>(null);
   const [seller, setSeller] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
-  
   const [copied, setCopied] = useState(false); 
   const [isFollowing, setIsFollowing] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
-  
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportReason, setReportReason] = useState('fraud');
   const [reportDescription, setReportDescription] = useState('');
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
-
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
   const [replyContent, setReplyContent] = useState('');
   const [activeReplyId, setActiveReplyId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
-
   const [mainImage, setMainImage] = useState('');
 
+  // Kiểm tra xử phạt của người xem (currentUser) và người bán (seller)
+  const isViewerRestricted = currentUser?.banUntil ? new Date(currentUser.banUntil) > new Date() : isRestricted;
   const isSellerRestricted = seller?.banUntil ? new Date(seller.banUntil) > new Date() : false;
 
   useEffect(() => {
@@ -47,7 +45,6 @@ const ProductDetailPage: React.FC = () => {
         fetchProductAndSeller();
         fetchComments();
         window.scrollTo(0, 0);
-        
         const channel = supabase.channel(`realtime-comments-${id}`)
             .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments', filter: `product_id=eq.${id}` }, 
             () => fetchComments())
@@ -63,8 +60,8 @@ const ProductDetailPage: React.FC = () => {
 
   const checkFollowStatus = async () => {
     if (!seller || !currentUser) return;
-    const { data } = await supabase.from('profiles').select('*').eq('id', seller.id).single();
-    // Logic follow...
+    const { data } = await supabase.from('follows').select('*').eq('follower_id', currentUser.id).eq('following_id', seller.id).single();
+    setIsFollowing(!!data);
   };
 
   const checkLikeStatus = async () => {
@@ -118,14 +115,17 @@ const ProductDetailPage: React.FC = () => {
       }
   };
 
-  // --- SỬA HÀM NÀY ĐỂ CHẶN TRIỆT ĐỂ ---
+  // --- HÀM SUBMIT ĐÃ ĐƯỢC FIX CHẶN TRIỆT ĐỂ ---
   const handleSubmit = async (e: React.FormEvent, parentId: string | null = null) => {
       e.preventDefault();
 
-      // BƯỚC 1: CHẶN NGAY LẬP TỨC TRONG LOGIC
-      if (isRestricted) {
-          addToast("Hành động bị chặn: Bạn đang mang huy hiệu 'Không đáng tin'.", "error");
-          return; // Dừng hàm, không cho gửi dữ liệu
+      // KIỂM TRA LẠI THỜI GIAN THỰC (Bảo mật lớp 1)
+      const now = new Date();
+      const isActuallyBanned = currentUser?.banUntil && new Date(currentUser.banUntil) > now;
+
+      if (isActuallyBanned || isRestricted) {
+          addToast("Tài khoản của bạn đang bị hạn chế bình luận do mang huy hiệu 'Không đáng tin'.", "error");
+          return; 
       }
 
       const content = parentId ? replyContent : newComment;
@@ -133,17 +133,16 @@ const ProductDetailPage: React.FC = () => {
       
       setSubmitting(true);
       try {
-          const { error } = await supabase.from('comments').insert({
-              product_id: id, user_id: currentUser.id, content: content.trim(), parent_id: parentId
-          });
-          if (error) throw error;
-          
-          setNewComment(''); setReplyContent(''); setActiveReplyId(null);
-          playNotificationSound();
+        const { error } = await supabase.from('comments').insert({
+            product_id: id, user_id: currentUser.id, content: content.trim(), parent_id: parentId
+        });
+        if (error) throw error;
+        setNewComment(''); setReplyContent(''); setActiveReplyId(null);
+        playNotificationSound();
       } catch (err: any) {
-          addToast(err.message, "error");
+        addToast("Không thể gửi bình luận. Có thể bạn đã bị ban.", "error");
       } finally {
-          setSubmitting(false);
+        setSubmitting(false);
       }
   };
 
@@ -160,6 +159,18 @@ const ProductDetailPage: React.FC = () => {
   const handleReportClick = () => {
       if (!currentUser) return navigate('/auth');
       setShowReportModal(true);
+  };
+
+  const handleFollow = async () => {
+    if (!currentUser) return navigate('/auth');
+    if (!seller) return;
+    if (isFollowing) {
+        await supabase.from('follows').delete().eq('follower_id', currentUser.id).eq('following_id', seller.id);
+        setIsFollowing(false);
+    } else {
+        await supabase.from('follows').insert({ follower_id: currentUser.id, following_id: seller.id });
+        setIsFollowing(true);
+    }
   };
 
   const handleToggleLike = async () => {
@@ -188,6 +199,12 @@ const ProductDetailPage: React.FC = () => {
     } catch (err: any) { addToast("Có lỗi xảy ra.", "error"); } finally { setIsSubmittingReport(false); }
   };
 
+  const handleUpdateStatus = async (newStatus: ProductStatus) => {
+    if (!product || !currentUser || currentUser.id !== product.sellerId) return;
+    const { error } = await supabase.from('products').update({ status: newStatus }).eq('id', product.id);
+    if (!error) { setProduct({ ...product, status: newStatus }); addToast("Đã cập nhật trạng thái.", "success"); }
+  };
+
   const CommentItem = ({ comment, isReply = false }: { comment: Comment, isReply?: boolean }) => (
       <div className={`flex gap-3 group ${isReply ? 'mt-3 pl-4 border-l-2 border-gray-100' : 'mt-4'}`}>
           <Link to={`/profile/${comment.userId}`}>
@@ -205,12 +222,12 @@ const ProductDetailPage: React.FC = () => {
                   <p className="text-sm text-gray-800 whitespace-pre-wrap">{comment.content}</p>
               </div>
               <div className="flex items-center gap-4 mt-1 ml-2">
-                  {!isReply && !isRestricted && (
+                  {!isReply && !isViewerRestricted && (
                       <button onClick={() => setActiveReplyId(activeReplyId === comment.id ? null : comment.id)} className="text-xs font-bold text-gray-500 hover:text-[#034EA2] cursor-pointer">Trả lời</button>
                   )}
                   {currentUser?.id === comment.userId && <button onClick={() => handleDelete(comment.id)} className="text-xs text-gray-400 hover:text-red-500">Xóa</button>}
               </div>
-              {activeReplyId === comment.id && !isRestricted && (
+              {activeReplyId === comment.id && !isViewerRestricted && (
                   <form onSubmit={(e) => handleSubmit(e, comment.id)} className="flex gap-2 mt-2 max-w-lg">
                       <input autoFocus type="text" className="flex-1 text-sm border border-gray-300 rounded-full px-4 py-1.5 focus:outline-none focus:border-[#034EA2]" placeholder={`Trả lời ${comment.userName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} />
                       <button disabled={submitting} className="bg-[#034EA2] text-white p-1.5 rounded-full hover:bg-blue-800"><Send className="w-3.5 h-3.5" /></button>
@@ -234,7 +251,6 @@ const ProductDetailPage: React.FC = () => {
 
   return (
     <div className="bg-slate-50 min-h-screen pb-20 relative font-sans">
-      {/* Header, Images, Description... */}
       <div className="bg-white border-b border-gray-200 sticky top-0 z-20">
           <div className="max-w-7xl mx-auto px-4 h-14 flex items-center text-sm text-gray-500">
               <Link to="/market" className="hover:text-[#034EA2] flex items-center font-medium"><ArrowLeft className="w-4 h-4 mr-1"/> Chợ BK</Link>
@@ -246,7 +262,6 @@ const ProductDetailPage: React.FC = () => {
       <div className="pt-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
           <div className="lg:grid lg:grid-cols-12 lg:gap-8">
             <div className="lg:col-span-8 flex flex-col gap-6">
-                {/* Image Section */}
                 <div className="bg-white rounded-2xl p-2 border border-gray-200 shadow-sm">
                     <div className="aspect-video w-full rounded-xl overflow-hidden bg-gray-100 relative group">
                         <img src={mainImage || product.images[0]} alt={product.title} className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105" />
@@ -257,26 +272,37 @@ const ProductDetailPage: React.FC = () => {
                         )}
                     </div>
                 </div>
+                
+                {product.images.length > 1 && (
+                    <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide">
+                        {product.images.map((img, idx) => (
+                            <button key={idx} onClick={() => setMainImage(img)} className={`w-20 h-20 flex-shrink-0 rounded-xl border-2 overflow-hidden transition-all ${mainImage === img ? 'border-[#034EA2] ring-2 ring-blue-100' : 'border-transparent hover:border-gray-300'}`}>
+                                <img src={img} className="w-full h-full object-cover" />
+                            </button>
+                        ))}
+                    </div>
+                )}
 
-                {/* Comment Section */}
+                <div className="bg-white rounded-2xl p-8 border border-gray-200 shadow-sm">
+                    <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center border-l-4 border-[#034EA2] pl-3">Mô tả sản phẩm</h2>
+                    <div className="prose max-w-none text-gray-700 whitespace-pre-line leading-relaxed text-base">{product.description}</div>
+                </div>
+
+                {/* KHU VỰC BÌNH LUẬN */}
                 <div className="bg-white rounded-2xl p-8 border border-gray-200 shadow-sm" id="comments">
                     <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center">Hỏi đáp <span className="ml-2 bg-gray-100 text-gray-600 text-sm py-0.5 px-3 rounded-full">{comments.length}</span></h3>
 
-                    {/* HIỂN THỊ CHẶN BÌNH LUẬN */}
-                    {isRestricted ? (
+                    {isViewerRestricted ? (
                         <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-center gap-3 mb-8 animate-pulse">
-                            <ShieldAlert className="text-red-600 flex-shrink-0" size={24} />
-                            <div>
-                              <p className="text-red-800 text-sm font-black uppercase tracking-tight">Tài khoản bị hạn chế</p>
-                              <p className="text-red-700 text-xs font-bold">Chức năng bình luận đã khóa do mang huy hiệu 'Không đáng tin'.</p>
-                            </div>
+                            <ShieldAlert className="text-red-600" size={24} />
+                            <p className="text-red-800 text-sm font-bold uppercase tracking-tight">Tính năng bình luận của bạn đã bị khóa do xử phạt.</p>
                         </div>
                     ) : currentUser ? (
                         <form onSubmit={(e) => handleSubmit(e)} className="flex gap-4 mb-8">
                             <img src={currentUser.avatar} className="w-10 h-10 rounded-full border border-gray-200 object-cover" />
                             <div className="flex-1 relative">
                                 <input type="text" className="w-full border border-gray-300 rounded-full py-3 px-5 pr-12 focus:outline-none focus:ring-2 focus:ring-[#034EA2] bg-gray-50" placeholder="Bạn thắc mắc gì về sản phẩm này?" value={newComment} onChange={(e) => setNewComment(e.target.value)} />
-                                <button disabled={!newComment.trim() || submitting} className="absolute right-2 top-1.5 p-1.5 bg-[#034EA2] text-white rounded-full"><Send className="w-4 h-4" /></button>
+                                <button disabled={!newComment.trim() || submitting} className="absolute right-2 top-1.5 p-1.5 bg-[#034EA2] text-white rounded-full hover:bg-blue-800"><Send className="w-4 h-4" /></button>
                             </div>
                         </form>
                     ) : <div className="bg-gray-50 p-4 rounded-xl text-center mb-8 border border-dashed border-gray-300 text-sm font-bold">Vui lòng <Link to="/auth" className="text-[#034EA2] hover:underline">đăng nhập</Link> để bình luận.</div>}
@@ -285,13 +311,13 @@ const ProductDetailPage: React.FC = () => {
                 </div>
             </div>
 
-            {/* Sidebar with Seller Info and Chat Block */}
             <div className="lg:col-span-4 space-y-6 mt-8 lg:mt-0">
-                {/* ... Price box giữ nguyên ... */}
                 <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-lg relative overflow-hidden">
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-blue-50 rounded-bl-[100px] -mr-6 -mt-6 z-0"></div>
                     <div className="relative z-10">
                         <div className="mb-3 flex justify-between items-start">
                             {renderStatusBadge()}
+                            <div className="text-xs text-gray-400 flex items-center bg-gray-100 px-2 py-1 rounded-full"><Eye className="w-3 h-3 mr-1"/> {product.view_count || 0} lượt xem</div>
                         </div>
                         <h1 className="text-2xl font-black text-gray-900 leading-tight mb-3">{product.title}</h1>
                         <div className="text-4xl font-extrabold text-[#034EA2] mb-6 tracking-tight">{product.price === 0 ? "FREE" : product.price.toLocaleString('vi-VN') + " đ"}</div>
@@ -308,22 +334,27 @@ const ProductDetailPage: React.FC = () => {
                         <div className="flex items-center gap-4 mb-6">
                             <Link to={`/profile/${seller.id}`} className="relative">
                                 <img className={`h-16 w-16 rounded-full border-4 shadow-md object-cover ${isSellerRestricted ? 'border-red-200' : 'border-white'}`} src={seller.avatar} />
+                                {seller.isVerified && !isSellerRestricted && <div className="absolute -bottom-1 -right-1 bg-blue-500 text-white p-1 rounded-full border-2 border-white"><ShieldCheck size={12} fill="currentColor"/></div>}
                                 {isSellerRestricted && <div className="absolute -bottom-1 -right-1 bg-red-500 text-white p-1 rounded-full border-2 border-white animate-pulse"><ShieldAlert size={12} /></div>}
                             </Link>
                             <div className="flex-1 overflow-hidden">
                                 <h4 className="font-bold text-lg text-gray-900 truncate"><Link to={`/profile/${seller.id}`} className="hover:text-[#034EA2]">{seller.name}</Link></h4>
                                 {isSellerRestricted && <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded font-black uppercase">Không đáng tin</span>}
+                                <div className="flex gap-2 mt-2">
+                                  {currentUser?.id !== seller.id && (
+                                      <button onClick={handleFollow} className={`text-xs font-bold px-3 py-1 rounded-full border ${isFollowing ? 'bg-gray-100 text-gray-600' : 'bg-blue-50 text-[#034EA2]'}`}>{isFollowing ? 'Đang theo dõi' : '+ Theo dõi'}</button>
+                                  )}
+                                </div>
                             </div>
                         </div>
 
-                        {/* NÚT CHAT BỊ KHÓA NẾU BỊ PHẠT */}
                         {currentUser?.id !== seller.id && (
                             <Link 
-                                to={isRestricted || isSellerRestricted || product.status === ProductStatus.SOLD ? '#' : `/chat?partnerId=${seller.id}`} 
-                                className={`w-full py-4 rounded-xl font-bold flex justify-center items-center shadow-lg transition-all ${isRestricted || isSellerRestricted || product.status === ProductStatus.SOLD ? 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none scale-100' : 'bg-[#034EA2] text-white hover:bg-blue-800'}`}
+                                to={isViewerRestricted || isSellerRestricted || product.status === ProductStatus.SOLD ? '#' : `/chat?partnerId=${seller.id}`} 
+                                className={`w-full py-4 rounded-xl font-bold flex justify-center items-center shadow-lg transition-all ${isViewerRestricted || isSellerRestricted || product.status === ProductStatus.SOLD ? 'bg-gray-200 text-gray-400 cursor-not-allowed' : 'bg-[#034EA2] text-white hover:bg-blue-800'}`}
                             >
                                 <MessageCircle className="w-5 h-5 mr-2" /> 
-                                {isRestricted ? 'BẠN BỊ HẠN CHẾ' : isSellerRestricted ? 'NB BỊ HẠN CHẾ' : product.status === ProductStatus.SOLD ? 'ĐÃ BÁN' : 'Nhắn tin ngay'}
+                                {isViewerRestricted ? 'BẠN BỊ HẠN CHẾ' : isSellerRestricted ? 'NB BỊ HẠN CHẾ' : product.status === ProductStatus.SOLD ? 'ĐÃ BÁN' : 'Nhắn tin ngay'}
                             </Link>
                         )}
                     </div>
@@ -332,19 +363,20 @@ const ProductDetailPage: React.FC = () => {
           </div>
       </div>
 
-      {/* MOBILE STICKY FOOTER */}
       <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t p-4 z-50 flex gap-3 pb-safe">
             <button onClick={handleToggleLike} className={`p-3.5 rounded-xl border-2 ${isLiked ? 'border-red-100 bg-red-50 text-red-500' : 'bg-gray-50 text-gray-600'}`}><Heart className={isLiked ? 'fill-current' : ''}/></button>
             {currentUser?.id !== product.sellerId ? (
                 <button 
-                onClick={() => !(isRestricted || isSellerRestricted || product.status === ProductStatus.SOLD) && navigate(`/chat?partnerId=${product.sellerId}`)}
-                className={`flex-1 rounded-xl font-bold text-lg flex items-center justify-center gap-2 ${isRestricted || isSellerRestricted || product.status === ProductStatus.SOLD ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-[#034EA2] text-white'}`}
-                disabled={isRestricted || isSellerRestricted || product.status === ProductStatus.SOLD}
+                onClick={() => !(isViewerRestricted || isSellerRestricted || product.status === ProductStatus.SOLD) && navigate(`/chat?partnerId=${product.sellerId}`)}
+                className={`flex-1 rounded-xl font-bold text-lg flex items-center justify-center gap-2 ${isViewerRestricted || isSellerRestricted || product.status === ProductStatus.SOLD ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-[#034EA2] text-white'}`}
+                disabled={isViewerRestricted || isSellerRestricted || product.status === ProductStatus.SOLD}
                 >
-                    {isRestricted ? 'BỊ CHẶN' : isSellerRestricted ? 'NB BỊ CHẶN' : product.status === ProductStatus.SOLD ? 'ĐÃ BÁN' : 'Chat ngay'}
+                    {isViewerRestricted ? 'BỊ CHẶN' : isSellerRestricted ? 'NB BỊ CHẶN' : product.status === ProductStatus.SOLD ? 'ĐÃ BÁN' : 'Chat ngay'}
                 </button>
             ) : <button onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})} className="flex-1 bg-gray-800 text-white rounded-xl font-bold text-lg">Quản lý tin</button>}
       </div>
+
+      {/* REPORT MODAL GIỮ NGUYÊN... */}
     </div>
   );
 };
