@@ -6,6 +6,7 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   isAdmin: boolean;
+  isRestricted: boolean; // Trạng thái có đang mang huy hiệu/bị phạt không
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string, name: string, studentId: string) => Promise<{ error: any }>;
   signOut: () => Promise<void>;
@@ -19,9 +20,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [isRestricted, setIsRestricted] = useState(false);
   const mounted = useRef(false);
 
-  // --- HÀM LẤY THÔNG TIN CHI TIẾT NGƯỜI DÙNG ---
   const fetchProfile = async (sessionUser: any) => {
     try {
       const { data, error } = await supabase
@@ -31,20 +32,22 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         .single();
 
       if (data && mounted.current) {
-        const profile = data as DBProfile & { banned?: boolean };
+        const profile = data as DBProfile & { banned?: boolean, ban_until?: string | null };
 
-        // 1. KIỂM TRA TRẠNG THÁI BỊ KHÓA (BANNED)
+        // 1. KIỂM TRA BAN VĨNH VIỄN (Chỉ dành cho banned = true)
         if (profile.banned === true) {
-          await supabase.auth.signOut(); // Xóa phiên đăng nhập ngay lập tức
+          await supabase.auth.signOut();
           setUser(null);
           setIsAdmin(false);
           setLoading(false);
-          // Thông báo cho người dùng
-          alert("Tài khoản của bạn đã bị khóa do vi phạm chính sách của BK Market.");
+          alert("Tài khoản của bạn đã bị khóa vĩnh viễn!");
           return;
         }
 
-        // 2. PHÂN QUYỀN ADMIN
+        // 2. KIỂM TRA BAN CÓ THỜI HẠN (Huy hiệu không đáng tin)
+        const restrictedStatus = profile.ban_until ? new Date(profile.ban_until) > new Date() : false;
+        setIsRestricted(restrictedStatus);
+
         const userRole = profile.role === 'admin' ? 'admin' : 'user';
         
         const userData: User = {
@@ -54,26 +57,27 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           studentId: profile.student_id || '',
           avatar: profile.avatar_url || sessionUser.user_metadata?.avatar_url || `https://ui-avatars.com/api/?name=${profile.name || 'User'}&background=random`,
           isVerified: profile.is_verified,
-          role: userRole
+          role: userRole,
+          banUntil: profile.ban_until // Thêm cái này vào types của bạn nếu cần
         };
         
         setUser(userData);
         setIsAdmin(userRole === 'admin');
       } else if (!data && mounted.current) {
-        // Fallback nếu không tìm thấy profile (trường hợp hiếm)
         setUser({
           id: sessionUser.id,
           email: sessionUser.email,
           name: sessionUser.user_metadata?.name || sessionUser.email?.split('@')[0],
           studentId: '',
-          avatar: sessionUser.user_metadata?.avatar_url || 'https://via.placeholder.com/150',
+          avatar: 'https://via.placeholder.com/150',
           isVerified: false,
           role: 'user'
         });
         setIsAdmin(false);
+        setIsRestricted(false);
       }
     } catch (error) {
-      console.error("Lỗi xác thực hệ thống:", error);
+      console.error("Lỗi xác thực:", error);
     } finally {
       if (mounted.current) setLoading(false);
     }
@@ -81,17 +85,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     mounted.current = true;
-
-    // Kiểm tra session khi ứng dụng khởi chạy
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        fetchProfile(session.user);
-      } else {
-        if (mounted.current) setLoading(false);
-      }
+      if (session?.user) fetchProfile(session.user);
+      else if (mounted.current) setLoading(false);
     });
 
-    // Lắng nghe sự thay đổi trạng thái đăng nhập (Realtime Auth)
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (mounted.current) {
         if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
@@ -99,6 +97,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
           setIsAdmin(false);
+          setIsRestricted(false);
           setLoading(false);
         }
       }
@@ -110,11 +109,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
-  // --- CÁC HÀM TIỆN ÍCH ---
-
-  const signIn = async (email: string, password: string) => {
-    return await supabase.auth.signInWithPassword({ email, password });
-  };
+  // --- ACTIONS ---
+  const signIn = async (email: string, password: string) => supabase.auth.signInWithPassword({ email, password });
 
   const signUp = async (email: string, password: string, name: string, studentId: string) => {
     const { data, error } = await supabase.auth.signUp({
@@ -122,46 +118,32 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       password,
       options: { data: { name, student_id: studentId } },
     });
-
     if (error) return { error };
-
     if (data.user) {
-      // Tạo profile mặc định trong Database
       await supabase.from('profiles').insert({
         id: data.user.id,
-        name: name,
+        name,
         student_id: studentId,
-        email: email,
-        avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}&background=random`,
+        email,
+        avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}`,
         role: 'user',
         is_verified: false,
-        banned: false // Mặc định không bị khóa
+        banned: false,
+        ban_until: null
       });
     }
     return { error: null };
   };
 
-  const signOut = async () => {
-    await supabase.auth.signOut();
-  };
-
-  const resetPassword = async (email: string) => {
-    const resetUrl = `${window.location.origin}/#/reset-password`;
-    return await supabase.auth.resetPasswordForEmail(email, { redirectTo: resetUrl });
-  };
-
-  const updatePassword = async (newPassword: string) => {
-    return await supabase.auth.updateUser({ password: newPassword });
-  };
+  const signOut = async () => await supabase.auth.signOut();
+  const resetPassword = async (email: string) => supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/#/reset-password` });
+  const updatePassword = async (newPassword: string) => supabase.auth.updateUser({ password: newPassword });
 
   return (
-    <AuthContext.Provider value={{ user, loading, isAdmin, signIn, signUp, signOut, resetPassword, updatePassword }}>
+    <AuthContext.Provider value={{ user, loading, isAdmin, isRestricted, signIn, signUp, signOut, resetPassword, updatePassword }}>
       {!loading ? children : (
         <div className="h-screen flex items-center justify-center bg-gray-50">
-          <div className="flex flex-col items-center">
-             <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600 mb-4"></div>
-             <p className="text-gray-500 font-bold animate-pulse">Đang xác thực hệ thống...</p>
-          </div>
+          <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
         </div>
       )}
     </AuthContext.Provider>
