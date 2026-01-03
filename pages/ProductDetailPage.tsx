@@ -14,7 +14,7 @@ import { playNotificationSound } from '../utils/audio';
 
 const ProductDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const { user: currentUser } = useAuth();
+  const { user: currentUser, isRestricted } = useAuth();
   const navigate = useNavigate();
   const { addToast } = useToast();
   
@@ -22,33 +22,39 @@ const ProductDetailPage: React.FC = () => {
   const [seller, setSeller] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   
+  // States tính năng phụ
   const [copied, setCopied] = useState(false); 
   const [isFollowing, setIsFollowing] = useState(false);
   const [isLiked, setIsLiked] = useState(false);
   
+  // Report Modal
   const [showReportModal, setShowReportModal] = useState(false);
   const [reportReason, setReportReason] = useState('fraud');
   const [reportDescription, setReportDescription] = useState('');
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
 
+  // Comments & Related
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
   const [replyContent, setReplyContent] = useState('');
   const [activeReplyId, setActiveReplyId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
+
+  // Ảnh chính
   const [mainImage, setMainImage] = useState('');
 
-  // --- LOGIC KIỂM TRA XỬ PHẠT CHẶN TRIỆT ĐỂ (Dựa trên huy hiệu không đáng tin) ---
+  // --- LOGIC KIỂM TRA XỬ PHẠT THỜI GIAN THỰC ---
   const isViewerRestricted = useMemo(() => {
-    if (!currentUser?.banUntil) return false;
-    return new Date(currentUser.banUntil) > new Date();
-  }, [currentUser?.banUntil]);
+    // Ưu tiên kiểm tra trực tiếp ngày banUntil từ object user để tránh delay context
+    if (currentUser?.banUntil && new Date(currentUser.banUntil) > new Date()) return true;
+    return isRestricted;
+  }, [currentUser, isRestricted]);
 
   const isSellerRestricted = useMemo(() => {
-    if (!seller?.banUntil) return false;
-    return new Date(seller.banUntil) > new Date();
-  }, [seller?.banUntil]);
+    if (seller?.banUntil && new Date(seller.banUntil) > new Date()) return true;
+    return false;
+  }, [seller]);
 
   useEffect(() => {
     if (id) {
@@ -57,19 +63,21 @@ const ProductDetailPage: React.FC = () => {
         window.scrollTo(0, 0);
         
         const channel = supabase.channel(`realtime-comments-${id}`)
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments', filter: `product_id=eq.${id}` }, 
-            () => fetchComments())
+            .on('postgres_changes', { 
+                event: 'INSERT', 
+                schema: 'public', 
+                table: 'comments', 
+                filter: `product_id=eq.${id}` 
+            }, () => fetchComments())
             .subscribe();
         return () => { supabase.removeChannel(channel); };
     }
   }, [id]);
 
   useEffect(() => {
-    if (currentUser && seller) {
-      checkFollowStatus();
-      checkLikeStatus();
-    }
-  }, [currentUser, seller]);
+    if (currentUser && seller) checkFollowStatus();
+    if (currentUser && id) checkLikeStatus();
+  }, [currentUser, seller, id]);
 
   const checkFollowStatus = async () => {
     if (!seller || !currentUser) return;
@@ -128,13 +136,58 @@ const ProductDetailPage: React.FC = () => {
       }
   };
 
+  // --- CÁC HÀM XỬ LÝ ACTION (FIX LỖI BUILD) ---
+
+  const handleToggleLike = async () => {
+    if (!currentUser) return navigate('/auth');
+    try {
+      if (isLiked) {
+        await supabase.from('saved_products').delete().eq('user_id', currentUser.id).eq('product_id', id);
+        setIsLiked(false);
+      } else {
+        await supabase.from('saved_products').insert({ user_id: currentUser.id, product_id: id });
+        setIsLiked(true);
+        playNotificationSound();
+        addToast("Đã lưu vào yêu thích", "success");
+      }
+    } catch (err) { console.error(err); }
+  };
+
+  const handleSubmitReport = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser || !product) return;
+    setIsSubmittingReport(true);
+    try {
+        const finalReason = reportDescription ? `${reportReason}: ${reportDescription}` : reportReason;
+        await supabase.from('reports').insert({
+            reporter_id: currentUser.id, product_id: product.id, reason: finalReason, status: 'pending' 
+        });
+        addToast("Đã gửi báo cáo vi phạm", "success");
+        setShowReportModal(false);
+        setReportDescription('');
+    } catch (err) { addToast("Lỗi gửi báo cáo", "error"); } finally { setIsSubmittingReport(false); }
+  };
+
+  const handleFollow = async () => {
+    if (!currentUser) return navigate('/auth');
+    if (!seller) return;
+    try {
+      if (isFollowing) {
+        await supabase.from('follows').delete().eq('follower_id', currentUser.id).eq('following_id', seller.id);
+        setIsFollowing(false);
+      } else {
+        await supabase.from('follows').insert({ follower_id: currentUser.id, following_id: seller.id });
+        setIsFollowing(true);
+        addToast(`Đang theo dõi ${seller.name}`, "success");
+      }
+    } catch (err) { console.error(err); }
+  };
+
   const handleSubmit = async (e: React.FormEvent, parentId: string | null = null) => {
       e.preventDefault();
-      
-      // CHẶN BÌNH LUẬN: Kiểm tra trực tiếp thời gian ban tại thời điểm click
-      const isBanned = currentUser?.banUntil && new Date(currentUser.banUntil) > new Date();
-      if (isBanned) {
-          addToast(`Tài khoản của bạn bị hạn chế bình luận cho đến ${new Date(currentUser.banUntil!).toLocaleString('vi-VN')}`, "error");
+      // CHẶN BÌNH LUẬN NẾU BỊ BAN (BẢO MẬT TẦNG LOGIC)
+      if (isViewerRestricted) {
+          addToast("Bạn không thể bình luận do tài khoản đang bị hạn chế.", "error");
           return; 
       }
 
@@ -148,12 +201,25 @@ const ProductDetailPage: React.FC = () => {
         });
         if (error) throw error;
         setNewComment(''); setReplyContent(''); setActiveReplyId(null);
+        fetchComments();
         playNotificationSound();
-      } catch (err: any) {
-        addToast("Không thể gửi bình luận. Bạn đang bị xử phạt.", "error");
-      } finally {
-        setSubmitting(false);
-      }
+      } catch (err: any) { addToast("Lỗi gửi bình luận", "error"); } finally { setSubmitting(false); }
+  };
+
+  const handleDeleteComment = async (cid: string) => {
+    if(confirm("Xóa bình luận này?")) {
+        await supabase.from('comments').delete().eq('id', cid);
+        fetchComments();
+    }
+  };
+
+  const handleUpdateStatus = async (newStatus: ProductStatus) => {
+    if (!product || !currentUser || currentUser.id !== product.sellerId) return;
+    const { error } = await supabase.from('products').update({ status: newStatus }).eq('id', product.id);
+    if (!error) { 
+        setProduct({ ...product, status: newStatus }); 
+        addToast("Đã cập nhật trạng thái tin đăng", "success"); 
+    }
   };
 
   const CommentItem = ({ comment, isReply = false }: { comment: Comment, isReply?: boolean }) => (
@@ -173,11 +239,10 @@ const ProductDetailPage: React.FC = () => {
                   <p className="text-sm text-gray-800 whitespace-pre-wrap">{comment.content}</p>
               </div>
               <div className="flex items-center gap-4 mt-1 ml-2">
-                  {/* CHẶN NÚT TRẢ LỜI NẾU BỊ BAN */}
                   {!isReply && !isViewerRestricted && (
-                      <button onClick={() => setActiveReplyId(activeReplyId === comment.id ? null : comment.id)} className="text-xs font-bold text-gray-500 hover:text-[#034EA2]">Trả lời</button>
+                      <button onClick={() => setActiveReplyId(activeReplyId === comment.id ? null : comment.id)} className="text-xs font-bold text-gray-500 hover:text-[#034EA2] cursor-pointer">Trả lời</button>
                   )}
-                  {currentUser?.id === comment.userId && <button onClick={() => handleDelete(comment.id)} className="text-xs text-gray-400 hover:text-red-500">Xóa</button>}
+                  {currentUser?.id === comment.userId && <button onClick={() => handleDeleteComment(comment.id)} className="text-xs text-gray-400 hover:text-red-500">Xóa</button>}
               </div>
               {activeReplyId === comment.id && !isViewerRestricted && (
                   <form onSubmit={(e) => handleSubmit(e, comment.id)} className="flex gap-2 mt-2 max-w-lg">
@@ -192,27 +257,14 @@ const ProductDetailPage: React.FC = () => {
       </div>
   );
 
-  const handleDelete = async (cid: string) => {
-    if(confirm("Xóa bình luận?")) {
-        await supabase.from('comments').delete().eq('id', cid);
-        fetchComments();
-    }
-  };
-
   const renderStatusBadge = () => {
       if (product?.status === ProductStatus.SOLD) return <span className="bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit"><XCircle className="w-4 h-4 mr-1"/> ĐÃ BÁN</span>;
       if (product?.status === ProductStatus.PENDING) return <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit"><AlertTriangle className="w-4 h-4 mr-1"/> ĐANG GIAO DỊCH</span>;
       return <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit"><CheckCircle className="w-4 h-4 mr-1"/> CÒN HÀNG</span>;
   };
 
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(window.location.href);
-    setCopied(true); setTimeout(() => setCopied(false), 2000);
-    addToast("Đã sao chép liên kết!", "success");
-  };
-
   if (loading) return <div className="min-h-screen flex items-center justify-center font-sans"><Loader2 className="animate-spin text-[#034EA2]" size={40} /></div>;
-  if (!product) return <div className="py-20 text-center text-red-500 font-sans">Sản phẩm không tồn tại</div>;
+  if (!product) return <div className="py-20 text-center text-red-500">Sản phẩm không tồn tại</div>;
 
   return (
     <div className="bg-slate-50 min-h-screen pb-20 relative font-sans">
@@ -243,17 +295,16 @@ const ProductDetailPage: React.FC = () => {
                     <div className="prose max-w-none text-gray-700 whitespace-pre-line leading-relaxed text-base">{product.description}</div>
                 </div>
 
-                {/* KHU VỰC BÌNH LUẬN */}
                 <div className="bg-white rounded-2xl p-8 border border-gray-200 shadow-sm" id="comments">
                     <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center">Hỏi đáp <span className="ml-2 bg-gray-100 text-gray-600 text-sm py-0.5 px-3 rounded-full">{comments.length}</span></h3>
 
-                    {/* HIỂN THỊ BANNER CHẶN NẾU BỊ BAN */}
+                    {/* HIỂN THỊ CHẶN BÌNH LUẬN NẾU BỊ BAN */}
                     {isViewerRestricted ? (
                         <div className="p-4 bg-red-50 border border-red-200 rounded-2xl flex items-center gap-3 mb-8 animate-pulse">
                             <ShieldAlert className="text-red-600 flex-shrink-0" size={24} />
                             <div>
                                 <p className="text-red-800 text-sm font-black uppercase tracking-tight">Tài khoản bị hạn chế</p>
-                                <p className="text-red-700 text-xs font-bold">Chức năng bình luận của bạn đã bị khóa tạm thời do vi phạm chính sách cộng đồng.</p>
+                                <p className="text-red-700 text-xs font-bold">Chức năng bình luận đã khóa do mang huy hiệu 'Không đáng tin'.</p>
                             </div>
                         </div>
                     ) : currentUser ? (
@@ -266,8 +317,9 @@ const ProductDetailPage: React.FC = () => {
                                   placeholder="Bạn thắc mắc gì về sản phẩm này?" 
                                   value={newComment} 
                                   onChange={(e) => setNewComment(e.target.value)} 
+                                  disabled={isViewerRestricted}
                                 />
-                                <button disabled={!newComment.trim() || submitting} className="absolute right-2 top-1.5 p-1.5 bg-[#034EA2] text-white rounded-full hover:bg-blue-800 transition-colors"><Send className="w-4 h-4" /></button>
+                                <button disabled={!newComment.trim() || submitting || isViewerRestricted} className="absolute right-2 top-1.5 p-1.5 bg-[#034EA2] text-white rounded-full"><Send className="w-4 h-4" /></button>
                             </div>
                         </form>
                     ) : <div className="bg-gray-50 p-4 rounded-xl text-center mb-8 border border-dashed border-gray-300 text-sm font-bold">Vui lòng <Link to="/auth" className="text-[#034EA2] hover:underline">đăng nhập</Link> để bình luận.</div>}
@@ -287,7 +339,7 @@ const ProductDetailPage: React.FC = () => {
                         <div className="text-4xl font-extrabold text-[#034EA2] mb-6 tracking-tight">{product.price === 0 ? "FREE" : product.price.toLocaleString('vi-VN') + " đ"}</div>
                         <div className="flex gap-3">
                             <button onClick={handleToggleLike} className={`flex-1 py-3 rounded-xl font-bold border transition-all flex items-center justify-center gap-2 ${isLiked ? 'bg-red-50 border-red-200 text-red-500' : 'bg-white border-gray-300 text-gray-600'}`}><Heart className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} /> {isLiked ? 'Đã lưu' : 'Lưu tin'}</button>
-                            <button onClick={handleCopyLink} className="p-3 rounded-xl border border-gray-300 text-gray-600">{copied ? <Check className="text-green-500"/> : <Share2 />}</button>
+                            <button onClick={() => { navigator.clipboard.writeText(window.location.href); addToast("Đã copy link", "success"); }} className="p-3 rounded-xl border border-gray-300 text-gray-600"><Share2 /></button>
                             <button onClick={() => setShowReportModal(true)} className="p-3 rounded-xl border border-gray-300 text-gray-400 hover:text-red-500"><Flag /></button>
                         </div>
                     </div>
@@ -303,12 +355,16 @@ const ProductDetailPage: React.FC = () => {
                             </Link>
                             <div className="flex-1 overflow-hidden">
                                 <h4 className="font-bold text-lg text-gray-900 truncate"><Link to={`/profile/${seller.id}`} className="hover:text-[#034EA2]">{seller.name}</Link></h4>
-                                {isSellerRestricted && <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded font-black uppercase tracking-tighter">Không đáng tin</span>}
+                                {isSellerRestricted && <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded font-black uppercase">Không đáng tin</span>}
+                                <div className="flex gap-2 mt-2">
+                                  {currentUser?.id !== seller.id && (
+                                      <button onClick={handleFollow} className={`text-xs font-bold px-3 py-1 rounded-full border ${isFollowing ? 'bg-gray-100 text-gray-600' : 'bg-blue-50 text-[#034EA2]'}`}>{isFollowing ? 'Đang theo dõi' : '+ Theo dõi'}</button>
+                                  )}
+                                </div>
                             </div>
                         </div>
 
-                        {/* NÚT CHAT BỊ KHÓA NẾU BỊ PHẠT HOẶC NB BỊ PHẠT */}
-                        {currentUser?.id !== seller.id && (
+                        {currentUser?.id !== seller.id ? (
                             <Link 
                                 to={isViewerRestricted || isSellerRestricted || product.status === ProductStatus.SOLD ? '#' : `/chat?partnerId=${seller.id}`} 
                                 className={`w-full py-4 rounded-xl font-bold flex justify-center items-center shadow-lg transition-all ${isViewerRestricted || isSellerRestricted || product.status === ProductStatus.SOLD ? 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none' : 'bg-[#034EA2] text-white hover:bg-blue-800'}`}
@@ -316,17 +372,18 @@ const ProductDetailPage: React.FC = () => {
                                 <MessageCircle className="w-5 h-5 mr-2" /> 
                                 {isViewerRestricted ? 'BẠN BỊ HẠN CHẾ' : isSellerRestricted ? 'NB BỊ HẠN CHẾ' : product.status === ProductStatus.SOLD ? 'ĐÃ BÁN' : 'Nhắn tin ngay'}
                             </Link>
+                        ) : (
+                            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+                                <p className="text-xs font-bold text-[#034EA2] mb-3 uppercase text-center">Quản lý tin đăng</p>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <button onClick={() => handleUpdateStatus(ProductStatus.AVAILABLE)} className={`py-2 text-[10px] font-bold rounded-lg ${product.status === ProductStatus.AVAILABLE ? 'bg-green-500 text-white shadow-md' : 'bg-white text-gray-600'}`}>Bán</button>
+                                    <button onClick={() => handleUpdateStatus(ProductStatus.PENDING)} className={`py-2 text-[10px] font-bold rounded-lg ${product.status === ProductStatus.PENDING ? 'bg-yellow-400 text-yellow-900 shadow-md' : 'bg-white text-gray-600'}`}>Giao dịch</button>
+                                    <button onClick={() => handleUpdateStatus(ProductStatus.SOLD)} className={`py-2 text-[10px] font-bold rounded-lg ${product.status === ProductStatus.SOLD ? 'bg-red-500 text-white shadow-md' : 'bg-white text-gray-600'}`}>Đã Bán</button>
+                                </div>
+                            </div>
                         )}
                     </div>
                 )}
-                
-                <div className="bg-orange-50 rounded-2xl p-5 border border-orange-100 flex gap-4">
-                    <div className="bg-orange-100 p-2 rounded-full h-fit"><AlertTriangle className="w-6 h-6 text-orange-600" /></div>
-                    <div>
-                        <h4 className="font-bold text-orange-800 text-sm mb-1">Lưu ý an toàn</h4>
-                        <p className="text-xs text-orange-700 leading-relaxed">Nên giao dịch trực tiếp tại sảnh H6, thư viện A2 hoặc canteen B4. Không chuyển tiền trước.</p>
-                    </div>
-                </div>
             </div>
           </div>
       </div>
@@ -354,22 +411,15 @@ const ProductDetailPage: React.FC = () => {
                     <button onClick={() => setShowReportModal(false)} className="text-gray-400"><X size={20} /></button>
                 </div>
                 <form onSubmit={handleSubmitReport} className="p-6 space-y-4">
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">Lý do</label>
-                        <select value={reportReason} onChange={(e) => setReportReason(e.target.value)} className="w-full border-gray-300 rounded-xl p-3 bg-gray-50 border outline-none focus:ring-2 focus:ring-red-500">
-                            <option value="fraud">Lừa đảo / Hàng giả</option>
-                            <option value="inappropriate">Nội dung thô tục</option>
-                            <option value="duplicate">Spam / Tin trùng lặp</option>
-                            <option value="other">Khác</option>
-                        </select>
-                    </div>
-                    <div>
-                        <label className="block text-sm font-bold text-gray-700 mb-1">Chi tiết</label>
-                        <textarea rows={3} value={reportDescription} onChange={(e) => setReportDescription(e.target.value)} placeholder="Mô tả thêm..." className="w-full border-gray-300 rounded-xl p-3 border resize-none outline-none focus:ring-2 focus:ring-red-500" />
-                    </div>
-                    <div className="flex justify-end space-x-3 pt-2">
-                        <button type="button" onClick={() => setShowReportModal(false)} className="px-4 py-2 font-bold text-gray-600 hover:bg-gray-100 rounded-lg transition">Hủy</button>
-                        <button type="submit" disabled={isSubmittingReport} className="px-6 py-2 font-bold text-white bg-red-600 rounded-lg hover:bg-red-700 shadow-md shadow-red-200 transition">{isSubmittingReport ? 'Đang gửi...' : 'Gửi báo cáo'}</button>
+                    <select value={reportReason} onChange={(e) => setReportReason(e.target.value)} className="w-full border-gray-300 rounded-xl p-3 bg-gray-50 border">
+                        <option value="fraud">Lừa đảo / Hàng giả</option>
+                        <option value="duplicate">Spam</option>
+                        <option value="other">Khác</option>
+                    </select>
+                    <textarea rows={3} value={reportDescription} onChange={(e) => setReportDescription(e.target.value)} placeholder="Chi tiết..." className="w-full border-gray-300 rounded-xl p-3 border resize-none" />
+                    <div className="flex justify-end gap-3">
+                        <button type="button" onClick={() => setShowReportModal(false)} className="px-4 py-2 font-bold text-gray-600">Hủy</button>
+                        <button type="submit" disabled={isSubmittingReport} className="px-6 py-2 font-bold text-white bg-red-600 rounded-lg">{isSubmittingReport ? 'Đang gửi...' : 'Gửi báo cáo'}</button>
                     </div>
                 </form>
             </div>
