@@ -55,7 +55,8 @@ export interface User {
   role?: 'user' | 'admin';
   rating?: number; 
   // Độ uy tín "Đồng môn": Dân kỹ thuật tin tưởng dựa trên số lượt giao dịch
-  completedTrades?: number; 
+  completedTrades?: number;
+  banUntil?: string | null; 
 }
 
 export interface Product {

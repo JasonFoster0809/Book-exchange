@@ -31,21 +31,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         .eq('id', sessionUser.id)
         .single();
 
+      if (error) throw error;
+
       if (data && mounted.current) {
+        // Ép kiểu để nhận diện các cột xử phạt mới
         const profile = data as DBProfile & { banned?: boolean, ban_until?: string | null };
 
-        // 1. KIỂM TRA BAN VĨNH VIỄN (Chỉ dành cho banned = true)
+        // 1. KIỂM TRA BAN VĨNH VIỄN
         if (profile.banned === true) {
           await supabase.auth.signOut();
           setUser(null);
           setIsAdmin(false);
           setLoading(false);
-          alert("Tài khoản của bạn đã bị khóa vĩnh viễn!");
+          alert("Tài khoản của bạn đã bị khóa vĩnh viễn do vi phạm chính sách.");
           return;
         }
 
         // 2. KIỂM TRA BAN CÓ THỜI HẠN (Huy hiệu không đáng tin)
-        const restrictedStatus = profile.ban_until ? new Date(profile.ban_until) > new Date() : false;
+        const restrictedStatus = profile.ban_until 
+          ? new Date(profile.ban_until) > new Date() 
+          : false;
         setIsRestricted(restrictedStatus);
 
         const userRole = profile.role === 'admin' ? 'admin' : 'user';
@@ -55,29 +60,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           email: sessionUser.email,
           name: profile.name || sessionUser.user_metadata?.name || 'User',
           studentId: profile.student_id || '',
-          avatar: profile.avatar_url || sessionUser.user_metadata?.avatar_url || `https://ui-avatars.com/api/?name=${profile.name || 'User'}&background=random`,
-          isVerified: profile.is_verified,
+          avatar: profile.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(profile.name || 'User')}&background=random`,
+          isVerified: profile.is_verified || false,
           role: userRole,
-          banUntil: profile.ban_until // Thêm cái này vào types của bạn nếu cần
+          banUntil: profile.ban_until // Đảm bảo trong interface User đã có trường này
         };
         
         setUser(userData);
         setIsAdmin(userRole === 'admin');
-      } else if (!data && mounted.current) {
-        setUser({
-          id: sessionUser.id,
-          email: sessionUser.email,
-          name: sessionUser.user_metadata?.name || sessionUser.email?.split('@')[0],
-          studentId: '',
-          avatar: 'https://via.placeholder.com/150',
-          isVerified: false,
-          role: 'user'
-        });
-        setIsAdmin(false);
-        setIsRestricted(false);
       }
     } catch (error) {
-      console.error("Lỗi xác thực:", error);
+      console.error("Lỗi xác thực hệ thống:", error);
+      if (mounted.current) setUser(null);
     } finally {
       if (mounted.current) setLoading(false);
     }
@@ -85,11 +79,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     mounted.current = true;
+
+    // Kiểm tra session hiện tại
     supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) fetchProfile(session.user);
-      else if (mounted.current) setLoading(false);
+      if (session?.user) {
+        fetchProfile(session.user);
+      } else {
+        if (mounted.current) setLoading(false);
+      }
     });
 
+    // Lắng nghe thay đổi trạng thái Auth
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (mounted.current) {
         if ((event === 'SIGNED_IN' || event === 'USER_UPDATED') && session?.user) {
@@ -110,7 +110,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   // --- ACTIONS ---
-  const signIn = async (email: string, password: string) => supabase.auth.signInWithPassword({ email, password });
+
+  const signIn = async (email: string, password: string) => {
+    return await supabase.auth.signInWithPassword({ email, password });
+  };
 
   const signUp = async (email: string, password: string, name: string, studentId: string) => {
     const { data, error } = await supabase.auth.signUp({
@@ -118,13 +121,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       password,
       options: { data: { name, student_id: studentId } },
     });
+
     if (error) return { error };
+
     if (data.user) {
       await supabase.from('profiles').insert({
         id: data.user.id,
-        name,
+        name: name,
         student_id: studentId,
-        email,
+        email: email,
         avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(name)}`,
         role: 'user',
         is_verified: false,
@@ -135,14 +140,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     return { error: null };
   };
 
-  const signOut = async () => await supabase.auth.signOut();
-  const resetPassword = async (email: string) => supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/#/reset-password` });
-  const updatePassword = async (newPassword: string) => supabase.auth.updateUser({ password: newPassword });
+  // Sửa lỗi Promise<{error}> không khớp với Promise<void>
+  const signOut = async () => {
+    await supabase.auth.signOut();
+  };
+
+  const resetPassword = async (email: string) => {
+    const resetUrl = `${window.location.origin}/#/reset-password`;
+    return await supabase.auth.resetPasswordForEmail(email, { redirectTo: resetUrl });
+  };
+
+  const updatePassword = async (newPassword: string) => {
+    return await supabase.auth.updateUser({ password: newPassword });
+  };
 
   return (
     <AuthContext.Provider value={{ user, loading, isAdmin, isRestricted, signIn, signUp, signOut, resetPassword, updatePassword }}>
       {!loading ? children : (
-        <div className="h-screen flex items-center justify-center bg-gray-50">
+        <div className="h-screen flex items-center justify-center bg-white">
           <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
         </div>
       )}
