@@ -14,7 +14,7 @@ import { playNotificationSound } from '../utils/audio';
 
 const ProductDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const { user: currentUser, isRestricted } = useAuth();
+  const { user: currentUser } = useAuth();
   const navigate = useNavigate();
   const { addToast } = useToast();
   
@@ -36,18 +36,16 @@ const ProductDetailPage: React.FC = () => {
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
   const [mainImage, setMainImage] = useState('');
 
-  // --- LOGIC CHẶN TRIỆT ĐỂ: KIỂM TRA THỜI GIAN THỰC ---
-  const isViewerRestricted = useMemo(() => {
-    const now = new Date();
-    if (currentUser?.banUntil && new Date(currentUser.banUntil) > now) return true;
-    return isRestricted;
-  }, [currentUser, isRestricted]);
+  // --- LOGIC TRỌNG TÂM: KHÓA DỰA TRÊN HUY HIỆU KHÔNG ĐÁNG TIN ---
+  const isViewerUntrusted = useMemo(() => {
+    if (!currentUser?.banUntil) return false;
+    return new Date(currentUser.banUntil) > new Date();
+  }, [currentUser?.banUntil]);
 
-  const isSellerRestricted = useMemo(() => {
-    const now = new Date();
-    if (seller?.banUntil && new Date(seller.banUntil) > now) return true;
-    return false;
-  }, [seller]);
+  const isSellerUntrusted = useMemo(() => {
+    if (!seller?.banUntil) return false;
+    return new Date(seller.banUntil) > new Date();
+  }, [seller?.banUntil]);
 
   useEffect(() => {
     if (id) {
@@ -55,16 +53,19 @@ const ProductDetailPage: React.FC = () => {
         fetchComments();
         window.scrollTo(0, 0);
         const channel = supabase.channel(`realtime-comments-${id}`)
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments', filter: `product_id=eq.${id}` }, () => fetchComments())
+            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments', filter: `product_id=eq.${id}` }, 
+            () => fetchComments())
             .subscribe();
         return () => { supabase.removeChannel(channel); };
     }
   }, [id]);
 
   useEffect(() => {
-    if (currentUser && seller) checkFollowStatus();
-    if (currentUser && id) checkLikeStatus();
-  }, [currentUser, seller, id]);
+    if (currentUser && seller) {
+      checkFollowStatus();
+      checkLikeStatus();
+    }
+  }, [currentUser, seller]);
 
   const checkFollowStatus = async () => {
     if (!seller || !currentUser) return;
@@ -84,11 +85,17 @@ const ProductDetailPage: React.FC = () => {
         await supabase.rpc('increment_view_count', { product_id: id });
         const { data: pData, error: pError } = await supabase.from('products').select('*').eq('id', id).single();
         if (pError) throw pError;
-        const mappedProduct: Product = { ...pData, sellerId: pData.seller_id, images: pData.images || [], tradeMethod: pData.trade_method, postedAt: pData.posted_at, status: pData.status as ProductStatus, view_count: pData.view_count || 0 };
+        
+        const mappedProduct: Product = {
+            ...pData, sellerId: pData.seller_id, images: pData.images || [], tradeMethod: pData.trade_method, postedAt: pData.posted_at,
+            status: pData.status as ProductStatus, view_count: pData.view_count || 0
+        };
         setProduct(mappedProduct);
         setMainImage(mappedProduct.images[0]);
+
         const { data: uData } = await supabase.from('profiles').select('*').eq('id', mappedProduct.sellerId).single();
         if (uData) setSeller({ ...uData, id: uData.id, avatar: uData.avatar_url, isVerified: uData.is_verified, studentId: uData.student_id, banUntil: uData.ban_until });
+
         const { data: relatedData } = await supabase.from('products').select('*').eq('category', mappedProduct.category).neq('id', mappedProduct.id).eq('status', 'available').limit(4);
         if (relatedData) setRelatedProducts(relatedData.map((item: any) => ({ ...item, sellerId: item.seller_id, images: item.images || [], postedAt: item.posted_at, tradeMethod: item.trade_method })));
       } catch (err) { console.error(err); } finally { setLoading(false); }
@@ -97,10 +104,21 @@ const ProductDetailPage: React.FC = () => {
   const fetchComments = async () => {
       const { data } = await supabase.from('comments').select(`*, user:user_id(name, avatar_url)`).eq('product_id', id).order('created_at', { ascending: true });
       if (data) {
-          const rawComments: Comment[] = data.map((c: any) => ({ id: c.id, productId: c.product_id, userId: c.user_id, userName: c.user?.name || 'Người dùng', userAvatar: c.user?.avatar_url || 'https://via.placeholder.com/150', content: c.content, createdAt: c.created_at, parentId: c.parent_id }));
+          const rawComments: Comment[] = data.map((c: any) => ({
+              id: c.id, productId: c.product_id, userId: c.user_id,
+              userName: c.user?.name || 'Người dùng',
+              userAvatar: c.user?.avatar_url || 'https://via.placeholder.com/150',
+              content: c.content, createdAt: c.created_at, parentId: c.parent_id
+          }));
           const rootComments = rawComments.filter(c => !c.parentId);
           const replyMap = new Map<string, Comment[]>();
-          rawComments.forEach(c => { if (c.parentId) { const list = replyMap.get(c.parentId) || []; list.push(c); replyMap.set(c.parentId, list); } });
+          rawComments.forEach(c => {
+              if (c.parentId) {
+                  const list = replyMap.get(c.parentId) || [];
+                  list.push(c);
+                  replyMap.set(c.parentId, list);
+              }
+          });
           rootComments.forEach(root => root.replies = replyMap.get(root.id) || []);
           setComments(rootComments.reverse());
       }
@@ -126,37 +144,23 @@ const ProductDetailPage: React.FC = () => {
     if (!currentUser || !product) return;
     setIsSubmittingReport(true);
     try {
-        const finalReason = reportDescription ? `${reportReason}: ${reportDescription}` : reportReason;
-        await supabase.from('reports').insert({ reporter_id: currentUser.id, product_id: product.id, reason: finalReason, status: 'pending' });
-        addToast("Đã gửi báo cáo", "success");
+        await supabase.from('reports').insert({
+            reporter_id: currentUser.id, product_id: product.id, reason: `${reportReason}: ${reportDescription}`, status: 'pending' 
+        });
+        addToast("Đã gửi báo cáo vi phạm", "success");
         setShowReportModal(false);
-        setReportDescription('');
     } catch (err) { addToast("Lỗi gửi báo cáo", "error"); } finally { setIsSubmittingReport(false); }
-  };
-
-  const handleFollow = async () => {
-    if (!currentUser) return navigate('/auth');
-    if (!seller) return;
-    try {
-      if (isFollowing) {
-        await supabase.from('follows').delete().eq('follower_id', currentUser.id).eq('following_id', seller.id);
-        setIsFollowing(false);
-      } else {
-        await supabase.from('follows').insert({ follower_id: currentUser.id, following_id: seller.id });
-        setIsFollowing(true);
-      }
-    } catch (err) { console.error(err); }
   };
 
   const handleSubmit = async (e: React.FormEvent, parentId: string | null = null) => {
       e.preventDefault();
       
-      // LỚP BẢO MẬT CUỐI: Kiểm tra thời gian thực ngay khi bấm nút
+      // KHÓA CỨNG Ở TẦNG LOGIC: Kiểm tra thời gian thực ngay khi nhấn nút
       const now = new Date();
-      const actualBanDate = currentUser?.banUntil ? new Date(currentUser.banUntil) : null;
+      const isActuallyBanned = currentUser?.banUntil && new Date(currentUser.banUntil) > now;
       
-      if ((actualBanDate && actualBanDate > now) || isRestricted) {
-          addToast(`Bạn bị hạn chế bình luận đến ${actualBanDate?.toLocaleString('vi-VN')}`, "error");
+      if (isActuallyBanned) {
+          addToast("Tài khoản của bạn đang bị hạn chế bình luận do mang huy hiệu 'Không đáng tin'.", "error");
           return; 
       }
 
@@ -165,12 +169,18 @@ const ProductDetailPage: React.FC = () => {
       
       setSubmitting(true);
       try {
-        const { error } = await supabase.from('comments').insert({ product_id: id, user_id: currentUser.id, content: content.trim(), parent_id: parentId });
+        const { error } = await supabase.from('comments').insert({
+            product_id: id, user_id: currentUser.id, content: content.trim(), parent_id: parentId
+        });
         if (error) throw error;
         setNewComment(''); setReplyContent(''); setActiveReplyId(null);
         fetchComments();
         playNotificationSound();
-      } catch (err: any) { addToast("Lỗi hệ thống", "error"); } finally { setSubmitting(false); }
+      } catch (err: any) {
+        addToast("Lỗi: " + err.message, "error");
+      } finally {
+        setSubmitting(false);
+      }
   };
 
   const handleDeleteComment = async (cid: string) => {
@@ -180,166 +190,164 @@ const ProductDetailPage: React.FC = () => {
     }
   };
 
-  const handleUpdateStatus = async (newStatus: ProductStatus) => {
-    if (!product || !currentUser || currentUser.id !== product.sellerId) return;
-    const { error } = await supabase.from('products').update({ status: newStatus }).eq('id', product.id);
-    if (!error) { setProduct({ ...product, status: newStatus }); addToast("Đã cập nhật trạng thái", "success"); }
-  };
-
   const CommentItem = ({ comment, isReply = false }: { comment: Comment, isReply?: boolean }) => (
       <div className={`flex gap-3 group ${isReply ? 'mt-3 pl-4 border-l-2 border-gray-100' : 'mt-4'}`}>
-          <Link to={`/profile/${comment.userId}`}><img src={comment.userAvatar} className={`rounded-full object-cover border border-gray-200 ${isReply ? 'w-8 h-8' : 'w-10 h-10'}`} /></Link>
+          <Link to={`/profile/${comment.userId}`}>
+             <img src={comment.userAvatar} className={`rounded-full object-cover border ${isReply ? 'w-8 h-8' : 'w-10 h-10'}`} />
+          </Link>
           <div className="flex-1">
-              <div className="bg-gray-50 rounded-2xl px-4 py-2 relative inline-block min-w-[200px]">
-                  <div className="flex items-center justify-between mb-1 gap-4">
-                      <Link to={`/profile/${comment.userId}`} className="font-bold text-sm text-gray-900 hover:underline">{comment.userName} {seller && comment.userId === seller.id && <span className="ml-2 text-[10px] bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded border border-blue-200 font-bold">Người bán</span>}</Link>
-                      <span className="text-xs text-gray-400">{new Date(comment.createdAt).toLocaleDateString('vi-VN')}</span>
-                  </div>
+              <div className="bg-gray-50 rounded-2xl px-4 py-2 inline-block min-w-[180px] relative">
+                  <p className="font-bold text-sm text-gray-900">{comment.userName}</p>
                   <p className="text-sm text-gray-800 whitespace-pre-wrap">{comment.content}</p>
               </div>
               <div className="flex items-center gap-4 mt-1 ml-2">
-                  {!isReply && !isViewerRestricted && <button onClick={() => setActiveReplyId(activeReplyId === comment.id ? null : comment.id)} className="text-xs font-bold text-gray-500 hover:text-[#034EA2] cursor-pointer">Trả lời</button>}
+                  {/* CHẶN TRẢ LỜI NẾU KHÔNG ĐÁNG TIN */}
+                  {!isReply && !isViewerUntrusted && (
+                      <button onClick={() => setActiveReplyId(activeReplyId === comment.id ? null : comment.id)} className="text-xs font-bold text-gray-500 hover:text-blue-600">Trả lời</button>
+                  )}
                   {currentUser?.id === comment.userId && <button onClick={() => handleDeleteComment(comment.id)} className="text-xs text-gray-400 hover:text-red-500">Xóa</button>}
               </div>
-              {activeReplyId === comment.id && !isViewerRestricted && (
+              {activeReplyId === comment.id && !isViewerUntrusted && (
                   <form onSubmit={(e) => handleSubmit(e, comment.id)} className="flex gap-2 mt-2 max-w-lg">
-                      <input autoFocus type="text" className="flex-1 text-sm border border-gray-300 rounded-full px-4 py-1.5 focus:outline-none focus:border-[#034EA2]" placeholder={`Trả lời ${comment.userName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} />
-                      <button disabled={submitting} className="bg-[#034EA2] text-white p-1.5 rounded-full hover:bg-blue-800"><Send className="w-3.5 h-3.5" /></button>
+                      <input autoFocus type="text" className="flex-1 text-sm border rounded-full px-4 py-1.5 focus:border-blue-500 outline-none" placeholder={`Phản hồi ${comment.userName}...`} value={replyContent} onChange={(e) => setReplyContent(e.target.value)} />
+                      <button disabled={submitting} className="bg-blue-600 text-white p-1.5 rounded-full"><Send size={14} /></button>
                   </form>
               )}
-              {comment.replies && comment.replies.length > 0 && <div className="ml-2">{comment.replies.map(reply => <CommentItem key={reply.id} comment={reply} isReply={true} />)}</div>}
+              {comment.replies && comment.replies.length > 0 && (
+                  <div className="ml-2">{comment.replies.map(reply => <CommentItem key={reply.id} comment={reply} isReply={true} />)}</div>
+              )}
           </div>
       </div>
   );
 
-  const renderStatusBadge = () => {
-      if (product?.status === ProductStatus.SOLD) return <span className="bg-red-100 text-red-800 px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit"><XCircle className="w-4 h-4 mr-1"/> ĐÃ BÁN</span>;
-      if (product?.status === ProductStatus.PENDING) return <span className="bg-yellow-100 text-yellow-800 px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit"><AlertTriangle className="w-4 h-4 mr-1"/> ĐANG GIAO DỊCH</span>;
-      return <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-bold flex items-center w-fit"><CheckCircle className="w-4 h-4 mr-1"/> CÒN HÀNG</span>;
-  };
-
-  if (loading) return <div className="min-h-screen flex items-center justify-center font-sans"><Loader2 className="animate-spin text-[#034EA2]" size={40} /></div>;
-  if (!product) return <div className="py-20 text-center text-red-500 font-sans font-bold">Sản phẩm không tồn tại</div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center font-sans"><Loader2 className="animate-spin text-blue-600" size={40} /></div>;
+  if (!product) return <div className="py-20 text-center text-red-500 font-bold">Sản phẩm không tồn tại</div>;
 
   return (
-    <div className="bg-slate-50 min-h-screen pb-20 relative font-sans">
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-20">
-          <div className="max-w-7xl mx-auto px-4 h-14 flex items-center text-sm text-gray-500">
-              <Link to="/market" className="hover:text-[#034EA2] flex items-center font-medium"><ArrowLeft className="w-4 h-4 mr-1"/> Chợ BK</Link>
-              <ChevronRight className="w-4 h-4 mx-2 text-gray-300"/>
-              <span className="text-gray-900 font-medium truncate max-w-[200px]">{product.title}</span>
-          </div>
+    <div className="bg-slate-50 min-h-screen pb-20 font-sans">
+      <div className="bg-white border-b sticky top-0 z-20 p-4">
+        <div className="max-w-7xl mx-auto flex items-center gap-2 text-sm text-gray-500">
+          <Link to="/market" className="hover:text-blue-600 font-medium flex items-center gap-1"><ArrowLeft size={16}/> Chợ BK</Link>
+          <ChevronRight size={14} />
+          <span className="text-gray-900 font-medium truncate">{product.title}</span>
+        </div>
       </div>
 
-      <div className="pt-6 max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
-          <div className="lg:grid lg:grid-cols-12 lg:gap-8">
-            <div className="lg:col-span-8 flex flex-col gap-6">
-                <div className="bg-white rounded-2xl p-2 border border-gray-200 shadow-sm">
-                    <div className="aspect-video w-full rounded-xl overflow-hidden bg-gray-100 relative group">
-                        <img src={mainImage || product.images[0]} alt={product.title} className="w-full h-full object-contain transition-transform duration-500 group-hover:scale-105" />
-                        {product.status === ProductStatus.SOLD && <div className="absolute inset-0 bg-black/50 flex items-center justify-center backdrop-blur-sm"><span className="text-white font-black text-4xl border-4 border-white p-4 -rotate-12 rounded opacity-90 uppercase tracking-widest">ĐÃ BÁN</span></div>}
-                    </div>
-                </div>
-                <div className="bg-white rounded-2xl p-8 border border-gray-200 shadow-sm">
-                    <h2 className="text-xl font-bold text-gray-900 mb-6 flex items-center border-l-4 border-[#034EA2] pl-3">Mô tả sản phẩm</h2>
-                    <div className="prose max-w-none text-gray-700 whitespace-pre-line leading-relaxed text-base">{product.description}</div>
-                </div>
+      <div className="max-w-7xl mx-auto px-4 mt-6 lg:grid lg:grid-cols-12 lg:gap-8">
+        <div className="lg:col-span-8 space-y-6">
+          <div className="bg-white rounded-2xl p-2 shadow-sm border overflow-hidden relative">
+            <img src={mainImage} className="w-full aspect-video object-contain rounded-xl bg-gray-50" alt="main" />
+            {product.status === 'sold' && <div className="absolute inset-0 bg-black/40 flex items-center justify-center"><span className="text-white font-black text-4xl border-4 p-4 -rotate-12 uppercase tracking-widest">ĐÃ BÁN</span></div>}
+          </div>
 
-                {/* KHU VỰC BÌNH LUẬN */}
-                <div className="bg-white rounded-2xl p-8 border border-gray-200 shadow-sm" id="comments">
-                    <h3 className="text-xl font-bold text-gray-900 mb-6 flex items-center">Hỏi đáp <span className="ml-2 bg-gray-100 text-gray-600 text-sm py-0.5 px-3 rounded-full">{comments.length}</span></h3>
+          <div className="bg-white rounded-2xl p-8 shadow-sm border">
+            <h2 className="text-xl font-bold mb-4 border-l-4 border-blue-600 pl-3">Mô tả sản phẩm</h2>
+            <div className="text-gray-700 whitespace-pre-wrap leading-relaxed">{product.description}</div>
+          </div>
 
-                    {isViewerRestricted ? (
-                        <div className="p-4 bg-red-50 border-2 border-red-100 rounded-2xl flex items-center gap-4 mb-8 animate-pulse shadow-sm">
-                            <ShieldAlert className="text-red-600 flex-shrink-0" size={32} />
-                            <div>
-                                <p className="text-red-800 text-sm font-black uppercase tracking-widest">Tài khoản bị hạn chế</p>
-                                <p className="text-red-700 text-xs font-bold">Chức năng bình luận đã khóa do vi phạm quy định cộng đồng.</p>
-                            </div>
-                        </div>
-                    ) : currentUser ? (
-                        <form onSubmit={(e) => handleSubmit(e)} className="flex gap-4 mb-8">
-                            <img src={currentUser.avatar} className="w-10 h-10 rounded-full border border-gray-200 object-cover" />
-                            <div className="flex-1 relative">
-                                <input 
-                                  type="text" 
-                                  className="w-full border border-gray-300 rounded-full py-3 px-5 pr-12 focus:outline-none focus:ring-2 focus:ring-[#034EA2] bg-gray-50" 
-                                  placeholder="Bạn thắc mắc gì về sản phẩm này?" 
-                                  value={newComment} 
-                                  onChange={(e) => setNewComment(e.target.value)} 
-                                  disabled={isViewerRestricted}
-                                />
-                                <button disabled={!newComment.trim() || submitting || isViewerRestricted} className="absolute right-2 top-1.5 p-1.5 bg-[#034EA2] text-white rounded-full hover:bg-blue-800 transition-colors"><Send className="w-4 h-4" /></button>
-                            </div>
-                        </form>
-                    ) : <div className="bg-gray-50 p-4 rounded-xl text-center mb-8 border border-dashed border-gray-300 text-sm font-bold">Vui lòng <Link to="/auth" className="text-[#034EA2] hover:underline">đăng nhập</Link> để bình luận.</div>}
-                    
-                    <div className="space-y-4">{comments.map(comment => <CommentItem key={comment.id} comment={comment} />)}</div>
+          {/* KHU VỰC HỎI ĐÁP */}
+          <div className="bg-white rounded-2xl p-8 shadow-sm border" id="comments">
+            <h3 className="text-xl font-bold mb-6 flex items-center gap-2">Hỏi đáp <span className="bg-gray-100 text-gray-500 text-xs px-2 py-1 rounded-full">{comments.length}</span></h3>
+
+            {/* KHÓA HIỂN THỊ NẾU MANG HUY HIỆU KHÔNG ĐÁNG TIN */}
+            {isViewerUntrusted ? (
+              <div className="p-5 bg-red-50 border-2 border-red-100 rounded-2xl flex items-center gap-4 mb-8 animate-pulse shadow-sm">
+                <ShieldAlert className="text-red-600 flex-shrink-0" size={32} />
+                <div>
+                  <p className="text-red-800 text-sm font-black uppercase tracking-widest">Tài khoản bị hạn chế</p>
+                  <p className="text-red-700 text-xs font-bold">Chức năng bình luận đã khóa do tài khoản mang huy hiệu 'Không đáng tin'.</p>
                 </div>
-            </div>
-
-            <div className="lg:col-span-4 space-y-6 mt-8 lg:mt-0">
-                <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-lg relative overflow-hidden">
-                    <div className="relative z-10">
-                        <div className="mb-3 flex justify-between items-start">{renderStatusBadge()} <div className="text-xs text-gray-400 flex items-center bg-gray-100 px-2 py-1 rounded-full"><Eye className="w-3 h-3 mr-1"/> {product.view_count || 0} lượt xem</div></div>
-                        <h1 className="text-2xl font-black text-gray-900 leading-tight mb-3">{product.title}</h1>
-                        <div className="text-4xl font-extrabold text-[#034EA2] mb-6 tracking-tight">{product.price === 0 ? "FREE" : product.price.toLocaleString('vi-VN') + " đ"}</div>
-                        <div className="flex gap-3">
-                            <button onClick={handleToggleLike} className={`flex-1 py-3 rounded-xl font-bold border transition-all flex items-center justify-center gap-2 ${isLiked ? 'bg-red-50 border-red-200 text-red-500' : 'bg-white border-gray-300 text-gray-600'}`}><Heart className={`w-5 h-5 ${isLiked ? 'fill-current' : ''}`} /> {isLiked ? 'Đã lưu' : 'Lưu tin'}</button>
-                            <button onClick={() => { navigator.clipboard.writeText(window.location.href); addToast("Đã copy link", "success"); }} className="p-3 rounded-xl border border-gray-300 text-gray-600"><Share2 /></button>
-                            <button onClick={() => setShowReportModal(true)} className="p-3 rounded-xl border border-gray-300 text-gray-400 hover:text-red-500"><Flag /></button>
-                        </div>
-                    </div>
+              </div>
+            ) : currentUser ? (
+              <form onSubmit={(e) => handleSubmit(e)} className="flex gap-4 mb-10">
+                <img src={currentUser.avatar} className="w-12 h-12 rounded-full border shadow-sm object-cover" />
+                <div className="flex-1 relative">
+                  <input 
+                    type="text" 
+                    className="w-full border-2 border-gray-100 rounded-full py-3 px-6 pr-14 focus:border-blue-500 outline-none bg-gray-50" 
+                    placeholder="Đặt câu hỏi cho người bán..." 
+                    value={newComment} 
+                    onChange={(e) => setNewComment(e.target.value)} 
+                  />
+                  <button type="submit" disabled={!newComment.trim() || submitting} className="absolute right-2 top-2 p-2 bg-blue-600 text-white rounded-full"><Send size={20}/></button>
                 </div>
+              </form>
+            ) : (
+              <div className="text-center p-6 bg-gray-50 rounded-2xl mb-8 border-2 border-dashed border-gray-200">
+                Vui lòng <Link to="/auth" className="text-blue-600 font-bold underline">Đăng nhập</Link> để bình luận.
+              </div>
+            )}
 
-                {seller && (
-                    <div className="bg-white rounded-2xl p-6 border border-gray-200 shadow-sm">
-                        <div className="flex items-center gap-4 mb-6">
-                            <Link to={`/profile/${seller.id}`} className="relative"><img className={`h-16 w-16 rounded-full border-4 shadow-md object-cover ${isSellerRestricted ? 'border-red-400' : 'border-white'}`} src={seller.avatar} />{isSellerRestricted && <div className="absolute -bottom-1 -right-1 bg-red-500 text-white p-1 rounded-full border-2 border-white animate-pulse"><ShieldAlert size={12} /></div>}</Link>
-                            <div className="flex-1 overflow-hidden">
-                                <h4 className="font-bold text-lg text-gray-900 truncate"><Link to={`/profile/${seller.id}`} className="hover:text-[#034EA2]">{seller.name}</Link></h4>
-                                {isSellerRestricted && <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded font-black uppercase">Không đáng tin</span>}
-                                <div className="mt-2"><button onClick={handleFollow} className={`text-xs font-bold px-3 py-1 rounded-full border ${isFollowing ? 'bg-gray-100 text-gray-600' : 'bg-blue-50 text-[#034EA2]'}`}>{isFollowing ? 'Đang theo dõi' : '+ Theo dõi'}</button></div>
-                            </div>
-                        </div>
-                        {currentUser?.id !== seller.id ? (
-                            <Link to={isViewerRestricted || isSellerRestricted || product.status === ProductStatus.SOLD ? '#' : `/chat?partnerId=${seller.id}`} className={`w-full py-4 rounded-xl font-bold flex justify-center items-center shadow-lg transition-all ${isViewerRestricted || isSellerRestricted || product.status === ProductStatus.SOLD ? 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none' : 'bg-[#034EA2] text-white hover:bg-blue-800'}`}>
-                                <MessageCircle className="w-5 h-5 mr-2" /> {isViewerRestricted ? 'BẠN BỊ HẠN CHẾ' : isSellerRestricted ? 'NB BỊ HẠN CHẾ' : product.status === ProductStatus.SOLD ? 'ĐÃ BÁN' : 'Nhắn tin ngay'}
-                            </Link>
-                        ) : (
-                            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
-                                <p className="text-xs font-bold text-[#034EA2] mb-3 uppercase text-center">Quản lý tin đăng</p>
-                                <div className="grid grid-cols-3 gap-2">
-                                    <button onClick={() => handleUpdateStatus(ProductStatus.AVAILABLE)} className={`py-2 text-[10px] font-bold rounded-lg ${product.status === ProductStatus.AVAILABLE ? 'bg-green-500 text-white shadow-md' : 'bg-white text-gray-600'}`}>Bán</button>
-                                    <button onClick={() => handleUpdateStatus(ProductStatus.PENDING)} className={`py-2 text-[10px] font-bold rounded-lg ${product.status === ProductStatus.PENDING ? 'bg-yellow-400 text-yellow-900 shadow-md' : 'bg-white text-gray-600'}`}>GD</button>
-                                    <button onClick={() => handleUpdateStatus(ProductStatus.SOLD)} className={`py-2 text-[10px] font-bold rounded-lg ${product.status === ProductStatus.SOLD ? 'bg-red-500 text-white shadow-md' : 'bg-white text-gray-600'}`}>Đã Bán</button>
-                                </div>
-                            </div>
-                        )}
-                    </div>
-                )}
+            <div className="space-y-2">
+              {comments.map(c => <CommentItem key={c.id} comment={c} />)}
             </div>
           </div>
+        </div>
+
+        {/* SIDEBAR */}
+        <div className="lg:col-span-4 mt-8 lg:mt-0 space-y-6">
+          <div className="bg-white rounded-2xl p-6 shadow-lg border-2 border-white">
+             <h1 className="text-2xl font-black text-gray-900 mb-3 leading-tight">{product.title}</h1>
+             <div className="text-3xl font-black text-blue-700 mb-6">{product.price === 0 ? "FREE" : product.price.toLocaleString('vi-VN') + " đ"}</div>
+             <div className="flex gap-2">
+               <button onClick={handleToggleLike} className={`flex-1 py-3 rounded-xl font-bold border-2 transition-all flex items-center justify-center gap-2 ${isLiked ? 'bg-red-50 border-red-100 text-red-500' : 'bg-white border-gray-100 text-gray-600'}`}><Heart size={20} className={isLiked ? 'fill-current' : ''}/> {isLiked ? 'Đã lưu' : 'Lưu tin'}</button>
+               <button onClick={() => { navigator.clipboard.writeText(window.location.href); addToast("Đã copy link", "success"); }} className="p-3 border-2 border-gray-100 rounded-xl text-gray-400 hover:bg-gray-50"><Share2 size={20}/></button>
+             </div>
+          </div>
+
+          {seller && (
+            <div className="bg-white rounded-2xl p-6 shadow-sm border">
+              <div className="flex items-center gap-4 mb-6">
+                <Link to={`/profile/${seller.id}`} className="relative">
+                  <img src={seller.avatar} className={`w-16 h-16 rounded-full border-4 object-cover ${isSellerUntrusted ? 'border-red-400' : 'border-blue-50'}`} />
+                  {isSellerUntrusted && <div className="absolute -bottom-1 -right-1 bg-red-500 text-white p-1 rounded-full border-2 border-white animate-pulse"><ShieldAlert size={12} /></div>}
+                  {seller.isVerified && !isSellerUntrusted && <div className="absolute -bottom-1 -right-1 bg-blue-500 text-white p-1 rounded-full border-2 border-white"><ShieldCheck size={12} fill="currentColor"/></div>}
+                </Link>
+                <div className="overflow-hidden">
+                  <h4 className="font-bold text-lg truncate"><Link to={`/profile/${seller.id}`} className="hover:text-blue-600">{seller.name}</Link></h4>
+                  {isSellerUntrusted && <span className="text-[10px] bg-red-100 text-red-700 px-2 py-0.5 rounded font-black uppercase">Không đáng tin</span>}
+                </div>
+              </div>
+
+              {/* KHÓA NHẮN TIN 2 CHIỀU NẾU MỘT TRONG HAI BỊ BAN */}
+              <Link 
+                to={(isViewerUntrusted || isSellerUntrusted || product.status === 'sold') ? '#' : `/chat?partnerId=${seller.id}`} 
+                className={`w-full py-4 rounded-xl font-bold flex justify-center items-center shadow-lg transition-all ${ (isViewerUntrusted || isSellerUntrusted || product.status === 'sold') ? 'bg-gray-200 text-gray-400 cursor-not-allowed shadow-none' : 'bg-blue-600 text-white hover:bg-blue-700' }`}
+              >
+                <MessageCircle className="mr-2" size={20} /> 
+                {isViewerUntrusted ? 'BẠN BỊ HẠN CHẾ' : isSellerUntrusted ? 'NB BỊ HẠN CHẾ' : product.status === 'sold' ? 'ĐÃ BÁN' : 'Nhắn tin ngay'}
+              </Link>
+            </div>
+          )}
+
+          <div className="bg-orange-50 border-2 border-orange-100 p-5 rounded-2xl flex gap-3">
+             <AlertTriangle className="text-orange-500 flex-shrink-0" size={20} />
+             <div className="text-[11px] text-orange-800 leading-relaxed font-medium">Giao dịch trực tiếp tại trường. Không chuyển khoản trước để tránh lừa đảo.</div>
+          </div>
+        </div>
       </div>
 
-      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t p-4 z-50 flex gap-3 pb-safe shadow-[0_-4px_20px_rgba(0,0,0,0.1)]">
-            <button onClick={handleToggleLike} className={`p-3.5 rounded-xl border-2 ${isLiked ? 'border-red-100 bg-red-50 text-red-500' : 'bg-gray-50 text-gray-600'}`}><Heart className={isLiked ? 'fill-current' : ''}/></button>
-            {currentUser?.id !== product.sellerId ? (
-                <button onClick={() => !(isViewerRestricted || isSellerRestricted || product.status === ProductStatus.SOLD) && navigate(`/chat?partnerId=${product.sellerId}`)} className={`flex-1 rounded-xl font-bold text-lg flex items-center justify-center gap-2 ${isViewerRestricted || isSellerRestricted || product.status === ProductStatus.SOLD ? 'bg-gray-300 text-gray-500 cursor-not-allowed' : 'bg-[#034EA2] text-white'}`} disabled={isViewerRestricted || isSellerRestricted || product.status === ProductStatus.SOLD}>
-                    <MessageCircle className="w-5 h-5"/> {isViewerRestricted ? 'BỊ CHẶN' : isSellerRestricted ? 'NB BỊ CHẶN' : product.status === ProductStatus.SOLD ? 'ĐÃ BÁN' : 'Chat'}
-                </button>
-            ) : <button onClick={() => window.scrollTo({top: 0, behavior: 'smooth'})} className="flex-1 bg-gray-800 text-white rounded-xl font-bold text-lg">Quản lý tin</button>}
+      {/* Mobile Footer */}
+      <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t p-4 z-50 flex gap-3 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] pb-safe">
+          <button onClick={handleToggleLike} className={`p-3 rounded-xl border-2 ${isLiked ? 'border-red-100 bg-red-50 text-red-500' : 'border-gray-100 text-gray-400'}`}><Heart size={24}/></button>
+          <button 
+            onClick={() => !(isViewerUntrusted || isSellerUntrusted || product.status === 'sold') && navigate(`/chat?partnerId=${seller?.id}`)}
+            disabled={isViewerUntrusted || isSellerUntrusted || product.status === 'sold'}
+            className={`flex-1 rounded-xl font-bold flex items-center justify-center gap-2 ${isViewerUntrusted || isSellerUntrusted || product.status === 'sold' ? 'bg-gray-200 text-gray-400' : 'bg-blue-600 text-white shadow-lg'}`}
+          >
+            {isViewerUntrusted ? 'BỊ CHẶN' : isSellerUntrusted ? 'NB BỊ CHẶN' : 'Nhắn tin'}
+          </button>
       </div>
 
       {/* REPORT MODAL */}
       {showReportModal && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
             <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
-                <div className="bg-red-50 p-4 border-b border-red-100 flex justify-between items-center"><div className="flex items-center text-red-700 font-bold"><AlertTriangle size={20} className="mr-2" /> Báo cáo vi phạm</div><button onClick={() => setShowReportModal(false)} className="text-gray-400"><X size={20} /></button></div>
+                <div className="bg-red-50 p-4 border-b border-red-100 flex justify-between items-center"><div className="flex items-center text-red-700 font-bold"><AlertTriangle size={20} className="mr-2" /> Báo cáo vi phạm</div><button onClick={() => setShowReportModal(false)}><X size={20} /></button></div>
                 <form onSubmit={handleSubmitReport} className="p-6 space-y-4">
-                    <select value={reportReason} onChange={(e) => setReportReason(e.target.value)} className="w-full border-gray-300 rounded-xl p-3 bg-gray-50 border outline-none"><option value="fraud">Lừa đảo</option><option value="duplicate">Spam</option><option value="other">Khác</option></select>
+                    <select value={reportReason} onChange={(e) => setReportReason(e.target.value)} className="w-full border-gray-300 rounded-xl p-3 bg-gray-50 border outline-none"><option value="fraud">Lừa đảo / Hàng giả</option><option value="duplicate">Spam</option><option value="other">Khác</option></select>
                     <textarea rows={3} value={reportDescription} onChange={(e) => setReportDescription(e.target.value)} placeholder="Chi tiết..." className="w-full border-gray-300 rounded-xl p-3 border resize-none outline-none" />
-                    <div className="flex justify-end gap-3"><button type="button" onClick={() => setShowReportModal(false)} className="px-4 py-2 font-bold text-gray-600">Hủy</button><button type="submit" disabled={isSubmittingReport} className="px-6 py-2 font-bold text-white bg-red-600 rounded-lg">{isSubmittingReport ? 'Đang gửi...' : 'Gửi báo cáo'}</button></div>
+                    <div className="flex justify-end gap-3"><button type="button" onClick={() => setShowReportModal(false)} className="px-4 py-2 font-bold text-gray-600">Hủy</button><button type="submit" disabled={isSubmittingReport} className="px-6 py-2 font-bold text-white bg-red-600 rounded-lg">Gửi báo cáo</button></div>
                 </form>
             </div>
         </div>
