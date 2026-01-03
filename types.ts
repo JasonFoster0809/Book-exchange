@@ -1,8 +1,5 @@
-// src/types.ts
-
 // --- ENUMS (DANH MỤC CỐ ĐỊNH) ---
 
-// Địa điểm đặc thù của Bách Khoa giúp sinh viên lọc nơi nhận đồ gần nhất
 export enum Campus {
   CS1 = 'Quận 10 (CS1)',
   CS2 = 'Dĩ An (CS2)',
@@ -11,14 +8,14 @@ export enum Campus {
 
 export enum ProductCategory {
   TEXTBOOK = 'Textbook',
-  ELECTRONICS = 'Electronics', // Linh kiện, mạch nạp cho dân kỹ thuật
+  ELECTRONICS = 'Electronics', 
   SUPPLIES = 'School Supplies',
   CLOTHING = 'Uniforms/Clothing',
   OTHER = 'Other'
 }
 
 export enum TradeMethod {
-  DIRECT = 'Direct Meetup', // Ghế đá, thư viện, canteen
+  DIRECT = 'Direct Meetup',
   LOCKER = 'Smart Locker (Indirect)', 
   BOTH = 'Flexible'
 }
@@ -52,11 +49,13 @@ export interface User {
   studentId: string;
   avatar: string;
   isVerified: boolean;
-  role?: 'user' | 'admin';
+  role: 'user' | 'admin'; // Bỏ dấu ? để bắt buộc xác định quyền
   rating?: number; 
-  // Độ uy tín "Đồng môn": Dân kỹ thuật tin tưởng dựa trên số lượt giao dịch
   completedTrades?: number;
+  
+  // --- THÊM CHO HỆ THỐNG XỬ PHẠT ---
   banUntil?: string | null; 
+  banned?: boolean; 
 }
 
 export interface Product {
@@ -73,30 +72,39 @@ export interface Product {
   isLookingToBuy?: boolean;
   status: ProductStatus | string; 
   buyerId?: string;
-  
-  // [FIX] Thêm dấu ? để không báo lỗi khi dữ liệu thiếu campus
   campus?: Campus | string; 
-
-  // [FIX] Thêm trường seller để sửa lỗi ở ProfilePage khi gọi product.seller
+  
+  // Liên kết người bán
   seller?: User | any;
 
-  isLiked?: boolean; // Để UI hiện nút Tim đỏ hay xám
-  view_count?: number; // Số lượt xem tin
-  isGoodPrice?: boolean; // Nhãn "Giá hời" (tự động hoặc admin set)
+  isLiked?: boolean;
+  view_count?: number;
+  isGoodPrice?: boolean;
 }
 
+// Interface này khớp chính xác với bảng 'profiles' trong Supabase
 export interface DBProfile {
   id: string;
   name: string | null;
+  email?: string; // Thêm email
   student_id: string | null;
   avatar_url: string | null;
+  cover_url?: string | null; // Thêm ảnh bìa
+  bio?: string | null;        // Thêm tiểu sử
+  major?: string | null;      // Thêm ngành học
+  academic_year?: string | null; // Thêm khóa học
   is_verified: boolean;
   role: string;
   rating?: number;
   completed_trades?: number; 
+  last_seen?: string;        // Thêm thời gian hoạt động cuối
+  
+  // --- QUAN TRỌNG: ĐỂ ĐỒNG BỘ VỚI ADMIN & AUTH ---
+  banned?: boolean;
+  ban_until?: string | null;
 }
 
-// --- CÁC INTERFACE PHỤ TRỢ (CHAT, REVIEW, REPORT) ---
+// --- CÁC INTERFACE PHỤ TRỢ ---
 
 export interface Review {
   id: string;
@@ -110,16 +118,24 @@ export interface Review {
 
 export interface ChatMessage {
   id: string;
-  senderId: string;
-  text: string;
-  timestamp: number;
+  conversation_id: string; // Thêm id cuộc hội thoại
+  sender_id: string;       // Đổi camelCase sang snake_case để khớp DB
+  content: string;         // Đổi text thành content
+  type: 'text' | 'image' | 'location'; // Thêm phân loại tin nhắn
+  image_url?: string;
+  created_at: string;      // Dùng string/ISO thay vì timestamp number
 }
 
 export interface ChatSession {
   id: string;
-  participants: User[];
-  lastMessage: string;
-  unreadCount: number;
+  participant1: string;
+  participant2: string;
+  partnerName?: string;
+  partnerAvatar?: string;
+  partnerId?: string;
+  isPartnerRestricted?: boolean; // Cảnh báo đối phương bị ban
+  last_message?: string;
+  unread_count?: number;
 }
 
 export interface Comment {
@@ -136,6 +152,8 @@ export interface Comment {
 
 export interface Report {
   id: string;
+  product_id: string;   // Thêm để dễ truy vấn
+  reporter_id: string;  // Thêm để dễ truy vấn
   reason: string;
   status: 'pending' | 'resolved' | 'dismissed';
   created_at: string;
