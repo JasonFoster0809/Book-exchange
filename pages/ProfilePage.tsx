@@ -7,7 +7,7 @@ import {
   ShieldCheck, LogOut, Package, MessageCircle, Star, User as UserIcon,
   Camera, Edit3, Save, X, ShoppingBag, Image as ImageIcon,
   Upload, Clock, Mail, Calendar, Flag, UserPlus, UserCheck, MapPin,
-  MoreHorizontal, Eye, Zap, CheckCircle, School, Search, ShieldAlert
+  MoreHorizontal, Eye, Zap, CheckCircle, School, Search, ShieldAlert,Loader2
 } from 'lucide-react';
 import { Product, User, Review } from '../types';
 import ProductCard from '../components/ProductCard';
@@ -430,7 +430,7 @@ const ProfilePage: React.FC = () => {
             <h3 className="text-xl font-bold">Xác thực sinh viên</h3>
             <p className="text-gray-500 text-sm mt-2 mb-6">Tải ảnh thẻ sinh viên của bạn lên để BK Market kiểm duyệt.</p>
             <label className="flex flex-col items-center justify-center h-32 border-2 border-dashed border-blue-200 bg-blue-50 rounded-xl cursor-pointer">
-              {uploadingVerify ? <Loader className="animate-spin text-blue-600" /> : <><Upload className="text-blue-600 mb-2" /><p className="text-sm font-bold text-blue-600">Chọn ảnh thẻ</p></>}
+              {uploadingVerify ? <Loader2 className="animate-spin text-blue-600" /> : <><Upload className="text-blue-600 mb-2" /><p className="text-sm font-bold text-blue-600">Chọn ảnh thẻ</p></>}
               <input type="file" className="hidden" accept="image/*" onChange={handleUploadVerification} disabled={uploadingVerify} />
             </label>
           </div>
