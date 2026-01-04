@@ -1,685 +1,600 @@
-import React, { useEffect, useState, useRef, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { 
   Search, ArrowRight, Zap, ShieldCheck, Users, 
   BookOpen, Calculator, Shirt, Plug, ChevronDown, 
-  ChevronRight, ChevronLeft, Bell, MapPin, 
-  CheckCircle2, TrendingUp, Flame, Gift,
-  Tag, Eye, Share2, Facebook, Instagram, Youtube, 
-  Twitter, Mail, Phone, ShoppingBag, Filter,
-  LayoutGrid, Clock, Star, RefreshCw, AlertCircle
+  MapPin, CheckCircle2, Flame, Gift, Tag, Eye, 
+  Share2, Facebook, Instagram, Youtube, Twitter, 
+  Mail, Phone, ShoppingBag, Clock, Grid, Layout, 
+  Sparkles, Star, TrendingUp, Monitor, Cpu, Ghost
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { Product } from '../types';
-import { useAuth } from '../contexts/AuthContext';
 
 // ============================================================================
-// 1. SYSTEM CONFIG & TYPES
+// 1. GLOBAL STYLES & KEYFRAMES INJECTION
 // ============================================================================
-
-/**
- * Cấu hình màu sắc chủ đạo - BK Cobalt Blue
- */
-const THEME = {
-  primary: '#00418E',
-  primaryHover: '#003370',
-  secondary: '#00B0F0',
-  accent: '#FFC107',
-  bg: '#F8F9FA',
-  text: '#1E293B',
-  muted: '#64748B',
-  border: '#E2E8F0'
-};
-
-interface CategoryItem {
-  id: string;
-  label: string;
-  icon: React.ReactNode;
-  desc: string;
-  color: string;
-}
-
-interface StatMetric {
-  label: string;
-  value: number;
-  icon: React.ReactNode;
-  suffix?: string;
-}
-
-// ============================================================================
-// 2. STATIC CONFIGURATION (Nav, Categories)
-// ============================================================================
-
-const MAIN_CATEGORIES: CategoryItem[] = [
-  { 
-    id: 'giao-trinh', 
-    label: 'Giáo trình & Tài liệu', 
-    desc: 'Sách đại cương, chuyên ngành',
-    icon: <BookOpen size={24} />, 
-    color: 'text-blue-600 bg-blue-50'
-  },
-  { 
-    id: 'dien-tu', 
-    label: 'Thiết bị điện tử', 
-    desc: 'Laptop, Điện thoại, Phụ kiện',
-    icon: <Plug size={24} />, 
-    color: 'text-indigo-600 bg-indigo-50'
-  },
-  { 
-    id: 'dung-cu', 
-    label: 'Dụng cụ học tập', 
-    desc: 'Máy tính Casio, Thước, Bảng',
-    icon: <Calculator size={24} />, 
-    color: 'text-emerald-600 bg-emerald-50'
-  },
-  { 
-    id: 'thoi-trang', 
-    label: 'Thời trang & Đồng phục', 
-    desc: 'Áo khoa, Balo, Giày dép',
-    icon: <Shirt size={24} />, 
-    color: 'text-orange-600 bg-orange-50'
-  },
-  { 
-    id: 'noi-that', 
-    label: 'Nội thất KTX', 
-    desc: 'Quạt, Bàn học, Tủ vải',
-    icon: <LayoutGrid size={24} />, 
-    color: 'text-purple-600 bg-purple-50'
-  },
-  { 
-    id: 'phuong-tien', 
-    label: 'Phương tiện đi lại', 
-    desc: 'Xe đạp, Xe máy cũ',
-    icon: <MapPin size={24} />, 
-    color: 'text-rose-600 bg-rose-50'
-  }
-];
-
-const TRUST_FEATURES = [
-  {
-    title: "Xác thực Sinh viên",
-    desc: "100% tài khoản người bán được xác minh qua Email sinh viên (@hcmut.edu.vn).",
-    icon: <ShieldCheck size={32} />,
-    color: "text-blue-600"
-  },
-  {
-    title: "Giao dịch An toàn",
-    desc: "Khuyến khích gặp mặt trực tiếp tại khuôn viên trường (H6, Thư viện) để kiểm tra.",
-    icon: <MapPin size={32} />,
-    color: "text-green-600"
-  },
-  {
-    title: "Cộng đồng Văn minh",
-    desc: "Hệ thống đánh giá tín nhiệm minh bạch. Đội ngũ Admin hỗ trợ 24/7.",
-    icon: <Users size={32} />,
-    color: "text-purple-600"
-  }
-];
-
-// ============================================================================
-// 3. CUSTOM HOOKS (LOGIC)
-// ============================================================================
-
-/**
- * Hook lấy số liệu thống kê thực tế từ Database
- * (Thay vì mock data ảo)
- */
-const useRealtimeStats = () => {
-  const [stats, setStats] = useState<StatMetric[]>([
-    { label: 'Tin đăng hoạt động', value: 0, icon: <ShoppingBag size={18}/> },
-    { label: 'Người dùng xác thực', value: 0, icon: <Users size={18}/> },
-    { label: 'Lượt giao dịch', value: 0, icon: <RefreshCw size={18}/> }
-  ]);
-
-  useEffect(() => {
-    const fetchStats = async () => {
-      try {
-        // 1. Đếm số sản phẩm available
-        const { count: productCount } = await supabase
-          .from('products')
-          .select('*', { count: 'exact', head: true })
-          .eq('status', 'available');
-
-        // 2. Đếm số user (giả định bảng profiles)
-        const { count: userCount } = await supabase
-          .from('profiles')
-          .select('*', { count: 'exact', head: true });
-
-        // 3. Đếm số sản phẩm đã bán (sold) coi như lượt giao dịch
-        const { count: soldCount } = await supabase
-          .from('products')
-          .select('*', { count: 'exact', head: true })
-          .eq('status', 'sold');
-
-        setStats([
-          { label: 'Tin đăng', value: productCount || 0, icon: <ShoppingBag size={18}/> },
-          { label: 'Thành viên', value: userCount || 0, icon: <Users size={18}/> },
-          { label: 'Đã bán', value: soldCount || 0, icon: <CheckCircle2 size={18}/> }
-        ]);
-      } catch (error) {
-        console.error("Error fetching stats:", error);
-      }
-    };
-
-    fetchStats();
-  }, []);
-
-  return stats;
-};
-
-/**
- * Hook xử lý hiệu ứng Sticky Header khi cuộn
- */
-const useStickyHeader = (threshold = 100) => {
-  const [isSticky, setIsSticky] = useState(false);
-  useEffect(() => {
-    const handleScroll = () => {
-      setIsSticky(window.scrollY > threshold);
-    };
-    window.addEventListener('scroll', handleScroll);
-    return () => window.removeEventListener('scroll', handleScroll);
-  }, [threshold]);
-  return isSticky;
-};
-
-// ============================================================================
-// 4. UI COMPONENTS (ATOMIC DESIGN)
-// ============================================================================
-
-/**
- * Component tiêu đề Section chuẩn
- */
-const SectionHeader = ({ title, subtitle, action }: { title: string, subtitle?: string, action?: React.ReactNode }) => (
-  <div className="flex flex-col md:flex-row justify-between items-end mb-8 gap-4 border-b border-gray-100 pb-6">
-    <div className="space-y-2">
-      <h2 className="text-3xl font-black text-[#1E293B] tracking-tight flex items-center gap-3">
-        {title}
-      </h2>
-      {subtitle && <p className="text-gray-500 font-medium text-sm md:text-base max-w-2xl">{subtitle}</p>}
-    </div>
-    {action && (
-      <div className="shrink-0">
-        {action}
-      </div>
-    )}
-  </div>
+// Thêm CSS trực tiếp để tạo animation phức tạp mà Tailwind mặc định không có
+const GlobalStyles = () => (
+  <style>{`
+    @keyframes float {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-20px); }
+    }
+    @keyframes float-delayed {
+      0%, 100% { transform: translateY(0px); }
+      50% { transform: translateY(-15px); }
+    }
+    @keyframes shine {
+      0% { left: -100%; opacity: 0; }
+      50% { opacity: 0.5; }
+      100% { left: 100%; opacity: 0; }
+    }
+    @keyframes blob {
+      0% { transform: translate(0px, 0px) scale(1); }
+      33% { transform: translate(30px, -50px) scale(1.1); }
+      66% { transform: translate(-20px, 20px) scale(0.9); }
+      100% { transform: translate(0px, 0px) scale(1); }
+    }
+    @keyframes scroll-left {
+      0% { transform: translateX(0); }
+      100% { transform: translateX(-50%); }
+    }
+    .animate-float { animation: float 6s ease-in-out infinite; }
+    .animate-float-delayed { animation: float-delayed 7s ease-in-out infinite; animation-delay: 2s; }
+    .animate-blob { animation: blob 7s infinite; }
+    .animate-shine { position: absolute; top: 0; width: 50%; height: 100%; background: linear-gradient(to right, transparent, rgba(255,255,255,0.3), transparent); transform: skewX(-20deg); animation: shine 3s infinite; }
+    .animate-scroll { animation: scroll-left 30s linear infinite; }
+    
+    .glass-panel {
+      background: rgba(255, 255, 255, 0.7);
+      backdrop-filter: blur(12px);
+      border: 1px solid rgba(255, 255, 255, 0.5);
+    }
+    
+    .reveal-item { opacity: 0; transform: translateY(30px); transition: all 0.8s cubic-bezier(0.5, 0, 0, 1); }
+    .reveal-item.active { opacity: 1; transform: translateY(0); }
+  `}</style>
 );
 
+// ============================================================================
+// 2. TYPES & CONFIG
+// ============================================================================
+
+const THEME = {
+  primary: '#00418E', // Cobalt Blue
+  secondary: '#00B0F0',
+  accent: '#FFD700',
+};
+
+const CATEGORIES = [
+  { id: 'giao-trinh', label: 'Giáo trình', icon: <BookOpen size={28}/>, bg: 'bg-blue-100', text: 'text-blue-600', desc: 'Sách, Slide, Đề thi' },
+  { id: 'cong-nghe', label: 'Công nghệ', icon: <Monitor size={28}/>, bg: 'bg-indigo-100', text: 'text-indigo-600', desc: 'Laptop, Chuột, Phím' },
+  { id: 'dung-cu', label: 'Dụng cụ', icon: <Calculator size={28}/>, bg: 'bg-green-100', text: 'text-green-600', desc: 'Casio, Thước, Bảng' },
+  { id: 'thoi-trang', label: 'Thời trang', icon: <Shirt size={28}/>, bg: 'bg-orange-100', text: 'text-orange-600', desc: 'Đồng phục, Balo' },
+  { id: 'noi-that', label: 'Nội thất', icon: <Grid size={28}/>, bg: 'bg-purple-100', text: 'text-purple-600', desc: 'Bàn, Ghế, Tủ vải' },
+  { id: 'xe-co', label: 'Xe cộ', icon: <MapPin size={28}/>, bg: 'bg-red-100', text: 'text-red-600', desc: 'Xe đạp, Xe máy' },
+];
+
+const TRUST_BADGES = [
+  { title: "Xác thực 100%", desc: "Email sinh viên BK", icon: <ShieldCheck size={32}/>, color: "text-blue-500" },
+  { title: "An toàn", desc: "Giao dịch tại trường", icon: <MapPin size={32}/>, color: "text-green-500" },
+  { title: "Cộng đồng", desc: "25,000+ Thành viên", icon: <Users size={32}/>, color: "text-purple-500" },
+];
+
+// ============================================================================
+// 3. ANIMATED COMPONENTS (HOOKS & HELPERS)
+// ============================================================================
+
 /**
- * Component Card sản phẩm (Clean & Info-focused)
+ * RevealOnScroll: Component bao bọc để tạo hiệu ứng "trượt lên" khi cuộn tới
  */
-const ProductCard = ({ product }: { product: Product }) => {
-  const navigate = useNavigate();
-  
+const RevealOnScroll = ({ children, delay = 0, className = "" }: { children: React.ReactNode, delay?: number, className?: string }) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [isVisible, setIsVisible] = useState(false);
+
+  useEffect(() => {
+    const observer = new IntersectionObserver(([entry]) => {
+      if (entry.isIntersecting) {
+        setIsVisible(true);
+        observer.unobserve(entry.target);
+      }
+    }, { threshold: 0.1 });
+
+    if (ref.current) observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, []);
+
   return (
     <div 
-      onClick={() => navigate(`/product/${product.id}`)}
-      className="group bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-xl hover:border-blue-200 transition-all duration-300 cursor-pointer flex flex-col h-full relative"
+      ref={ref} 
+      className={`reveal-item ${isVisible ? 'active' : ''} ${className}`}
+      style={{ transitionDelay: `${delay}ms` }}
     >
-      {/* Image Area */}
-      <div className="aspect-square relative overflow-hidden bg-gray-50">
-        {product.images[0] ? (
-          <img 
-            src={product.images[0]} 
-            alt={product.title} 
-            className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
-            loading="lazy"
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center text-gray-300">
-            <ShoppingBag size={40} />
-          </div>
-        )}
-        
-        {/* Badges */}
-        <div className="absolute top-2 left-2 flex flex-col gap-1">
-          {product.price === 0 && (
-            <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm flex items-center gap-1">
-              <Gift size={10} /> 0Đ
-            </span>
-          )}
-          {product.condition === 'Mới' && (
-            <span className="bg-emerald-500 text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm">
-              NEW
-            </span>
-          )}
-        </div>
-
-        {/* Hover Action */}
-        <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/60 to-transparent p-4 translate-y-full group-hover:translate-y-0 transition-transform duration-300 flex justify-center">
-          <span className="text-white text-xs font-bold flex items-center gap-1">
-            Xem chi tiết <ArrowRight size={12} />
-          </span>
-        </div>
-      </div>
-
-      {/* Info Area */}
-      <div className="p-4 flex flex-col flex-1">
-        <div className="flex items-center gap-2 mb-2 text-[10px] font-bold text-gray-500 uppercase tracking-wider">
-          <span className="bg-gray-100 px-1.5 py-0.5 rounded text-[#00418E]">{product.category}</span>
-          <span>•</span>
-          <span className="flex items-center gap-1"><Clock size={10}/> {new Date(product.postedAt).toLocaleDateString('vi-VN')}</span>
-        </div>
-
-        <h3 className="font-bold text-gray-800 text-sm mb-2 line-clamp-2 group-hover:text-[#00418E] transition-colors flex-1" title={product.title}>
-          {product.title}
-        </h3>
-
-        <div className="mt-3 flex items-center justify-between">
-          <div className="flex flex-col">
-            <span className="text-[10px] text-gray-400 font-medium line-through">
-              {product.price > 0 ? `${(product.price * 1.15).toLocaleString()}đ` : ''}
-            </span>
-            <span className="text-lg font-black text-[#00418E]">
-              {product.price === 0 ? 'Miễn phí' : `${product.price.toLocaleString('vi-VN')}đ`}
-            </span>
-          </div>
-          <div className="w-8 h-8 rounded-full bg-gray-50 flex items-center justify-center text-gray-400 group-hover:bg-[#00418E] group-hover:text-white transition-all">
-            <ShoppingBag size={14} />
-          </div>
-        </div>
-      </div>
+      {children}
     </div>
   );
 };
 
 /**
- * Component Skeleton Loading (Khi chưa tải xong dữ liệu)
+ * Counter: Hiệu ứng số nhảy
  */
-const ProductSkeleton = () => (
-  <div className="bg-white rounded-xl border border-gray-100 p-4 space-y-3">
-    <div className="aspect-square bg-gray-200 rounded-lg animate-pulse"></div>
-    <div className="h-4 bg-gray-200 rounded w-3/4 animate-pulse"></div>
-    <div className="h-4 bg-gray-200 rounded w-1/2 animate-pulse"></div>
-    <div className="flex justify-between pt-2">
-      <div className="h-6 bg-gray-200 rounded w-1/3 animate-pulse"></div>
-      <div className="h-8 w-8 bg-gray-200 rounded-full animate-pulse"></div>
+const Counter = ({ end, duration = 2000, suffix = "" }: { end: number, duration?: number, suffix?: string }) => {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let start = 0;
+    const increment = end / (duration / 16);
+    const timer = setInterval(() => {
+      start += increment;
+      if (start >= end) {
+        setCount(end);
+        clearInterval(timer);
+      } else {
+        setCount(Math.floor(start));
+      }
+    }, 16);
+    return () => clearInterval(timer);
+  }, [end, duration]);
+  return <span>{count.toLocaleString()}{suffix}</span>;
+};
+
+/**
+ * Typewriter: Hiệu ứng gõ chữ tìm kiếm
+ */
+const TypewriterInput = ({ onSearch }: { onSearch: (val: string) => void }) => {
+  const placeholders = ["Tìm 'Giáo trình Giải tích'...", "Tìm 'Casio 580VNX'...", "Tìm 'Laptop cũ'..."];
+  const [text, setText] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [loopNum, setLoopNum] = useState(0);
+  const [typingSpeed, setTypingSpeed] = useState(150);
+  const [inputValue, setInputValue] = useState("");
+
+  useEffect(() => {
+    const handleType = () => {
+      const i = loopNum % placeholders.length;
+      const fullText = placeholders[i];
+      setText(isDeleting ? fullText.substring(0, text.length - 1) : fullText.substring(0, text.length + 1));
+      setTypingSpeed(isDeleting ? 30 : 100);
+
+      if (!isDeleting && text === fullText) {
+        setTimeout(() => setIsDeleting(true), 1500);
+      } else if (isDeleting && text === "") {
+        setIsDeleting(false);
+        setLoopNum(loopNum + 1);
+      }
+    };
+    const timer = setTimeout(handleType, typingSpeed);
+    return () => clearTimeout(timer);
+  }, [text, isDeleting, loopNum, typingSpeed]);
+
+  return (
+    <div className="relative w-full group">
+      <div className="absolute -inset-1 bg-gradient-to-r from-blue-400 via-purple-400 to-pink-400 rounded-full blur opacity-25 group-hover:opacity-75 transition duration-1000 animate-pulse"></div>
+      <form 
+        onSubmit={(e) => { e.preventDefault(); onSearch(inputValue); }}
+        className="relative flex items-center bg-white/90 backdrop-blur-xl rounded-full shadow-2xl p-2 transition-transform transform hover:scale-[1.02]"
+      >
+        <Search className="ml-4 text-gray-400 w-6 h-6" />
+        <input 
+          type="text" 
+          className="w-full h-14 pl-4 pr-12 bg-transparent border-none outline-none text-lg text-gray-800 font-medium placeholder-gray-400"
+          placeholder={text}
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+        />
+        <button className="bg-[#00418E] text-white px-8 h-12 rounded-full font-bold hover:bg-[#003370] transition-all shadow-lg active:scale-95 flex items-center gap-2 overflow-hidden relative">
+          <span className="relative z-10">TÌM KIẾM</span>
+          <div className="animate-shine"></div>
+        </button>
+      </form>
     </div>
-  </div>
-);
+  );
+};
 
 // ============================================================================
-// 5. MAIN COMPONENT (HOMEPAGE)
+// 4. MAIN HOMEPAGE COMPONENT
 // ============================================================================
 
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
-  const stats = useRealtimeStats();
-  const isSticky = useStickyHeader();
-
-  // State Management
-  const [searchTerm, setSearchTerm] = useState('');
-  const [recentProducts, setRecentProducts] = useState<Product[]>([]);
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<'all' | 'books' | 'tech'>('all');
+  
+  // Parallax State
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0 });
 
-  // Fetch Data Thật từ Supabase
+  // Handle Mouse Move for Parallax
+  const handleMouseMove = (e: React.MouseEvent) => {
+    const x = (e.clientX - window.innerWidth / 2) / 40;
+    const y = (e.clientY - window.innerHeight / 2) / 40;
+    setMousePos({ x, y });
+  };
+
+  // Fetch Real Data
   useEffect(() => {
     const fetchData = async () => {
       setLoading(true);
       try {
-        let query = supabase
+        const { data } = await supabase
           .from('products')
           .select('*, profiles:seller_id(name, avatar_url)')
           .eq('status', 'available')
           .order('posted_at', { ascending: false })
           .limit(8);
 
-        // Simple Tab Filtering Logic
-        if (activeTab === 'books') query = query.eq('category', 'Giáo trình');
-        if (activeTab === 'tech') query = query.eq('category', 'Đồ điện tử');
-
-        const { data, error } = await query;
-        if (error) throw error;
-
         if (data) {
-          const mapped: Product[] = data.map((item: any) => ({
+          const mapped = data.map((item: any) => ({
             ...item, sellerId: item.seller_id, tradeMethod: item.trade_method, postedAt: item.posted_at, 
             status: item.status, seller: item.profiles, view_count: item.view_count || 0
           }));
-          setRecentProducts(mapped);
+          setProducts(mapped);
         }
-      } catch (err) {
-        console.error("Error fetching products:", err);
-      } finally {
-        setLoading(false);
-      }
+      } catch (e) { console.error(e); } finally { setLoading(false); }
     };
-
     fetchData();
-  }, [activeTab]);
+  }, []);
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (searchTerm.trim()) {
-      navigate(`/market?search=${encodeURIComponent(searchTerm.trim())}`);
-    }
+  const handleSearch = (term: string) => {
+    if(term.trim()) navigate(`/market?search=${encodeURIComponent(term)}`);
   };
 
   return (
-    <div className="min-h-screen bg-[#F8F9FA] font-sans text-[#1E293B]">
-      
+    <div className="min-h-screen bg-[#F0F4F8] font-sans text-slate-800 overflow-x-hidden selection:bg-[#00418E] selection:text-white">
+      <GlobalStyles />
+
       {/* =================================================================
-          HEADER SECTION (HERO + SEARCH)
+          1. HERO SECTION (PARALLAX + ANIMATED BACKGROUND)
       ================================================================== */}
-      <header className="relative bg-white overflow-hidden">
-        {/* Decorative Background Patterns */}
-        <div className="absolute inset-0 bg-[#F1F5F9] skew-y-3 origin-top-left translate-y-[-50%] z-0"></div>
-        <div className="absolute top-0 right-0 w-1/3 h-full bg-gradient-to-l from-blue-50 to-transparent opacity-50 z-0"></div>
+      <section 
+        className="relative w-full min-h-[900px] flex items-center justify-center overflow-hidden bg-[#00418E]"
+        onMouseMove={handleMouseMove}
+      >
+        {/* Animated Background Layers */}
+        <div className="absolute inset-0 z-0">
+          <div className="absolute inset-0 bg-[url('https://hcmut.edu.vn/img/campus/campus-1.jpg')] bg-cover bg-center opacity-10 mix-blend-overlay scale-110"></div>
+          <div className="absolute inset-0 bg-gradient-to-b from-[#00418E]/90 via-[#00418E]/80 to-[#F0F4F8]"></div>
+          
+          {/* Moving Blobs (Hiệu ứng đốm sáng di chuyển) */}
+          <div 
+            className="absolute top-[-10%] right-[-5%] w-[800px] h-[800px] bg-blue-400/20 rounded-full blur-[100px] animate-float"
+            style={{ transform: `translate(${mousePos.x}px, ${mousePos.y}px)` }}
+          ></div>
+          <div 
+            className="absolute bottom-[20%] left-[-10%] w-[600px] h-[600px] bg-purple-500/20 rounded-full blur-[80px] animate-float-delayed"
+            style={{ transform: `translate(${mousePos.x * -1}px, ${mousePos.y * -1}px)` }}
+          ></div>
+          
+          {/* Grid Pattern */}
+          <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
+        </div>
 
-        <div className="relative z-10 pt-16 pb-24 md:pt-24 md:pb-32 max-w-7xl mx-auto px-4">
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
-            
-            {/* Left Column: Text & Search */}
-            <div className="space-y-8">
-              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-50 border border-blue-100 text-[#00418E] text-xs font-bold uppercase tracking-wider animate-in fade-in slide-in-from-bottom-4 duration-700">
-                <span className="relative flex h-2 w-2">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75"></span>
-                  <span className="relative inline-flex rounded-full h-2 w-2 bg-[#00418E]"></span>
-                </span>
-                Cộng đồng Sinh viên Bách Khoa
-              </div>
+        {/* Hero Content */}
+        <div className="relative z-10 w-full max-w-6xl px-4 flex flex-col items-center text-center mt-[-50px]">
+          
+          {/* Badge */}
+          <RevealOnScroll className="inline-flex items-center gap-3 px-6 py-2.5 rounded-full bg-white/10 backdrop-blur-md border border-white/20 text-white shadow-2xl mb-10 hover:bg-white/20 transition-all cursor-default">
+            <span className="relative flex h-3 w-3">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-yellow-400 opacity-75"></span>
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-yellow-500"></span>
+            </span>
+            <span className="text-xs font-black uppercase tracking-[0.2em]">Cộng đồng Bách Khoa Official</span>
+          </RevealOnScroll>
 
-              <h1 className="text-5xl md:text-6xl lg:text-7xl font-black text-[#0F172A] leading-[1.1] tracking-tight">
-                Trao đổi đồ cũ <br/>
-                <span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00418E] to-[#00B0F0]">
-                  Thông Minh hơn.
-                </span>
-              </h1>
+          {/* Main Headline */}
+          <RevealOnScroll delay={200}>
+            <h1 className="text-6xl md:text-8xl font-black text-white mb-8 leading-tight tracking-tighter drop-shadow-2xl">
+              Cũ Người <br />
+              <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-200 via-white to-cyan-200">
+                Mới Ta.
+              </span>
+            </h1>
+          </RevealOnScroll>
 
-              <p className="text-lg text-gray-500 max-w-lg leading-relaxed">
-                Nền tảng mua bán giáo trình, thiết bị điện tử an toàn dành riêng cho sinh viên Bách Khoa. 
-                Tiết kiệm chi phí, kết nối cộng đồng.
-              </p>
+          <RevealOnScroll delay={400}>
+            <p className="text-blue-100 text-lg md:text-2xl mb-16 max-w-3xl font-medium leading-relaxed opacity-90">
+              Sàn giao dịch đồ cũ thông minh, an toàn dành riêng cho sinh viên. 
+              Kết nối hơn <strong className="text-yellow-300">25,000+</strong> thành viên Bách Khoa.
+            </p>
+          </RevealOnScroll>
 
-              {/* Modern Search Input */}
-              <form onSubmit={handleSearch} className="relative max-w-md w-full group">
-                <div className="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
-                  <Search className="h-5 w-5 text-gray-400 group-focus-within:text-[#00418E] transition-colors" />
+          {/* Search */}
+          <RevealOnScroll delay={600} className="w-full max-w-2xl mb-20">
+            <TypewriterInput onSearch={handleSearch} />
+          </RevealOnScroll>
+
+          {/* Stats Counters */}
+          <div className="grid grid-cols-3 gap-8 md:gap-24 text-white w-full max-w-4xl border-t border-white/10 pt-10">
+            {[
+              { label: "Sản phẩm", val: 8500, suffix: "+" },
+              { label: "Thành viên", val: 25000, suffix: "+" },
+              { label: "Giao dịch", val: 14200, suffix: "+" },
+            ].map((stat, i) => (
+              <RevealOnScroll key={i} delay={800 + i * 100}>
+                <div className="text-center group cursor-default">
+                  <p className="text-4xl md:text-6xl font-black group-hover:scale-110 transition-transform duration-500 group-hover:text-yellow-300">
+                    <Counter end={stat.val} suffix={stat.suffix} />
+                  </p>
+                  <p className="text-xs md:text-sm uppercase font-bold tracking-widest opacity-60 mt-2">{stat.label}</p>
                 </div>
-                <input 
-                  type="text" 
-                  className="block w-full pl-12 pr-4 py-4 bg-white border-2 border-gray-100 rounded-2xl text-gray-900 placeholder-gray-400 focus:outline-none focus:border-[#00418E] focus:ring-4 focus:ring-blue-50 transition-all shadow-sm hover:shadow-md"
-                  placeholder="Bạn đang tìm gì? (VD: Giải tích 1)"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-                <button type="submit" className="absolute right-2 top-2 bottom-2 bg-[#00418E] text-white px-6 rounded-xl font-bold hover:bg-[#003370] transition-colors shadow-lg shadow-blue-900/20">
-                  Tìm
-                </button>
-              </form>
-
-              {/* Stats Row */}
-              <div className="flex items-center gap-8 pt-4 border-t border-gray-100">
-                {stats.map((stat, index) => (
-                  <div key={index} className="flex flex-col">
-                    <span className="text-2xl font-black text-[#0F172A]">{stat.value.toLocaleString()}+</span>
-                    <span className="text-xs font-bold text-gray-400 uppercase tracking-wider">{stat.label}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            {/* Right Column: Hero Visuals */}
-            <div className="relative hidden lg:block">
-              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-blue-100 rounded-full blur-3xl opacity-50 animate-pulse"></div>
-              
-              <div className="relative grid grid-cols-2 gap-4">
-                <div className="space-y-4 pt-12">
-                  <div className="bg-white p-4 rounded-2xl shadow-xl border border-gray-50 transform hover:-translate-y-2 transition-transform duration-500">
-                    <div className="h-32 bg-gray-100 rounded-xl mb-3 overflow-hidden">
-                        <img src="https://salt.tikicdn.com/cache/750x750/ts/product/6e/04/b3/c2759e6659c20a4d46c764e40292276c.jpg.webp" className="w-full h-full object-cover" alt="Casio"/>
-                    </div>
-                    <div className="h-2 w-20 bg-gray-200 rounded mb-2"></div>
-                    <div className="h-4 w-32 bg-blue-100 rounded"></div>
-                  </div>
-                  <div className="bg-[#00418E] p-6 rounded-2xl shadow-xl text-white transform hover:-translate-y-2 transition-transform duration-500 delay-100">
-                    <ShieldCheck size={32} className="mb-4 text-blue-300"/>
-                    <h3 className="font-bold text-lg mb-1">An toàn tuyệt đối</h3>
-                    <p className="text-blue-100 text-sm opacity-80">Xác thực sinh viên qua Email trường.</p>
-                  </div>
-                </div>
-                <div className="space-y-4">
-                  <div className="bg-white p-6 rounded-2xl shadow-xl border border-gray-50 transform hover:-translate-y-2 transition-transform duration-500 delay-75">
-                    <div className="flex items-center gap-3 mb-4">
-                       <div className="w-10 h-10 rounded-full bg-green-100 flex items-center justify-center text-green-600"><TrendingUp size={20}/></div>
-                       <div>
-                          <p className="text-xs text-gray-500 font-bold">Tiết kiệm</p>
-                          <p className="font-black text-lg">70%</p>
-                       </div>
-                    </div>
-                    <p className="text-sm text-gray-500">So với mua mới</p>
-                  </div>
-                  <div className="bg-white p-4 rounded-2xl shadow-xl border border-gray-50 transform hover:-translate-y-2 transition-transform duration-500 delay-150">
-                    <div className="h-40 bg-gray-100 rounded-xl mb-3 overflow-hidden">
-                        <img src="https://cdn.fahasa.com/media/flashmagazine/images/page_images/giao_trinh_giai_tich_1/2020_05_21_10_45_22_1-390x510.jpg" className="w-full h-full object-cover" alt="Sach"/>
-                    </div>
-                    <div className="flex justify-between items-center">
-                        <div className="h-4 w-24 bg-gray-200 rounded"></div>
-                        <div className="h-6 w-12 bg-red-100 rounded-full"></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
+              </RevealOnScroll>
+            ))}
           </div>
         </div>
-      </header>
+
+        {/* Scroll Indicator */}
+        <div className="absolute bottom-10 left-1/2 -translate-x-1/2 animate-bounce text-white/50 cursor-pointer hover:text-white transition-colors">
+          <ChevronDown size={32} />
+        </div>
+      </section>
 
       {/* =================================================================
-          CATEGORIES GRID
+          2. MARQUEE CATEGORIES (INFINITE SCROLL)
       ================================================================== */}
-      <section className="py-20 px-4 max-w-7xl mx-auto">
-        <SectionHeader 
-          title="Danh Mục Nổi Bật" 
-          subtitle="Tìm kiếm nhanh chóng theo nhu cầu của bạn."
-          action={
-            <button onClick={() => navigate('/market')} className="text-[#00418E] font-bold text-sm hover:underline flex items-center gap-1">
-              Xem tất cả <ArrowRight size={16}/>
-            </button>
-          }
-        />
-        
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4">
-          {MAIN_CATEGORIES.map((cat) => (
+      <div className="bg-white py-12 border-b border-gray-100 overflow-hidden relative shadow-sm z-20">
+        <div className="flex w-[200%] animate-scroll hover:[animation-play-state:paused]">
+          {[...CATEGORIES, ...CATEGORIES].map((cat, i) => (
             <div 
-              key={cat.id}
+              key={i} 
               onClick={() => navigate(`/market?cat=${cat.id}`)}
-              className="group bg-white border border-gray-200 rounded-2xl p-6 flex flex-col items-center text-center hover:border-blue-300 hover:shadow-lg transition-all duration-300 cursor-pointer"
+              className="flex-shrink-0 w-64 mx-4 p-6 rounded-2xl bg-gray-50 border border-gray-100 flex items-center gap-4 cursor-pointer hover:bg-white hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group"
             >
-              <div className={`w-14 h-14 rounded-full flex items-center justify-center mb-4 transition-transform group-hover:scale-110 ${cat.color}`}>
+              <div className={`w-14 h-14 rounded-full ${cat.bg} ${cat.text} flex items-center justify-center transition-transform group-hover:scale-110 group-hover:rotate-6`}>
                 {cat.icon}
               </div>
-              <h3 className="font-bold text-gray-800 text-sm group-hover:text-[#00418E] transition-colors">{cat.label}</h3>
-              <p className="text-xs text-gray-400 mt-1 line-clamp-1">{cat.desc}</p>
+              <div>
+                <h4 className="font-bold text-gray-800 group-hover:text-[#00418E] transition-colors">{cat.label}</h4>
+                <p className="text-xs text-gray-500">{cat.desc}</p>
+              </div>
             </div>
           ))}
         </div>
-      </section>
+      </div>
 
       {/* =================================================================
-          LATEST PRODUCTS (LIVE FEED)
+          3. FEATURED PRODUCTS (STAGGERED GRID)
       ================================================================== */}
-      <section className="py-20 bg-white border-y border-gray-100">
-        <div className="max-w-7xl mx-auto px-4">
-          <SectionHeader 
-            title="Mới Lên Sàn" 
-            subtitle="Những món đồ vừa được các bạn sinh viên đăng bán."
-            action={
-              <div className="flex bg-gray-100 p-1 rounded-lg">
-                <button 
-                  onClick={() => setActiveTab('all')}
-                  className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${activeTab === 'all' ? 'bg-white text-[#00418E] shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-                >
-                  Tất cả
-                </button>
-                <button 
-                  onClick={() => setActiveTab('books')}
-                  className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${activeTab === 'books' ? 'bg-white text-[#00418E] shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-                >
-                  Giáo trình
-                </button>
-                <button 
-                  onClick={() => setActiveTab('tech')}
-                  className={`px-4 py-1.5 text-xs font-bold rounded-md transition-all ${activeTab === 'tech' ? 'bg-white text-[#00418E] shadow-sm' : 'text-gray-500 hover:text-gray-900'}`}
-                >
-                  Công nghệ
-                </button>
+      <section className="py-24 max-w-7xl mx-auto px-4">
+        <RevealOnScroll>
+          <div className="flex flex-col md:flex-row justify-between items-end mb-12 gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="p-2 bg-red-100 text-red-500 rounded-lg animate-pulse"><Flame size={20}/></div>
+                <span className="text-red-500 font-bold uppercase tracking-widest text-sm">Hot New Items</span>
               </div>
-            }
-          />
-
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
-            {loading ? (
-              [...Array(8)].map((_, i) => <ProductSkeleton key={i} />)
-            ) : (
-              recentProducts.map(product => (
-                <ProductCard key={product.id} product={product} />
-              ))
-            )}
-          </div>
-
-          <div className="mt-12 text-center">
+              <h2 className="text-4xl md:text-5xl font-black text-[#1E293B]">Vừa Lên Sàn</h2>
+            </div>
             <button 
-              onClick={() => navigate('/market')}
-              className="inline-flex items-center gap-2 px-8 py-3 bg-white border-2 border-[#00418E] text-[#00418E] rounded-xl font-bold hover:bg-[#00418E] hover:text-white transition-all duration-300"
+              onClick={() => navigate('/market')} 
+              className="group flex items-center gap-2 px-6 py-3 bg-white border-2 border-gray-200 rounded-xl font-bold text-gray-600 hover:border-[#00418E] hover:text-[#00418E] transition-all"
             >
-              Xem thêm 200+ sản phẩm khác <ArrowRight size={18} />
+              Xem tất cả <ArrowRight className="w-4 h-4 group-hover:translate-x-1 transition-transform"/>
             </button>
           </div>
+        </RevealOnScroll>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-8">
+          {loading ? (
+            // Skeleton Loading Animation
+            [...Array(8)].map((_, i) => (
+              <div key={i} className="bg-white rounded-3xl h-[400px] border border-gray-100 p-4 space-y-4 shadow-sm">
+                <div className="h-56 bg-gray-200 rounded-2xl animate-pulse w-full"></div>
+                <div className="h-6 bg-gray-200 rounded-full w-3/4 animate-pulse"></div>
+                <div className="h-4 bg-gray-200 rounded-full w-1/2 animate-pulse"></div>
+                <div className="h-10 bg-gray-200 rounded-xl w-full mt-4 animate-pulse"></div>
+              </div>
+            ))
+          ) : (
+            products.map((product, idx) => (
+              <RevealOnScroll key={product.id} delay={idx * 100}>
+                <div 
+                  onClick={() => navigate(`/product/${product.id}`)}
+                  className="group bg-white rounded-3xl border border-gray-100 overflow-hidden hover:shadow-[0_20px_40px_-15px_rgba(0,0,0,0.1)] hover:-translate-y-2 transition-all duration-500 cursor-pointer flex flex-col h-full relative"
+                >
+                  {/* Image Container with Zoom Effect */}
+                  <div className="aspect-[4/3] relative overflow-hidden bg-gray-50">
+                    <img 
+                      src={product.images[0] || 'https://via.placeholder.com/400'} 
+                      alt={product.title} 
+                      className="w-full h-full object-contain mix-blend-multiply transition-transform duration-700 group-hover:scale-110" 
+                    />
+                    
+                    {/* Badges */}
+                    <div className="absolute top-4 left-4 flex flex-col gap-2">
+                      {product.price === 0 && (
+                        <span className="bg-red-500 text-white text-[10px] font-bold px-3 py-1 rounded-full shadow-lg animate-pulse flex items-center gap-1">
+                          <Gift size={12} /> 0Đ
+                        </span>
+                      )}
+                      <span className="bg-white/90 backdrop-blur text-gray-700 text-[10px] font-bold px-3 py-1 rounded-full shadow-sm">
+                        {product.condition}
+                      </span>
+                    </div>
+
+                    {/* Hover Actions */}
+                    <div className="absolute inset-0 bg-black/20 opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3 backdrop-blur-[2px]">
+                      <button className="w-12 h-12 bg-white rounded-full flex items-center justify-center text-[#00418E] hover:scale-110 transition-transform shadow-xl">
+                        <Eye size={24} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Info */}
+                  <div className="p-6 flex flex-col flex-1">
+                    <div className="text-xs font-bold text-gray-400 uppercase tracking-wider mb-2 flex items-center gap-2">
+                      <span className="bg-blue-50 text-[#00418E] px-2 py-0.5 rounded">{product.category}</span>
+                      <span>•</span> {new Date(product.postedAt).toLocaleDateString('vi-VN')}
+                    </div>
+                    <h3 className="font-bold text-gray-900 text-lg mb-4 line-clamp-2 group-hover:text-[#00418E] transition-colors">{product.title}</h3>
+                    <div className="mt-auto pt-4 border-t border-gray-100 flex justify-between items-center">
+                      <span className="text-2xl font-black text-[#00418E]">
+                        {product.price === 0 ? 'Tặng miễn phí' : `${product.price.toLocaleString('vi-VN')}đ`}
+                      </span>
+                      <div className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-400 group-hover:bg-[#00418E] group-hover:text-white transition-all">
+                        <ArrowRight size={16}/>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </RevealOnScroll>
+            ))
+          )}
         </div>
       </section>
 
       {/* =================================================================
-          FEATURES & TRUST
+          4. AI BANNER (HOVER 3D EFFECT)
       ================================================================== */}
-      <section className="py-24 px-4 bg-[#F8FAFC]">
-        <div className="max-w-7xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-4xl font-black text-[#1E293B] mb-4">Tại sao chọn Chợ BK?</h2>
-            <p className="text-gray-500 max-w-2xl mx-auto">Nền tảng mua bán an toàn, minh bạch và tiện lợi nhất dành cho sinh viên Bách Khoa.</p>
-          </div>
+      <section className="py-20 px-4">
+        <RevealOnScroll>
+          <div className="max-w-7xl mx-auto relative rounded-[3rem] overflow-hidden bg-[#0F172A] shadow-2xl group perspective-1000">
+            {/* Animated Background */}
+            <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-blue-600/20 rounded-full blur-[120px] animate-pulse"></div>
+            <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-purple-600/20 rounded-full blur-[120px] animate-pulse animation-delay-2000"></div>
+            <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/carbon-fibre.png')] opacity-20"></div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-            {TRUST_FEATURES.map((feature, idx) => (
-              <div key={idx} className="bg-white p-8 rounded-2xl shadow-sm border border-gray-100 hover:shadow-lg transition-all duration-300">
-                <div className={`w-14 h-14 rounded-xl bg-gray-50 flex items-center justify-center mb-6 ${feature.color}`}>
-                  {feature.icon}
+            <div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-16 p-12 md:p-24 items-center">
+              <div className="space-y-8">
+                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-lg bg-blue-500/20 text-blue-300 text-xs font-bold uppercase tracking-widest border border-blue-500/30">
+                  <Sparkles size={14}/> AI Powered
                 </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-3">{feature.title}</h3>
-                <p className="text-gray-500 leading-relaxed">{feature.desc}</p>
+                <h2 className="text-5xl md:text-6xl font-black text-white leading-[1.1]">
+                  Đăng tin <br/> 
+                  <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">Siêu Tốc Độ.</span>
+                </h2>
+                <p className="text-slate-400 text-lg leading-relaxed max-w-md">
+                  Công nghệ Gemini AI sẽ tự động phân tích hình ảnh, viết mô tả và định giá sản phẩm chỉ trong 30 giây.
+                </p>
+                <div className="flex flex-wrap gap-4 pt-4">
+                  <button onClick={() => navigate('/post')} className="px-8 py-4 bg-blue-600 hover:bg-blue-500 text-white rounded-xl font-bold shadow-lg shadow-blue-600/30 transition-all hover:scale-105 active:scale-95 flex items-center gap-2">
+                    <Zap size={20} className="fill-current"/> Thử Ngay
+                  </button>
+                  <button onClick={() => navigate('/market')} className="px-8 py-4 bg-white/5 hover:bg-white/10 text-white border border-white/10 rounded-xl font-bold transition-all">
+                    Xem Demo
+                  </button>
+                </div>
               </div>
+
+              {/* 3D Floating Elements */}
+              <div className="relative h-[400px] flex items-center justify-center transform group-hover:rotate-y-6 transition-transform duration-700">
+                {/* Main Card */}
+                <div className="absolute z-20 w-72 bg-white/10 backdrop-blur-xl border border-white/20 p-6 rounded-3xl shadow-2xl animate-float">
+                  <div className="h-40 bg-white/5 rounded-xl mb-4 flex items-center justify-center border border-white/10">
+                    <Monitor size={48} className="text-blue-400 opacity-80"/>
+                  </div>
+                  <div className="space-y-3">
+                    <div className="h-3 w-2/3 bg-white/20 rounded-full"></div>
+                    <div className="h-3 w-full bg-white/10 rounded-full"></div>
+                    <div className="h-3 w-1/2 bg-white/10 rounded-full"></div>
+                  </div>
+                  <div className="mt-6 flex items-center gap-3">
+                    <div className="w-8 h-8 rounded-full bg-green-500/20 flex items-center justify-center">
+                      <CheckCircle2 size={16} className="text-green-400"/>
+                    </div>
+                    <span className="text-xs font-bold text-green-400">AI Analysis Complete</span>
+                  </div>
+                </div>
+
+                {/* Floating Bubbles */}
+                <div className="absolute top-10 right-10 bg-purple-500/80 p-4 rounded-2xl shadow-xl animate-float-delayed z-30">
+                  <Cpu className="text-white" size={24}/>
+                </div>
+                <div className="absolute bottom-20 left-0 bg-blue-500/80 p-4 rounded-2xl shadow-xl animate-float z-30">
+                  <Tag className="text-white" size={24}/>
+                </div>
+              </div>
+            </div>
+          </div>
+        </RevealOnScroll>
+      </section>
+
+      {/* =================================================================
+          5. TRUST & FEATURES (HOVER CARDS)
+      ================================================================== */}
+      <section className="py-24 bg-white">
+        <div className="max-w-7xl mx-auto px-4">
+          <RevealOnScroll>
+            <div className="text-center mb-20">
+              <h2 className="text-4xl font-black text-[#1E293B] mb-4">An Tâm Tuyệt Đối</h2>
+              <p className="text-gray-500 text-lg">Nền tảng được xây dựng với tiêu chuẩn bảo mật cao nhất.</p>
+            </div>
+          </RevealOnScroll>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+            {TRUST_BADGES.map((item, idx) => (
+              <RevealOnScroll key={idx} delay={idx * 150}>
+                <div className="group p-10 rounded-[2.5rem] bg-gray-50 border border-transparent hover:bg-white hover:border-gray-100 hover:shadow-2xl transition-all duration-500 text-center">
+                  <div className={`w-20 h-20 mx-auto rounded-3xl bg-white shadow-sm flex items-center justify-center mb-8 group-hover:scale-110 transition-transform duration-500 ${item.color}`}>
+                    {item.icon}
+                  </div>
+                  <h3 className="text-xl font-black text-gray-900 mb-3">{item.title}</h3>
+                  <p className="text-gray-500 leading-relaxed">{item.desc}</p>
+                </div>
+              </RevealOnScroll>
             ))}
           </div>
         </div>
       </section>
 
       {/* =================================================================
-          CALL TO ACTION (BANNER)
+          6. FOOTER (CLEAN & MINIMAL)
       ================================================================== */}
-      <section className="py-12 px-4">
-        <div className="max-w-7xl mx-auto relative rounded-3xl overflow-hidden bg-[#00418E] text-white shadow-2xl">
-          {/* Background Texture */}
-          <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/cubes.png')] opacity-10"></div>
-          <div className="absolute right-0 top-0 w-1/2 h-full bg-gradient-to-l from-[#00B0F0] to-transparent opacity-30"></div>
-
-          <div className="relative z-10 flex flex-col md:flex-row items-center justify-between p-12 gap-8">
-            <div className="space-y-4 text-center md:text-left">
-              <h2 className="text-3xl md:text-4xl font-black">Bạn có đồ cũ cần bán?</h2>
-              <p className="text-blue-100 text-lg">Đăng tin miễn phí, tiếp cận hàng ngàn sinh viên ngay hôm nay.</p>
-            </div>
-            
-            <div className="flex gap-4">
-              <button 
-                onClick={() => navigate('/post')}
-                className="px-8 py-4 bg-white text-[#00418E] rounded-xl font-bold shadow-lg hover:shadow-xl hover:scale-105 transition-all flex items-center gap-2"
-              >
-                <Zap size={20} className="fill-current" /> Đăng Tin Ngay
-              </button>
-              <button 
-                onClick={() => navigate('/auth')}
-                className="px-8 py-4 bg-blue-700/50 text-white rounded-xl font-bold hover:bg-blue-700 transition-all border border-blue-500/30"
-              >
-                Đăng ký
-              </button>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* =================================================================
-          FOOTER (MEGA)
-      ================================================================== */}
-      <footer className="bg-white border-t border-gray-200 pt-16 pb-8 text-sm">
+      <footer className="bg-white border-t border-gray-100 pt-20 pb-10">
         <div className="max-w-7xl mx-auto px-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-12 mb-12">
-            {/* Brand */}
-            <div className="space-y-4">
-              <div className="flex items-center gap-2">
-                <div className="w-10 h-10 bg-[#00418E] rounded-lg flex items-center justify-center text-white">
-                  <ShoppingBag size={20} />
+          <div className="grid grid-cols-1 lg:grid-cols-4 gap-12 mb-16">
+            <div className="space-y-6">
+              <div className="flex items-center gap-3">
+                <div className="w-12 h-12 bg-[#00418E] rounded-xl flex items-center justify-center text-white shadow-lg shadow-blue-200">
+                  <ShoppingBag size={24}/>
                 </div>
-                <span className="text-xl font-black text-[#00418E]">CHỢ BK</span>
+                <span className="text-2xl font-black text-[#00418E] tracking-tight">CHỢ BK</span>
               </div>
-              <p className="text-gray-500 leading-relaxed">
-                Dự án phi lợi nhuận hỗ trợ sinh viên ĐH Bách Khoa TP.HCM. 
-                Kết nối - Chia sẻ - Tiết kiệm.
+              <p className="text-gray-500 leading-relaxed text-sm">
+                Dự án phi lợi nhuận hỗ trợ sinh viên ĐH Bách Khoa TP.HCM.
+                <br/>Kết nối - Chia sẻ - Tiết kiệm.
               </p>
-              <div className="flex gap-4 pt-2">
-                <a href="#" className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-blue-100 hover:text-blue-600 transition-all"><Facebook size={16}/></a>
-                <a href="#" className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-pink-100 hover:text-pink-600 transition-all"><Instagram size={16}/></a>
-                <a href="#" className="w-8 h-8 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-red-100 hover:text-red-600 transition-all"><Youtube size={16}/></a>
+              <div className="flex gap-4">
+                {[Facebook, Instagram, Youtube].map((Icon, i) => (
+                  <a key={i} href="#" className="w-10 h-10 rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-[#00418E] hover:text-white transition-all hover:-translate-y-1">
+                    <Icon size={18}/>
+                  </a>
+                ))}
               </div>
             </div>
 
-            {/* Links */}
             <div>
-              <h4 className="font-bold text-gray-900 mb-4 uppercase text-xs tracking-wider">Về chúng tôi</h4>
-              <ul className="space-y-3 text-gray-500">
-                <li><Link to="/about" className="hover:text-[#00418E] transition-colors">Giới thiệu</Link></li>
-                <li><Link to="/rules" className="hover:text-[#00418E] transition-colors">Quy chế hoạt động</Link></li>
-                <li><Link to="/policy" className="hover:text-[#00418E] transition-colors">Chính sách bảo mật</Link></li>
-                <li><Link to="/careers" className="hover:text-[#00418E] transition-colors">Tuyển dụng Admin</Link></li>
+              <h4 className="font-bold text-gray-900 mb-6 uppercase text-xs tracking-widest">Khám phá</h4>
+              <ul className="space-y-4 text-sm text-gray-500">
+                {['Về chúng tôi', 'Quy chế hoạt động', 'Chính sách bảo mật', 'Tuyển dụng Admin'].map(Link => (
+                  <li key={Link}><a href="#" className="hover:text-[#00418E] transition-colors">{Link}</a></li>
+                ))}
               </ul>
             </div>
 
             <div>
-              <h4 className="font-bold text-gray-900 mb-4 uppercase text-xs tracking-wider">Hỗ trợ</h4>
-              <ul className="space-y-3 text-gray-500">
-                <li><Link to="/help" className="hover:text-[#00418E] transition-colors">Trung tâm trợ giúp</Link></li>
-                <li><Link to="/safety" className="hover:text-[#00418E] transition-colors">An toàn mua bán</Link></li>
-                <li><Link to="/contact" className="hover:text-[#00418E] transition-colors">Liên hệ</Link></li>
-                <li><Link to="/report" className="hover:text-[#00418E] transition-colors">Báo cáo lừa đảo</Link></li>
+              <h4 className="font-bold text-gray-900 mb-6 uppercase text-xs tracking-widest">Danh mục</h4>
+              <ul className="space-y-4 text-sm text-gray-500">
+                {CATEGORIES.map(cat => (
+                  <li key={cat.id}><a href="#" className="hover:text-[#00418E] transition-colors">{cat.label}</a></li>
+                ))}
               </ul>
             </div>
 
-            {/* Contact Info */}
             <div>
-              <h4 className="font-bold text-gray-900 mb-4 uppercase text-xs tracking-wider">Liên hệ</h4>
-              <ul className="space-y-4 text-gray-500">
-                <li className="flex items-start gap-3">
-                  <MapPin size={18} className="text-[#00418E] shrink-0 mt-0.5" />
-                  <span>268 Lý Thường Kiệt, Phường 14, Quận 10, TP.HCM</span>
-                </li>
-                <li className="flex items-center gap-3">
-                  <Mail size={18} className="text-[#00418E] shrink-0" />
-                  <a href="mailto:support@chobk.com" className="hover:text-[#00418E]">support@chobk.com</a>
-                </li>
-                <li className="flex items-center gap-3">
-                  <Phone size={18} className="text-[#00418E] shrink-0" />
-                  <a href="tel:0123456789" className="hover:text-[#00418E]">0123.456.789</a>
-                </li>
+              <h4 className="font-bold text-gray-900 mb-6 uppercase text-xs tracking-widest">Liên hệ</h4>
+              <ul className="space-y-4 text-sm text-gray-500">
+                <li className="flex items-center gap-3"><MapPin size={18} className="text-[#00418E]"/> 268 Lý Thường Kiệt, Q.10</li>
+                <li className="flex items-center gap-3"><Mail size={18} className="text-[#00418E]"/> support@chobk.com</li>
+                <li className="flex items-center gap-3"><Phone size={18} className="text-[#00418E]"/> 0123.456.789</li>
               </ul>
             </div>
           </div>
 
           <div className="border-t border-gray-100 pt-8 flex flex-col md:flex-row justify-between items-center gap-4 text-xs text-gray-400 font-medium">
             <p>&copy; {new Date().getFullYear()} Chợ BK Team. All rights reserved.</p>
-            <div className="flex gap-6">
-              <a href="#" className="hover:text-gray-600">Điều khoản</a>
-              <a href="#" className="hover:text-gray-600">Bảo mật</a>
-              <a href="#" className="hover:text-gray-600">Sitemap</a>
+            <div className="flex gap-8">
+              <a href="#" className="hover:text-[#00418E]">Điều khoản</a>
+              <a href="#" className="hover:text-[#00418E]">Bảo mật</a>
+              <a href="#" className="hover:text-[#00418E]">Sitemap</a>
             </div>
           </div>
         </div>
