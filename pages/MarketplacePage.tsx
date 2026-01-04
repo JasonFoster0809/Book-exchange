@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+// --- ĐÃ SỬA: Thêm Link vào đây ---
+import { useSearchParams, useNavigate, Link } from 'react-router-dom'; 
 import { 
   Search, Filter, SlidersHorizontal, ArrowLeft, Loader2, 
   ChevronDown, X, Check, Grid, List as ListIcon, ShieldAlert
