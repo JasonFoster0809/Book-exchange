@@ -3,9 +3,9 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Heart, MessageCircle, Share2, Flag, ArrowLeft,
   ChevronRight, MapPin, Clock, Eye, ShieldCheck,
-  Star, Box, CheckCircle2, ShoppingBag // Đã bỏ ShoppingBag ở nút mua, giữ lại icon nếu cần
+  Star, Box, CheckCircle2
 } from 'lucide-react';
-import { Product, User, Comment } from '../types'; // Đảm bảo import đúng types
+import { Product, User, Comment } from '../types';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -51,7 +51,7 @@ const Animations = () => (
 // 2. COMPONENTS
 // ============================================================================
 
-const InteractiveGallery = ({ images, status }: { images: string[], status: any }) => {
+const Gallery = ({ images, status }: { images: string[], status: any }) => {
   const [active, setActive] = useState(0);
   return (
     <div className="space-y-4">
@@ -59,7 +59,7 @@ const InteractiveGallery = ({ images, status }: { images: string[], status: any 
         <img src={images[active]} alt="Product" className="w-full h-full object-contain p-4 transition-transform duration-500 group-hover:scale-105"/>
         {status === 'sold' && (
           <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-10">
-            <span className="text-white font-black text-4xl border-4 border-white px-8 py-2 uppercase tracking-widest -rotate-12">Đã bán</span>
+            <span className="text-white font-black text-4xl border-4 border-white px-8 py-2 uppercase tracking-widest -rotate-12">ĐÃ BÁN</span>
           </div>
         )}
       </div>
@@ -185,10 +185,9 @@ const ProductDetailPage: React.FC = () => {
       <main className="max-w-7xl mx-auto px-4 py-8">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
           
-          {/* Left: Gallery & Content */}
+          {/* LEFT COLUMN */}
           <div className="lg:col-span-7 space-y-10 animate-enter">
-            <InteractiveGallery images={product.images} status={product.status} />
-            
+            <Gallery images={product.images} status={product.status} />
             <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100">
               <h3 className="text-xl font-black text-gray-900 mb-6">Mô tả chi tiết</h3>
               <div className="prose prose-slate max-w-none text-gray-600 leading-relaxed whitespace-pre-wrap mb-8">
@@ -207,10 +206,10 @@ const ProductDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Right: Info & Actions */}
+          {/* RIGHT COLUMN */}
           <div className="lg:col-span-5 relative">
             <div className="sticky top-24 space-y-6 animate-enter stagger-2">
-              <div className="bg-white rounded-[2.5rem] p-8 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.1)] border border-gray-100 relative overflow-hidden">
+              <div className="bg-white rounded-[2.5rem] p-8 shadow-[0_20px_40px_-15px_rgba(0,0,0,0.1)] border border-gray-100/80 relative overflow-hidden">
                 <div className="flex justify-between items-start mb-6">
                   <span className="bg-blue-50 text-blue-700 text-xs font-black px-3 py-1.5 rounded-lg uppercase tracking-wider">{product.category}</span>
                   <button onClick={handleLike} className="p-2 hover:bg-gray-50 rounded-full transition-all active:scale-90 group">
@@ -226,16 +225,15 @@ const ProductDetailPage: React.FC = () => {
                   <div className="flex items-center gap-1.5"><Eye size={16} className="text-blue-500"/> {product.view_count}</div>
                 </div>
 
+                {/* SỬA LẠI PHẦN GIÁ: KHÔNG CÓ GIẢM GIÁ ẢO */}
                 <div className="mb-8">
                   <div className="flex items-baseline gap-3">
                     <span className="text-5xl font-black text-blue-700 tracking-tight">
-                      {product.price === 0 ? 'FREE' : formatCurrency(product.price)}
+                      {product.price === 0 ? 'Tặng miễn phí' : formatCurrency(product.price)}
                     </span>
-                    {product.price > 0 && <span className="text-xl text-gray-300 line-through font-bold">{formatCurrency(product.price * 1.2)}</span>}
                   </div>
                 </div>
 
-                {/* --- CHỈ CÓ NÚT CHAT --- */}
                 <div className="flex flex-col gap-3">
                   {isOwner ? (
                     <button onClick={() => navigate(`/post-item?edit=${product.id}`)} className="w-full py-4 bg-gray-100 hover:bg-gray-200 text-gray-900 rounded-2xl font-bold text-lg transition-all hover-scale">
@@ -266,7 +264,7 @@ const ProductDetailPage: React.FC = () => {
           </div>
         </div>
 
-        {/* Related Products */}
+        {/* RELATED PRODUCTS */}
         {related.length > 0 && (
           <div className="mt-24 border-t border-gray-200 pt-16 animate-enter stagger-2">
             <div className="flex items-center justify-between mb-8">
@@ -280,14 +278,10 @@ const ProductDetailPage: React.FC = () => {
         )}
       </main>
 
-      {/* Mobile Sticky Bar */}
+      {/* MOBILE BAR */}
       <div className="fixed bottom-0 left-0 right-0 bg-white/90 backdrop-blur-lg border-t border-gray-200 p-4 lg:hidden z-50 animate-enter">
         <div className="flex gap-3">
-           <button 
-             onClick={() => navigate(`/chat?partnerId=${seller?.id}&productId=${product.id}`)} 
-             disabled={product.status === 'sold'}
-             className="flex-1 bg-[#00418E] text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-transform disabled:bg-gray-300"
-           >
+           <button onClick={() => navigate(`/chat?partnerId=${seller?.id}&productId=${product.id}`)} disabled={product.status === 'sold'} className="flex-1 bg-[#00418E] text-white py-3.5 rounded-xl font-bold flex items-center justify-center gap-2 shadow-lg active:scale-95 transition-transform disabled:bg-gray-300">
              <MessageCircle size={20} className="fill-current"/> Chat Ngay
            </button>
            <button onClick={handleLike} className={`w-14 flex items-center justify-center rounded-xl border-2 transition-all active:scale-95 ${isLiked ? 'border-red-500 bg-red-50 text-red-500' : 'border-gray-200 text-gray-400 bg-white'}`}>
