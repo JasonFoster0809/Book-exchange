@@ -3,9 +3,9 @@ import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
   Heart, MessageCircle, Share2, Flag, ArrowLeft,
   ChevronRight, MapPin, Clock, Eye, ShieldCheck,
-  Star, Box, CheckCircle2
+  Star, Box, CheckCircle2 // Đã bỏ icon ShoppingBag
 } from 'lucide-react';
-import { Product, User, Comment } from '../types';
+import { Product, User } from '../types';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
@@ -225,7 +225,6 @@ const ProductDetailPage: React.FC = () => {
                   <div className="flex items-center gap-1.5"><Eye size={16} className="text-blue-500"/> {product.view_count}</div>
                 </div>
 
-                {/* SỬA LẠI PHẦN GIÁ: KHÔNG CÓ GIẢM GIÁ ẢO */}
                 <div className="mb-8">
                   <div className="flex items-baseline gap-3">
                     <span className="text-5xl font-black text-blue-700 tracking-tight">
@@ -246,7 +245,7 @@ const ProductDetailPage: React.FC = () => {
                       className="w-full py-4 bg-[#00418E] hover:bg-[#003370] text-white rounded-2xl font-bold text-lg shadow-xl shadow-blue-900/10 transition-all hover-scale flex items-center justify-center gap-3 disabled:bg-gray-300 disabled:shadow-none"
                     >
                       <MessageCircle size={22} className="fill-current"/> 
-                      {product.status === 'sold' ? 'Đã bán' : 'Nhắn tin với người bán'}
+                      {product.status === 'sold' ? 'Đã bán' : 'Nhắn tin cho người bán'}
                     </button>
                   )}
                 </div>
@@ -255,7 +254,7 @@ const ProductDetailPage: React.FC = () => {
               {seller && <SellerInfo seller={seller} />}
 
               <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-3xl border border-blue-100">
-                <h4 className="font-bold text-blue-900 flex items-center gap-2 mb-3"><ShieldCheck size={18}/> An toàn là trên hết</h4>
+                <h4 className="font-bold text-blue-900 flex items-center gap-2 mb-3"><ShieldCheck size={18}/> Mẹo giao dịch an toàn</h4>
                 <p className="text-sm text-blue-800/80 leading-relaxed">
                   Hãy trao đổi kỹ càng qua tin nhắn trước khi gặp mặt. Không chuyển khoản cọc trước khi nhận hàng.
                 </p>
