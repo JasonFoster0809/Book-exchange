@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import { useSearchParams, useNavigate, Link } from 'react-router-dom';
 import { 
   Search, Filter, SlidersHorizontal, ArrowLeft, Loader2, 
@@ -6,7 +6,7 @@ import {
   Ghost, Sparkles, Tag, ArrowUpAZ, ArrowDownAZ, LayoutGrid,
   ChevronRight, ChevronLeft, MapPin, Zap, Clock, Star,
   RotateCcw, ShoppingBag, Eye, Heart, AlertCircle, Calendar,
-  MoreHorizontal, ArrowUpRight
+  MoreHorizontal, ArrowUpRight, Gift // <-- Đã thêm Gift
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { Product, ProductCondition, ProductCategory, ProductStatus } from '../types';
@@ -23,7 +23,7 @@ const THEME = {
   accent: '#FFD700',
 };
 
-// Inject CSS Keyframes trực tiếp để đảm bảo Animation mượt mà 60fps
+// Inject CSS Keyframes
 const MarketStyles = () => (
   <style>{`
     @keyframes slideUpFade {
@@ -44,12 +44,6 @@ const MarketStyles = () => (
     .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
     .custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgba(0, 65, 142, 0.1); border-radius: 20px; }
     .custom-scrollbar:hover::-webkit-scrollbar-thumb { background-color: rgba(0, 65, 142, 0.3); }
-
-    .glass-panel {
-      background: rgba(255, 255, 255, 0.8);
-      backdrop-filter: blur(12px);
-      border: 1px solid rgba(255, 255, 255, 0.6);
-    }
   `}</style>
 );
 
@@ -112,7 +106,27 @@ const CheckboxItem = ({ label, checked, onChange, count }: any) => (
 );
 
 /**
- * ProductCard: Card sản phẩm phiên bản Market (Chi tiết hơn Home)
+ * MarketSkeleton: Component Loading (Định nghĩa 1 lần duy nhất ở đây)
+ */
+const MarketSkeleton = ({ viewMode }: { viewMode: 'grid' | 'list' }) => (
+  <div className={viewMode === 'grid' ? "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6" : "flex flex-col gap-4"}>
+    {[...Array(8)].map((_, i) => (
+      <div key={i} className={`bg-white border border-gray-100 rounded-3xl p-4 shadow-sm relative overflow-hidden ${viewMode === 'list' ? 'flex gap-4 h-36' : 'h-[350px]'}`}>
+        <div className={`${viewMode === 'list' ? 'w-48 h-full' : 'h-48 w-full'} bg-gray-200 rounded-2xl`}></div>
+        <div className="flex-1 space-y-3 py-2">
+          <div className="h-4 bg-gray-200 rounded-full w-24"></div>
+          <div className="h-6 bg-gray-200 rounded-full w-full"></div>
+          <div className="h-6 bg-gray-200 rounded-full w-2/3"></div>
+          <div className="h-8 bg-gray-200 rounded-lg w-32 mt-4"></div>
+        </div>
+        <div className="absolute inset-0 animate-shimmer"></div>
+      </div>
+    ))}
+  </div>
+);
+
+/**
+ * ProductCard: Card sản phẩm phiên bản Market
  */
 const MarketProductCard = ({ product, viewMode, onAdminDelete }: { product: Product, viewMode: 'grid' | 'list', onAdminDelete?: (id: string) => void }) => {
   const navigate = useNavigate();
@@ -243,26 +257,6 @@ const MarketProductCard = ({ product, viewMode, onAdminDelete }: { product: Prod
   );
 };
 
-/**
- * MarketSkeleton: Loading state chuyên nghiệp
- */
-const MarketSkeleton = ({ viewMode }: { viewMode: 'grid' | 'list' }) => (
-  <div className={viewMode === 'grid' ? "grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4" : "flex flex-col gap-4"}>
-    {[...Array(8)].map((_, i) => (
-      <div key={i} className={`bg-white border border-gray-100 rounded-3xl p-4 shadow-sm relative overflow-hidden ${viewMode === 'list' ? 'flex gap-4 h-36' : 'h-[350px]'}`}>
-        <div className={`${viewMode === 'list' ? 'w-48 h-full' : 'h-48 w-full'} bg-gray-200 rounded-2xl`}></div>
-        <div className="flex-1 space-y-3 py-2">
-          <div className="h-4 bg-gray-200 rounded-full w-24"></div>
-          <div className="h-6 bg-gray-200 rounded-full w-full"></div>
-          <div className="h-6 bg-gray-200 rounded-full w-2/3"></div>
-          <div className="h-8 bg-gray-200 rounded-lg w-32 mt-4"></div>
-        </div>
-        <div className="absolute inset-0 animate-shimmer"></div>
-      </div>
-    ))}
-  </div>
-);
-
 // ============================================================================
 // 3. MAIN PAGE COMPONENT
 // ============================================================================
@@ -270,7 +264,8 @@ const MarketSkeleton = ({ viewMode }: { viewMode: 'grid' | 'list' }) => (
 const MarketPage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { isAdmin } = useAuth();
+  // --- ĐÃ SỬA: Lấy thêm 'user' để check nút đăng tin ---
+  const { user, isAdmin } = useAuth();
   const { addToast } = useToast();
 
   // --- STATE MANAGEMENT ---
@@ -642,23 +637,5 @@ const MarketPage: React.FC = () => {
     </div>
   );
 };
-
-// --- HELPER COMPONENT FOR SKELETON ---
-const MarketSkeleton = ({ viewMode }: { viewMode: 'grid' | 'list' }) => (
-  <div className={viewMode === 'grid' ? "grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-4 md:gap-6" : "flex flex-col gap-4"}>
-    {[...Array(8)].map((_, i) => (
-      <div key={i} className={`bg-white border border-gray-100 rounded-3xl p-4 shadow-sm relative overflow-hidden ${viewMode === 'list' ? 'flex gap-4 h-36' : 'h-[350px]'}`}>
-        <div className={`${viewMode === 'list' ? 'w-48 h-full' : 'h-48 w-full'} bg-gray-200 rounded-2xl`}></div>
-        <div className="flex-1 space-y-3 py-2">
-          <div className="h-4 bg-gray-200 rounded-full w-24"></div>
-          <div className="h-6 bg-gray-200 rounded-full w-full"></div>
-          <div className="h-6 bg-gray-200 rounded-full w-2/3"></div>
-          <div className="h-8 bg-gray-200 rounded-lg w-32 mt-4"></div>
-        </div>
-        <div className="absolute inset-0 animate-shimmer"></div>
-      </div>
-    ))}
-  </div>
-);
 
 export default MarketPage;
