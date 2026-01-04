@@ -4,8 +4,8 @@ import {
   ShieldCheck, MessageCircle, Share2, Flag, Heart, 
   ShieldAlert, Loader2, ShoppingBag, Store, ArrowLeft, 
   ChevronRight, X, Clock, Box, MapPin, CheckCircle2, 
-  AlertCircle, Copy, Send, Gift, Eye, MoreHorizontal, // Đã thêm Gift, Eye
-  Calendar, Star
+  AlertCircle, Copy, Send, MoreHorizontal, Calendar, Star,
+  Eye, Gift // Đã import đủ
 } from 'lucide-react'; 
 import { Product, User, Comment, ProductStatus } from '../types'; 
 import { supabase } from '../services/supabase';
@@ -279,11 +279,12 @@ const ProductDetailPage: React.FC = () => {
         .limit(4);
       
       if (relData) {
+        // --- SỬA LỖI TẠI ĐÂY: Cast item.status thành ProductStatus ---
         setRelatedProducts(relData.map(item => ({ 
           ...item, 
           sellerId: item.seller_id, 
           images: item.images || [],
-          status: item.status as ProductStatus
+          status: (item.status as ProductStatus) || 'available' // Ép kiểu an toàn
         } as Product)));
       }
 
@@ -466,7 +467,7 @@ const ProductDetailPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Seller Card */}
+              {/* Seller & Safety */}
               {seller && <SellerInfoCard seller={seller} isUntrusted={isSellerUntrusted} />}
               
               {/* Safety Tips */}
@@ -491,7 +492,9 @@ const ProductDetailPage: React.FC = () => {
           {/* Description Mobile */}
           <div className="lg:hidden col-span-1 bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100">
             <h3 className="text-lg font-black text-[#00418E] uppercase tracking-widest mb-4">Mô tả sản phẩm</h3>
-            <div className="prose prose-sm text-gray-600 whitespace-pre-wrap">{product.description}</div>
+            <div className="prose prose-sm text-gray-600 whitespace-pre-wrap">
+              {product.description}
+            </div>
           </div>
 
         </div>
