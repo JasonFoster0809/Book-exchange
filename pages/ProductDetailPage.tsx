@@ -10,7 +10,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
 import {
-  Heart, MessageCircle, Share2, Flag, ArrowLeft,
+  Heart, MessageCircle, Share2, Flag, ArrowLeft,ArrowRight,
   ChevronRight, MapPin, Clock, Eye, ShieldCheck,
   Star, Box, CheckCircle2, Send, Copy, AlertTriangle,
   Calendar, Award, Zap, CornerUpRight, Info, X
