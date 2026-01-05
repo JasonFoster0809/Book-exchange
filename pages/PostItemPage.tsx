@@ -11,7 +11,26 @@ import {
 import { supabase } from '../services/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
-import { ProductCategory, ProductCondition, TradeMethod } from '../types';
+
+enum ProductCategory {
+  TEXTBOOK = 'textbook',
+  ELECTRONICS = 'electronics',
+  SUPPLIES = 'supplies',
+  CLOTHING = 'clothing',
+  OTHER = 'other',
+}
+
+enum ProductCondition {
+  NEW = 'new',
+  LIKE_NEW = 'like_new',
+  GOOD = 'good',
+  FAIR = 'fair'
+}
+
+enum TradeMethod {
+  DIRECT = 'direct',
+  SHIPPING = 'shipping'
+}
 
 const CATEGORIES = [
   { value: ProductCategory.TEXTBOOK, label: 'Giáo trình & Tài liệu', icon: '📚' },
@@ -118,7 +137,7 @@ const PostItemPage: React.FC = () => {
     title: '', description: '', price: '',
     category: ProductCategory.TEXTBOOK,
     condition: ProductCondition.GOOD,
-    tradeMethod: TradeMethod.DIRECT, // FIX: Use Enum
+    tradeMethod: TradeMethod.DIRECT,
     location: LOCATIONS[0].name,
     tags: []
   });
@@ -229,6 +248,9 @@ const PostItemPage: React.FC = () => {
     finally { setIsSubmitting(false); }
   };
 
+  const getUserName = () => (user as any)?.user_metadata?.name || 'Bạn';
+  const getUserAvatar = () => (user as any)?.user_metadata?.avatar_url || 'https://via.placeholder.com/40';
+
   if (isRestricted) return <div className="h-screen flex items-center justify-center bg-slate-100 text-red-500 font-bold"><AlertCircle className="mr-2"/>Tài khoản bị hạn chế</div>;
 
   return (
@@ -248,7 +270,7 @@ const PostItemPage: React.FC = () => {
           <div className="bg-white p-10 rounded-3xl shadow-2xl max-w-sm w-full text-center relative overflow-hidden">
             <div className="absolute inset-0 bg-gradient-to-br from-indigo-50 to-purple-50 z-0"></div>
             <div className="relative z-10">
-              <div className="w-20 h-20 bg-white rounded-full mx-auto mb-6 flex items-center justify-center shadow-lg relative"><Sparkles size={40} className="text-indigo-600 animate-pulse"/><div className="absolute inset-0 border-4 border-indigo-100 rounded-full animate-spin-slow border-t-indigo-500"></div></div>
+              <div className="w-20 h-20 bg-white rounded-full mx-auto mb-6 flex items-center justify-center shadow-lg relative"><Sparkles size={40} className="text-indigo-600 animate-pulse"/><div className="absolute inset-0 border-4 border-indigo-100 rounded-full animate-ping"></div></div>
               <h3 className="text-2xl font-black text-slate-800 mb-2">Gemini AI</h3>
               <p className="text-slate-500 font-medium">Đang phân tích hình ảnh...</p>
             </div>
@@ -392,7 +414,7 @@ const PostItemPage: React.FC = () => {
                     <div className="flex gap-2"><span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded">{state.condition}</span><span className="bg-slate-100 text-slate-600 text-[10px] font-bold px-2 py-1 rounded">{state.tradeMethod === TradeMethod.DIRECT ? 'Trực tiếp' : 'Ship COD'}</span></div>
                     <p className="text-xs text-slate-500 leading-relaxed">{state.description}</p>
                     <div className="pt-4 border-t border-slate-100">
-                      <div className="flex items-center gap-2"><img src={user?.user_metadata?.avatar_url || 'https://via.placeholder.com/40'} className="w-8 h-8 rounded-full bg-slate-200"/><div><p className="text-xs font-bold text-slate-900">{user?.user_metadata?.name || 'Bạn'}</p><p className="text-[10px] text-slate-400">Vừa xong</p></div></div>
+                      <div className="flex items-center gap-2"><img src={getUserAvatar()} className="w-8 h-8 rounded-full bg-slate-200"/><div><p className="text-xs font-bold text-slate-900">{getUserName()}</p><p className="text-[10px] text-slate-400">Vừa xong</p></div></div>
                     </div>
                   </div>
                 </div>
