@@ -6,28 +6,31 @@ import { useToast } from '../contexts/ToastContext';
 import { 
   Send, Image as ImageIcon, MapPin, CheckCircle, 
   MessageCircle, ArrowLeft, X, Loader, ShoppingBag, 
-  ShieldAlert, MoreVertical, Search, Phone, Calendar,
-  CornerDownRight, Zap, PlayCircle, Lock
+  ShieldAlert, Phone, Calendar, CornerDownRight, Zap, PlayCircle, Lock
 } from 'lucide-react'; 
 import { playMessageSound } from '../utils/audio';
 
-// ... (Giữ nguyên Style và Config Data để đảm bảo UI đẹp) ...
+// ============================================================================
+// 1. VISUAL ENGINE
+// ============================================================================
 const ChatStyles = () => (
   <style>{`
     .chat-scrollbar::-webkit-scrollbar { width: 6px; }
     .chat-scrollbar::-webkit-scrollbar-track { background: transparent; }
     .chat-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
     .chat-scrollbar:hover::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); }
+    
     @keyframes slide-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
     .animate-slide-up { animation: slide-up 0.3s ease-out forwards; }
+    
+    @keyframes msg-pop { 0% { opacity: 0; transform: scale(0.9) translateY(10px); } 100% { opacity: 1; transform: scale(1) translateY(0); } }
+    .animate-msg { animation: msg-pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards; }
+
     .glass-header { background: rgba(255, 255, 255, 0.9); backdrop-filter: blur(12px); border-bottom: 1px solid rgba(0,0,0,0.05); }
   `}</style>
 );
 
-const SUGGESTED_LOCATIONS = [
-    "📍 Thư viện Trung tâm", "📍 Canteen B4", "📍 Sảnh H6", 
-    "📍 Cổng Lý Thường Kiệt", "📍 Nhà xe SV", "📍 Ghế đá hồ nước"
-];
+const SUGGESTED_LOCATIONS = [ "📍 Thư viện Trung tâm", "📍 Canteen B4", "📍 Sảnh H6", "📍 Cổng Lý Thường Kiệt", "📍 Nhà xe SV", "📍 Ghế đá hồ nước" ];
 const QUICK_REPLIES = ["Sản phẩm còn không ạ?", "Có fix giá thêm không?", "Cho mình xem thêm ảnh thật đi", "Giao dịch lúc 12h trưa nay nhé?"];
 
 const ChatPage: React.FC = () => {
@@ -36,20 +39,22 @@ const ChatPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
+  // Params từ URL (khi click nút Chat ở trang Product)
   const partnerIdParam = searchParams.get('partnerId');
   const productIdParam = searchParams.get('productId'); 
   
+  // State Data
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [partnerProfile, setPartnerProfile] = useState<any>(null);
-  
-  // Sản phẩm đang được ghim
   const [targetProduct, setTargetProduct] = useState<any>(null);
   
+  // State UI
   const [newMessage, setNewMessage] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false); // Trạng thái xử lý giao dịch
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true); // Loading lúc đầu
   const [uploadingImg, setUploadingImg] = useState(false);
   const [showTools, setShowTools] = useState(false); 
   const [showAppointmentModal, setShowAppointmentModal] = useState(false);
@@ -58,149 +63,160 @@ const ChatPage: React.FC = () => {
 
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // --- INIT ---
-  useEffect(() => { if(user) fetchConversations(); }, [user]);
+  // --- 1. KHỞI TẠO DỮ LIỆU (FIX LOGIC) ---
 
-  // Xử lý khi vào từ URL (có partnerId và productId)
-  useEffect(() => {
-    const initChat = async () => {
-        if (!user || !partnerIdParam) return;
-        
-        // 1. Lấy thông tin sản phẩm để ghim
-        if (productIdParam) {
-            const { data } = await supabase.from('products').select('*').eq('id', productIdParam).single();
-            setTargetProduct(data);
-        }
-
-        // 2. Mở hoặc tạo hội thoại
-        await checkAndCreateConversation(partnerIdParam);
-    };
-    initChat();
-  }, [partnerIdParam, productIdParam, user]);
-
-  useEffect(() => {
-    if (activeConversation) {
-        fetchMessages(activeConversation);
-        const channel = supabase.channel(`chat:${activeConversation}`)
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversation}` }, (payload) => {
-                setMessages(prev => [...prev, payload.new]);
-                if (user && payload.new.sender_id !== user.id) playMessageSound();
-            })
-            .subscribe();
-        return () => { supabase.removeChannel(channel); };
-    }
-  }, [activeConversation, user]);
-
-  useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
-
-  // --- API ---
+  // Bước 1: Load danh sách hội thoại
   const fetchConversations = async () => {
       if (!user) return;
-      const { data } = await supabase.from('conversations').select(`*, p1:profiles!participant1(name, avatar_url, ban_until), p2:profiles!participant2(name, avatar_url, ban_until)`).or(`participant1.eq.${user.id},participant2.eq.${user.id}`).order('updated_at', { ascending: false });
+      const { data } = await supabase.from('conversations')
+          .select(`*, p1:profiles!participant1(name, avatar_url, ban_until), p2:profiles!participant2(name, avatar_url, ban_until)`)
+          .or(`participant1.eq.${user.id},participant2.eq.${user.id}`)
+          .order('updated_at', { ascending: false });
+      
       if(data) {
           const formatted = data.map((c: any) => {
               const isP1 = c.participant1 === user.id;
               const partner = isP1 ? c.p2 : c.p1;
-              return { ...c, partnerName: partner?.name || "Người dùng", partnerAvatar: partner?.avatar_url, partnerId: isP1 ? c.participant2 : c.participant1, isPartnerRestricted: partner?.ban_until && new Date(partner.ban_until) > new Date() };
+              return { 
+                  ...c, 
+                  partnerName: partner?.name || "Người dùng", 
+                  partnerAvatar: partner?.avatar_url, 
+                  partnerId: isP1 ? c.participant2 : c.participant1, 
+                  isPartnerRestricted: partner?.ban_until && new Date(partner.ban_until) > new Date() 
+              };
           });
           setConversations(formatted);
+          return formatted;
       }
+      return [];
   };
 
-  const checkAndCreateConversation = async (pId: string) => {
-      if (!user || user.id === pId) return;
-      let existing = conversations.find((c: any) => c.partnerId === pId);
-      if (!existing) {
-          const { data } = await supabase.from('conversations').select('id').or(`and(participant1.eq.${user.id},participant2.eq.${pId}),and(participant1.eq.${pId},participant2.eq.${user.id})`).maybeSingle();
-          if (data) existing = { id: data.id };
-          else {
-             const { data: newConv } = await supabase.from('conversations').insert({ participant1: user.id, participant2: pId }).select().single();
-             existing = newConv;
-          }
-          await fetchConversations();
-      }
-      if (existing) {
-          setActiveConversation(existing.id);
-          fetchPartnerInfo(pId);
-      }
-  };
+  // Bước 2: Xử lý Logic Chat từ URL (QUAN TRỌNG)
+  useEffect(() => {
+    const initChatFlow = async () => {
+        if (!user) return;
+        setIsInitializing(true);
 
-  const fetchPartnerInfo = async (pId: string) => {
-      const { data } = await supabase.from('profiles').select('*').eq('id', pId).single();
-      setPartnerProfile(data);
-  };
+        // 2a. Lấy danh sách hội thoại trước
+        const currentConvs = await fetchConversations() || [];
+
+        // 2b. Nếu có partnerId từ URL (Click nút Chat)
+        if (partnerIdParam) {
+            // Lấy thông tin partner
+            const { data: partnerData } = await supabase.from('profiles').select('*').eq('id', partnerIdParam).single();
+            setPartnerProfile(partnerData);
+
+            // Lấy thông tin sản phẩm (nếu có)
+            if (productIdParam) {
+                const { data: prodData } = await supabase.from('products').select('*').eq('id', productIdParam).single();
+                setTargetProduct(prodData);
+            }
+
+            // Tìm hội thoại đã tồn tại trong list
+            let existingConv = currentConvs.find((c: any) => c.partnerId === partnerIdParam);
+
+            // Nếu chưa có trong list, kiểm tra kỹ trong DB hoặc tạo mới
+            if (!existingConv) {
+                // Kiểm tra DB lần nữa cho chắc
+                const { data: dbConv } = await supabase.from('conversations')
+                    .select('id')
+                    .or(`and(participant1.eq.${user.id},participant2.eq.${partnerIdParam}),and(participant1.eq.${partnerIdParam},participant2.eq.${user.id})`)
+                    .maybeSingle();
+
+                if (dbConv) {
+                    setActiveConversation(dbConv.id);
+                    await fetchConversations(); // Refresh list để hiện lên sidebar
+                } else {
+                    // Tạo mới
+                    const { data: newConv, error } = await supabase.from('conversations')
+                        .insert({ participant1: user.id, participant2: partnerIdParam })
+                        .select()
+                        .single();
+                    
+                    if (newConv && !error) {
+                        setActiveConversation(newConv.id);
+                        await fetchConversations(); // Refresh list ngay lập tức
+                    } else {
+                        addToast("Không thể tạo cuộc trò chuyện", "error");
+                    }
+                }
+            } else {
+                setActiveConversation(existingConv.id);
+            }
+        }
+        setIsInitializing(false);
+    };
+
+    initChatFlow();
+  }, [user, partnerIdParam, productIdParam]);
+
+  // Bước 3: Lắng nghe tin nhắn Realtime
+  useEffect(() => {
+    if (!activeConversation) return;
+
+    fetchMessages(activeConversation);
+    
+    const channel = supabase.channel(`chat:${activeConversation}`)
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversation}` }, (payload) => {
+            setMessages(prev => [...prev, payload.new]);
+            if (user && payload.new.sender_id !== user.id) playMessageSound();
+            // Cập nhật lại list bên trái để nó nhảy lên đầu
+            fetchConversations();
+        })
+        .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [activeConversation, user]);
+
+  useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
   const fetchMessages = async (convId: string) => {
       const { data } = await supabase.from('messages').select('*').eq('conversation_id', convId).order('created_at', { ascending: true });
       if (data) setMessages(data);
   };
 
-  // --- LOGIC GIAO DỊCH 3 BƯỚC ---
+  // --- LOGIC GIAO DỊCH ---
   
-  // 1. Buyer: Gửi yêu cầu giao dịch
   const handleRequestTransaction = async () => {
       if (!activeConversation || !user || !targetProduct) return;
+      if (messages.length === 0) return addToast("Hãy nhắn tin trước khi yêu cầu giao dịch.", "warning");
       
-      // Kiểm tra xem đã chat chưa (Logic: Có ít nhất 1 tin nhắn cũ)
-      // Nếu chưa chat, không cho request (để tránh spam)
-      if (messages.length === 0) {
-          return addToast("Hãy nhắn tin trao đổi trước khi yêu cầu giao dịch.", "warning");
-      }
-
       setIsProcessing(true);
       try {
           await supabase.from('messages').insert({ 
               conversation_id: activeConversation, sender_id: user.id, type: 'text',
-              content: `👋 Tôi muốn mua sản phẩm "${targetProduct.title}". Bạn có thể xác nhận giao dịch không?`
+              content: `👋 Tôi muốn mua "${targetProduct.title}". Bạn xác nhận nhé?`
           });
-          addToast("Đã gửi yêu cầu giao dịch!", "success");
-      } catch(e) { console.error(e); }
-      finally { setIsProcessing(false); }
+          addToast("Đã gửi yêu cầu!", "success");
+      } catch(e) { console.error(e); } finally { setIsProcessing(false); }
   };
 
-  // 2. Seller: Chấp nhận giao dịch (Available -> Pending)
   const handleAcceptTransaction = async () => {
       if (!activeConversation || !user || !targetProduct) return;
-      if (!window.confirm("Xác nhận chấp nhận giao dịch? Sản phẩm sẽ chuyển sang trạng thái 'Đang giao dịch'.")) return;
-      
+      if (!window.confirm("Xác nhận giao dịch? Trạng thái sẽ chuyển sang 'Đang giao dịch'.")) return;
       setIsProcessing(true);
       try {
           await supabase.from('products').update({ status: 'pending', buyer_id: partnerProfile?.id }).eq('id', targetProduct.id);
-          await supabase.from('messages').insert({ 
-              conversation_id: activeConversation, sender_id: user.id, type: 'text',
-              content: `✅ Đã chấp nhận giao dịch! Sản phẩm "${targetProduct.title}" hiện đang được giữ cho bạn.`
-          });
+          await supabase.from('messages').insert({ conversation_id: activeConversation, sender_id: user.id, type: 'text', content: `✅ Đã chấp nhận! Sản phẩm đang được giữ cho bạn.` });
           setTargetProduct({ ...targetProduct, status: 'pending', buyerId: partnerProfile?.id });
-          addToast("Đã chấp nhận giao dịch!", "success");
-      } catch(e) { console.error(e); }
-      finally { setIsProcessing(false); }
+      } catch(e) { console.error(e); } finally { setIsProcessing(false); }
   };
 
-  // 3. Seller: Hoàn tất giao dịch (Pending -> Sold)
   const handleCompleteTransaction = async () => {
       if (!activeConversation || !user || !targetProduct) return;
-      if (!window.confirm("Bạn đã nhận tiền và giao hàng thành công?")) return;
-
+      if (!window.confirm("Đã giao hàng và nhận tiền?")) return;
       setIsProcessing(true);
       try {
           await supabase.from('products').update({ status: 'sold' }).eq('id', targetProduct.id);
-          await supabase.from('messages').insert({ 
-              conversation_id: activeConversation, sender_id: user.id, type: 'text',
-              content: `🎉 GIAO DỊCH HOÀN TẤT! Cảm ơn bạn đã mua hàng.`
-          });
+          await supabase.from('messages').insert({ conversation_id: activeConversation, sender_id: user.id, type: 'text', content: `🎉 GIAO DỊCH HOÀN TẤT! Cảm ơn bạn.` });
           setTargetProduct({ ...targetProduct, status: 'sold' });
-          addToast("Chúc mừng! Giao dịch thành công.", "success");
-      } catch(e) { console.error(e); }
-      finally { setIsProcessing(false); }
+      } catch(e) { console.error(e); } finally { setIsProcessing(false); }
   };
 
   const handleSendMessage = async (text: string = newMessage, type: 'text' | 'location' = 'text') => {
     if (isRestricted || !text.trim() || !activeConversation || !user) return;
     const { error } = await supabase.from('messages').insert({ conversation_id: activeConversation, sender_id: user.id, content: text, type });
-    if (!error) {
-        setNewMessage(''); setShowTools(false);
-        await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeConversation);
-    }
+    if (!error) { setNewMessage(''); setShowTools(false); await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeConversation); }
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -212,14 +228,13 @@ const ChatPage: React.FC = () => {
         await supabase.storage.from('product-images').upload(fileName, file);
         const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
         await supabase.from('messages').insert({ conversation_id: activeConversation, sender_id: user.id, content: 'Đã gửi ảnh', type: 'image', image_url: data.publicUrl });
-    } catch (error: any) { addToast(error.message, 'error'); } 
-    finally { setUploadingImg(false); }
+    } catch (error: any) { addToast(error.message, 'error'); } finally { setUploadingImg(false); }
   };
 
   const handleSendAppointment = () => {
-      if (!appointLoc || !appointTime) return addToast("Vui lòng chọn địa điểm và thời gian", "warning");
-      const content = `📅 LỜI HẸN GIAO DỊCH\n📍 Tại: ${appointLoc.replace('📍 ','')}\n⏰ Lúc: ${new Date(appointTime).toLocaleString('vi-VN')}`;
-      handleSendMessage(content, 'text'); setShowAppointmentModal(false);
+      if (!appointLoc || !appointTime) return addToast("Vui lòng nhập đủ thông tin", "warning");
+      handleSendMessage(`📅 HẸN GIAO DỊCH\n📍 ${appointLoc.replace('📍 ','')}\n⏰ ${new Date(appointTime).toLocaleString('vi-VN')}`, 'text'); 
+      setShowAppointmentModal(false);
   };
 
   const isSeller = user && targetProduct && user.id === targetProduct.sellerId;
@@ -237,7 +252,10 @@ const ChatPage: React.FC = () => {
            <div className="relative"><input type="text" placeholder="Tìm kiếm..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)} className="w-full bg-gray-50 border-none rounded-xl pl-10 pr-4 py-2.5 text-sm focus:ring-2 focus:ring-blue-100 transition-all font-medium placeholder-slate-400"/><Search className="absolute left-3 top-2.5 text-slate-400" size={18}/></div>
          </div>
          <div className="flex-1 overflow-y-auto chat-scrollbar p-3 space-y-1">
-             {filteredConversations.map(conv => (
+             {isInitializing && conversations.length === 0 ? (
+                 <div className="flex justify-center p-10"><Loader className="animate-spin text-blue-500"/></div>
+             ) : filteredConversations.length === 0 ? <div className="text-center py-10 text-slate-400 text-sm">Chưa có tin nhắn nào</div> :
+                filteredConversations.map(conv => (
                  <div key={conv.id} onClick={() => { setActiveConversation(conv.id); fetchPartnerInfo(conv.partnerId); setTargetProduct(null); }} className={`p-3 flex items-center gap-4 rounded-2xl cursor-pointer transition-all ${activeConversation === conv.id ? 'bg-blue-50 border border-blue-100' : 'hover:bg-gray-50 border border-transparent'}`}>
                      <img src={conv.partnerAvatar || 'https://via.placeholder.com/50'} className="w-12 h-12 rounded-full border border-gray-200 object-cover"/>
                      <div className="flex-1 min-w-0"><p className="font-bold truncate">{conv.partnerName}</p><p className="text-xs text-slate-500 truncate">Nhấn để xem tin nhắn...</p></div>
@@ -263,70 +281,35 @@ const ChatPage: React.FC = () => {
                   </div>
 
                   <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-6 bg-[#F1F5F9] chat-scrollbar flex flex-col">
-                      
-                      {/* KHUNG GHIM SẢN PHẨM & NÚT GIAO DỊCH */}
                       {targetProduct && (
                           <div className="mx-auto w-full max-w-md bg-white rounded-2xl p-4 shadow-lg border border-indigo-100 animate-slide-up flex flex-col gap-4 sticky top-0 z-10">
                               <div className="flex gap-3 items-center border-b border-gray-100 pb-3 cursor-pointer" onClick={() => navigate(`/product/${targetProduct.id}`)}>
                                   <img src={targetProduct.images?.[0] || 'https://via.placeholder.com/80'} className="w-16 h-16 rounded-xl object-cover bg-gray-100"/>
                                   <div className="flex-1 min-w-0">
-                                      <p className="text-xs text-indigo-500 font-bold uppercase tracking-wider mb-1">Đang trao đổi về</p>
+                                      <p className="text-xs text-indigo-500 font-bold uppercase tracking-wider mb-1">Giao dịch sản phẩm</p>
                                       <h4 className="font-bold text-slate-900 truncate text-sm">{targetProduct.title}</h4>
                                       <p className="text-red-500 font-black text-sm mt-1">{targetProduct.price === 0 ? 'FREE' : `${targetProduct.price.toLocaleString()}đ`}</p>
                                   </div>
-                                  <div className="flex flex-col justify-center items-end">
-                                      <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase ${targetProduct.status==='sold'?'bg-red-100 text-red-600':targetProduct.status==='pending'?'bg-orange-100 text-orange-600':'bg-green-100 text-green-600'}`}>
-                                          {targetProduct.status === 'available' ? 'Có sẵn' : targetProduct.status === 'pending' ? 'Đang GD' : 'Đã bán'}
-                                      </span>
-                                  </div>
+                                  <span className={`text-[10px] px-2 py-1 rounded-full font-bold uppercase ${targetProduct.status==='sold'?'bg-red-100 text-red-600':targetProduct.status==='pending'?'bg-orange-100 text-orange-600':'bg-green-100 text-green-600'}`}>
+                                      {targetProduct.status === 'available' ? 'Có sẵn' : targetProduct.status === 'pending' ? 'Đang GD' : 'Đã bán'}
+                                  </span>
                               </div>
-
-                              {/* --- TRANSACTION CONTROLS --- */}
                               <div className="flex justify-center w-full">
-                                  {/* 1. BUYER: Request Transaction */}
                                   {isBuyer && targetProduct.status === 'available' && (
-                                      <button onClick={handleRequestTransaction} disabled={isProcessing} className="w-full py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 active:scale-95">
-                                          {isProcessing ? <Loader size={16} className="animate-spin"/> : <PlayCircle size={16}/>} 
-                                          YÊU CẦU GIAO DỊCH
-                                      </button>
+                                      <button onClick={handleRequestTransaction} disabled={isProcessing} className="w-full py-2.5 bg-indigo-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-indigo-700 transition-all flex items-center justify-center gap-2 active:scale-95">{isProcessing ? <Loader size={16} className="animate-spin"/> : <PlayCircle size={16}/>} YÊU CẦU GIAO DỊCH</button>
                                   )}
-                                  
-                                  {/* 2. SELLER: Accept Transaction */}
                                   {isSeller && targetProduct.status === 'available' && (
-                                      <div className="w-full flex flex-col gap-2">
-                                          <div className="text-xs text-center text-gray-500 italic mb-1">Đang chờ người mua gửi yêu cầu hoặc tin nhắn...</div>
-                                          <button onClick={handleAcceptTransaction} disabled={isProcessing} className="w-full py-2.5 bg-blue-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-blue-700 transition-all active:scale-95">
-                                              CHẤP NHẬN GIAO DỊCH
-                                          </button>
-                                      </div>
+                                      <div className="w-full flex flex-col gap-2"><div className="text-xs text-center text-gray-500 italic mb-1">Đợi người mua yêu cầu...</div><button onClick={handleAcceptTransaction} disabled={isProcessing} className="w-full py-2.5 bg-blue-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-blue-700 transition-all active:scale-95">XÁC NHẬN GIAO DỊCH</button></div>
                                   )}
-
-                                  {/* 3. SELLER: Complete Transaction */}
                                   {isSeller && targetProduct.status === 'pending' && (
-                                      <button onClick={handleCompleteTransaction} disabled={isProcessing} className="w-full py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-green-700 transition-all flex items-center justify-center gap-2 active:scale-95">
-                                          {isProcessing ? <Loader size={16} className="animate-spin"/> : <CheckCircle size={16}/>} 
-                                          HOÀN TẤT GIAO DỊCH (ĐÃ BÁN)
-                                      </button>
+                                      <button onClick={handleCompleteTransaction} disabled={isProcessing} className="w-full py-2.5 bg-green-600 text-white rounded-xl font-bold text-sm shadow-md hover:bg-green-700 transition-all flex items-center justify-center gap-2 active:scale-95">{isProcessing ? <Loader size={16} className="animate-spin"/> : <CheckCircle size={16}/>} HOÀN THÀNH GIAO DỊCH</button>
                                   )}
-
-                                  {/* 4. BUYER: Waiting View */}
-                                  {isBuyer && targetProduct.status === 'pending' && (
-                                      <div className="w-full py-2 bg-orange-50 text-orange-600 rounded-xl font-bold text-xs border border-orange-200 text-center flex items-center justify-center gap-2">
-                                          <Loader size={14} className="animate-spin"/> Đang chờ người bán hoàn tất...
-                                      </div>
-                                  )}
-
-                                  {/* 5. FINISHED */}
-                                  {targetProduct.status === 'sold' && (
-                                      <div className="w-full py-2 bg-gray-100 text-gray-500 rounded-xl font-bold text-xs border border-gray-200 text-center flex items-center justify-center gap-2">
-                                          <CheckCircle size={14}/> Giao dịch đã kết thúc
-                                      </div>
-                                  )}
+                                  {isBuyer && targetProduct.status === 'pending' && <div className="w-full py-2 bg-orange-50 text-orange-600 rounded-xl font-bold text-xs border border-orange-200 text-center flex items-center justify-center gap-2"><Loader size={14} className="animate-spin"/> Đang giao dịch...</div>}
+                                  {targetProduct.status === 'sold' && <div className="w-full py-2 bg-gray-100 text-gray-500 rounded-xl font-bold text-xs border border-gray-200 text-center flex items-center justify-center gap-2"><CheckCircle size={14}/> Giao dịch đã kết thúc</div>}
                               </div>
                           </div>
                       )}
 
-                      {/* MESSAGES LIST */}
                       {messages.map((msg, idx) => {
                           const isMe = msg.sender_id === user?.id;
                           return (
@@ -343,35 +326,13 @@ const ChatPage: React.FC = () => {
                       <div ref={scrollRef} />
                   </div>
 
-                  {/* INPUT */}
                   <div className="p-4 bg-white border-t border-gray-100 z-30">
-                      {showTools && (
-                          <div className="mb-3 animate-slide-up flex gap-2 overflow-x-auto chat-scrollbar pb-1">
-                              {QUICK_REPLIES.map((text, i) => <button key={i} onClick={() => handleSendMessage(text)} className="flex-shrink-0 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold border border-blue-100 hover:bg-blue-100">{text}</button>)}
-                          </div>
-                      )}
+                      {showTools && <div className="mb-3 animate-slide-up flex gap-2 overflow-x-auto chat-scrollbar pb-1">{QUICK_REPLIES.map((text, i) => <button key={i} onClick={() => handleSendMessage(text)} className="flex-shrink-0 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold border border-blue-100 hover:bg-blue-100">{text}</button>)}</div>}
+                      {showAppointmentModal && <div className="absolute bottom-20 left-4 right-4 md:w-96 bg-white rounded-2xl shadow-2xl border p-4 z-50 animate-slide-up"><div className="flex justify-between mb-4"><h4 className="font-bold flex items-center gap-2"><Calendar size={18}/> Tạo Lịch Hẹn</h4><button onClick={() => setShowAppointmentModal(false)}><X size={18}/></button></div><div className="space-y-3"><div className="grid grid-cols-2 gap-2">{SUGGESTED_LOCATIONS.map(loc => <button key={loc} onClick={() => setAppointLoc(loc)} className={`text-xs p-2 rounded border truncate ${appointLoc===loc?'bg-blue-600 text-white':'bg-slate-50'}`}>{loc.replace('📍 ','')}</button>)}</div><input type="datetime-local" value={appointTime} onChange={e => setAppointTime(e.target.value)} className="w-full border p-2 rounded text-sm"/><button onClick={handleSendAppointment} className="w-full bg-blue-600 text-white py-2 rounded font-bold">Gửi</button></div></div>}
                       
-                      {/* APPOINTMENT MODAL */}
-                      {showAppointmentModal && (
-                          <div className="absolute bottom-20 left-4 right-4 md:w-96 bg-white rounded-2xl shadow-2xl border p-4 z-50 animate-slide-up">
-                              <div className="flex justify-between mb-4"><h4 className="font-bold flex items-center gap-2"><Calendar size={18}/> Tạo Lịch Hẹn</h4><button onClick={() => setShowAppointmentModal(false)}><X size={18}/></button></div>
-                              <div className="space-y-3">
-                                  <div className="grid grid-cols-2 gap-2">{SUGGESTED_LOCATIONS.map(loc => <button key={loc} onClick={() => setAppointLoc(loc)} className={`text-xs p-2 rounded border truncate ${appointLoc===loc?'bg-blue-600 text-white':'bg-slate-50'}`}>{loc.replace('📍 ','')}</button>)}</div>
-                                  <input type="datetime-local" value={appointTime} onChange={e => setAppointTime(e.target.value)} className="w-full border p-2 rounded text-sm"/>
-                                  <button onClick={handleSendAppointment} className="w-full bg-blue-600 text-white py-2 rounded font-bold">Gửi</button>
-                              </div>
-                          </div>
-                      )}
-
-                      {/* MAIN INPUT FORM */}
-                      {isRestricted ? (
-                        <div className="flex items-center justify-center gap-2 p-3 bg-slate-100 text-slate-500 rounded-xl text-sm font-bold"><Lock size={16}/> Chat bị khóa.</div>
-                      ) : (
+                      {isRestricted ? <div className="flex items-center justify-center gap-2 p-3 bg-slate-100 text-slate-500 rounded-xl text-sm font-bold"><Lock size={16}/> Chat bị khóa.</div> : (
                         <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="flex items-end gap-2">
-                            <label className="p-3 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl cursor-pointer">
-                                {uploadingImg ? <Loader size={24} className="animate-spin"/> : <ImageIcon size={24}/>}
-                                <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} disabled={uploadingImg} />
-                            </label>
+                            <label className="p-3 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-xl cursor-pointer">{uploadingImg ? <Loader size={24} className="animate-spin"/> : <ImageIcon size={24}/>}<input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} disabled={uploadingImg} /></label>
                             <button type="button" onClick={() => setShowAppointmentModal(!showAppointmentModal)} className="p-3 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl"><MapPin size={24}/></button>
                             <button type="button" onClick={() => setShowTools(!showTools)} className="p-3 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded-xl"><CornerDownRight size={24}/></button>
                             <div className="flex-1 bg-slate-100 rounded-2xl flex items-center px-4 py-3"><input type="text" value={newMessage} onChange={(e) => setNewMessage(e.target.value)} placeholder="Nhập tin nhắn..." className="flex-1 bg-transparent outline-none text-sm"/></div>
