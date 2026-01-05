@@ -4,7 +4,7 @@ import { supabase } from '../services/supabase';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
 import { 
-  Send, Image as ImageIcon, MapPin, CheckCircle, 
+  Send, Image as ImageIcon, MapPin, CheckCircle,Search,fetchPartnerInfo
   MessageCircle, ArrowLeft, X, Loader, ShoppingBag, 
   ShieldAlert, Phone, Calendar, CornerDownRight, Zap, PlayCircle, Lock
 } from 'lucide-react'; 
