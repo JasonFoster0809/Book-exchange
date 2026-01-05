@@ -1,667 +1,337 @@
-import React, { useState, useEffect, useReducer, useRef, useCallback } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useNavigate, Link } from 'react-router-dom';
 import { 
-  Upload, X, Image as ImageIcon, DollarSign, Tag, FileText, ArrowRight, ArrowLeft, 
-  CheckCircle2, Sparkles, Loader2, Info, Camera, Box, AlertCircle, MapPin, Wand2, 
-  Trash2, Edit3, Crop, RotateCcw, Save, Eye, ChevronDown, Check, AlertTriangle, 
-  Settings, Maximize2, RefreshCw, Lock, Unlock, Calendar, Cloud, Wifi, Search, Rocket
+  Search, ArrowRight, Zap, ShieldCheck, Users, BookOpen, Calculator, Shirt, Monitor, 
+  Grid, MapPin, Flame, Gift, Eye, ShoppingBag, PlusCircle, Heart, Package, ChevronRight, 
+  Sparkles, Bell, X, Clock, CheckCircle2, 
+  Star, Globe, Server, Smartphone, Trophy, Smile, Rocket, PlayCircle, Ghost, WifiOff,
+  RefreshCw, MoreHorizontal
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
-import { useAuth } from '../contexts/AuthContext';
-import { useToast } from '../contexts/ToastContext';
-import { ProductCategory, ProductCondition, TradeMethod } from '../types';
 
-type ActionType = 
-  | { type: 'SET_FIELD'; field: string; value: any }
-  | { type: 'SET_ERROR'; field: string; error: string | null }
-  | { type: 'ADD_IMAGE'; files: File[]; urls: string[] }
-  | { type: 'REMOVE_IMAGE'; index: number }
-  | { type: 'UPDATE_IMAGE'; index: number; url: string }
-  | { type: 'RESET_FORM'; payload: any }
-  | { type: 'SET_LOADING'; status: boolean }
-  | { type: 'SET_STEP'; step: number }
-  | { type: 'TOGGLE_AI_MODAL'; show: boolean }
-  | { type: 'SET_PRICE_ANALYSIS'; analysis: 'low' | 'good' | 'high' | null };
+type ID = string | number;
+type Timestamp = string;
 
-interface PostState {
-  title: string;
-  description: string;
-  price: string;
-  category: ProductCategory;
-  condition: ProductCondition;
-  tradeMethod: TradeMethod;
-  location: string;
-  tags: string[];
-  images: File[];
-  previewUrls: string[];
-  errors: Record<string, string>;
-  isLoading: boolean;
-  currentStep: number;
-  showAiModal: boolean;
-  priceAnalysis: 'low' | 'good' | 'high' | null;
-  touched: Record<string, boolean>;
+enum ProductCategory {
+  TEXTBOOK = 'textbook',
+  ELECTRONICS = 'electronics',
+  SUPPLIES = 'supplies',
+  CLOTHING = 'clothing',
+  OTHER = 'other',
 }
 
-const initialState: PostState = {
-  title: '',
-  description: '',
-  price: '',
-  category: ProductCategory.TEXTBOOK,
-  condition: ProductCondition.GOOD,
-  tradeMethod: TradeMethod.DIRECT,
-  location: 'Sảnh H6 - ĐH Bách Khoa',
-  tags: [],
-  images: [],
-  previewUrls: [],
-  errors: {},
-  isLoading: false,
-  currentStep: 1,
-  showAiModal: false,
-  priceAnalysis: null,
-  touched: {}
-};
+enum ProductStatus {
+  AVAILABLE = 'available',
+  PENDING = 'pending',
+  SOLD = 'sold',
+  HIDDEN = 'hidden',
+}
 
-const formReducer = (state: PostState, action: ActionType): PostState => {
-  switch (action.type) {
-    case 'SET_FIELD':
-      return { ...state, [action.field]: action.value, touched: { ...state.touched, [action.field]: true } };
-    case 'SET_ERROR':
-      return { ...state, errors: { ...state.errors, [action.field]: action.error || '' } };
-    case 'ADD_IMAGE':
-      return { ...state, images: [...state.images, ...action.files], previewUrls: [...state.previewUrls, ...action.urls] };
-    case 'REMOVE_IMAGE':
-      return { 
-        ...state, 
-        images: state.images.filter((_, i) => i !== action.index), 
-        previewUrls: state.previewUrls.filter((_, i) => i !== action.index) 
-      };
-    case 'UPDATE_IMAGE':
-      const newUrls = [...state.previewUrls];
-      newUrls[action.index] = action.url;
-      return { ...state, previewUrls: newUrls };
-    case 'RESET_FORM':
-      return { ...initialState, ...action.payload };
-    case 'SET_LOADING':
-      return { ...state, isLoading: action.status };
-    case 'SET_STEP':
-      return { ...state, currentStep: action.step };
-    case 'TOGGLE_AI_MODAL':
-      return { ...state, showAiModal: action.show };
-    case 'SET_PRICE_ANALYSIS':
-      return { ...state, priceAnalysis: action.analysis };
-    default:
-      return state;
-  }
-};
+enum SortOption {
+  NEWEST = 'newest',
+  OLDEST = 'oldest',
+  PRICE_ASC = 'price_asc',
+  PRICE_DESC = 'price_desc',
+  MOST_VIEWED = 'most_viewed',
+}
 
-const ImageProcessor = {
-  readFileAsDataURL: (file: File): Promise<string> => {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = (e) => resolve(e.target?.result as string);
-      reader.onerror = (e) => reject(e);
-      reader.readAsDataURL(file);
-    });
+enum TradeMethod {
+  DIRECT = 'direct',
+  SHIPPING = 'shipping'
+}
+
+interface Product {
+  id: ID;
+  created_at: Timestamp;
+  title: string;
+  description: string;
+  price: number;
+  images: string[];
+  category: ProductCategory;
+  status: ProductStatus;
+  seller_id: ID;
+  view_count: number;
+  like_count: number;
+  condition: 'new' | 'like_new' | 'good' | 'fair';
+  tags: string[];
+  trade_method: TradeMethod;
+  location_name?: string;
+  postedAt?: string; 
+}
+
+interface FilterState {
+  category: ProductCategory | 'all';
+  sort: SortOption;
+  minPrice?: number;
+  maxPrice?: number;
+  search: string;
+}
+
+interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
+  variant?: 'primary' | 'secondary' | 'outline' | 'ghost' | 'danger' | 'success';
+  size?: 'xs' | 'sm' | 'md' | 'lg' | 'xl'; 
+  loading?: boolean;
+  icon?: React.ReactNode;
+  iconPosition?: 'left' | 'right';
+  fullWidth?: boolean;
+}
+
+const Utils = {
+  formatCurrency: (amount: number): string => {
+    return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(amount);
   },
-  
-  createImage: (url: string): Promise<HTMLImageElement> => {
-    return new Promise((resolve, reject) => {
-      const image = new Image();
-      image.crossOrigin = "anonymous";
-      image.addEventListener('load', () => resolve(image));
-      image.addEventListener('error', (error) => reject(error));
-      image.src = url;
-    });
+  timeAgo: (dateString: string): string => {
+    const now = new Date();
+    const date = new Date(dateString);
+    const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
+    if (seconds > 86400) return Math.floor(seconds / 86400) + " ngày trước";
+    if (seconds > 3600) return Math.floor(seconds / 3600) + " giờ trước";
+    if (seconds > 60) return Math.floor(seconds / 60) + " phút trước";
+    return "Vừa xong";
   },
-
-  rotateImage: async (imageUrl: string, degrees: number): Promise<string> => {
-    try {
-      const image = await ImageProcessor.createImage(imageUrl);
-      const canvas = document.createElement('canvas');
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return imageUrl;
-
-      if (degrees === 90 || degrees === 270) {
-        canvas.width = image.height;
-        canvas.height = image.width;
-      } else {
-        canvas.width = image.width;
-        canvas.height = image.height;
-      }
-
-      ctx.translate(canvas.width / 2, canvas.height / 2);
-      ctx.rotate((degrees * Math.PI) / 180);
-      ctx.drawImage(image, -image.width / 2, -image.height / 2);
-
-      return canvas.toDataURL('image/jpeg', 0.9);
-    } catch (e) {
-      console.error(e);
-      return imageUrl;
-    }
-  }
+  cn: (...classes: (string | undefined | null | false)[]): string => classes.filter(Boolean).join(' ')
 };
 
-const Validator = {
-  title: (val: string) => !val ? 'Tiêu đề là bắt buộc' : val.length < 10 ? 'Tiêu đề quá ngắn (tối thiểu 10 ký tự)' : val.length > 100 ? 'Tiêu đề quá dài' : null,
-  price: (val: string) => {
-    const num = parseInt(val.replace(/\D/g, ''));
-    if (isNaN(num)) return 'Giá không hợp lệ';
-    if (num < 0) return 'Giá không thể âm';
-    if (num > 100000000) return 'Giá quá cao';
-    return null;
-  },
-  description: (val: string) => !val ? 'Mô tả là bắt buộc' : val.length < 20 ? 'Mô tả quá ngắn, hãy viết chi tiết hơn' : null,
-  images: (urls: string[]) => urls.length === 0 ? 'Cần ít nhất 1 ảnh minh họa' : urls.length > 8 ? 'Tối đa 8 ảnh' : null,
-};
-
-const VisualStyles = () => (
+const GlobalStyles = () => (
   <style>{`
-    :root { --primary: #00418E; --secondary: #00B0F0; --success: #10B981; --warning: #F59E0B; --danger: #EF4444; --bg-glass: rgba(255, 255, 255, 0.95); }
-    body { background-color: #F8FAFC; color: #334155; font-family: 'Inter', sans-serif; overflow-x: hidden; }
-    .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
-    .glass-panel { background: var(--bg-glass); backdrop-filter: blur(20px); border: 1px solid #E2E8F0; box-shadow: 0 4px 6px -1px rgba(0,0,0,0.05), 0 10px 15px -3px rgba(0,0,0,0.05); }
-    .input-wrapper { position: relative; transition: all 0.2s ease; }
-    .input-wrapper:focus-within { transform: translateY(-1px); }
-    .input-wrapper:focus-within label { color: var(--primary); }
-    .input-wrapper:focus-within input, .input-wrapper:focus-within textarea, .input-wrapper:focus-within select { border-color: var(--primary); box-shadow: 0 0 0 4px rgba(0, 65, 142, 0.1); }
-    .step-node { transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1); }
-    .step-active { background: var(--primary); color: white; border-color: var(--primary); box-shadow: 0 0 0 4px rgba(0, 65, 142, 0.2); transform: scale(1.1); }
-    .step-completed { background: var(--success); color: white; border-color: var(--success); }
-    .step-pending { background: white; color: #94A3B8; border-color: #E2E8F0; }
-    @keyframes spin-slow { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
-    @keyframes slide-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-    .animate-spin-slow { animation: spin-slow 3s linear infinite; }
-    .animate-enter { animation: slide-up 0.5s ease-out forwards; }
-    .toggle-switch { position: relative; width: 44px; height: 24px; background: #E2E8F0; border-radius: 99px; transition: 0.3s; cursor: pointer; }
-    .toggle-switch[data-checked="true"] { background: var(--primary); }
-    .toggle-switch::after { content: ''; position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; background: white; border-radius: 50%; transition: 0.3s; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-    .toggle-switch[data-checked="true"]::after { transform: translateX(20px); }
+    :root { --primary: #00418E; --secondary: #00B0F0; --light: #F8FAFC; }
+    body { background-color: var(--light); color: #1E293B; font-family: 'Inter', system-ui, sans-serif; overflow-x: hidden; }
+    ::-webkit-scrollbar { width: 8px; } ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    .animate-enter { animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
+    .glass-card-hover:hover { transform: translateY(-4px); box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); border-color: var(--secondary); }
+    .skeleton-shimmer { background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+    @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
   `}</style>
 );
 
-const Button: React.FC<React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: 'primary'|'secondary'|'danger'|'ghost'|'outline', loading?: boolean, icon?: React.ReactNode, fullWidth?: boolean }> = ({ variant = 'primary', loading, icon, children, className, disabled, fullWidth, ...props }) => {
-  const styles = {
+const ParticleCanvas = () => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    let width = window.innerWidth;
+    let height = window.innerHeight;
+    canvas.width = width;
+    canvas.height = height;
+    const particles = Array.from({ length: 40 }, () => ({
+      x: Math.random() * width, y: Math.random() * height,
+      vx: (Math.random() - 0.5) * 0.5, vy: (Math.random() - 0.5) * 0.5,
+      size: Math.random() * 3 + 1,
+      color: ['rgba(0, 65, 142, 0.1)', 'rgba(0, 176, 240, 0.1)'][Math.floor(Math.random() * 2)]
+    }));
+    const animate = () => {
+      ctx.clearRect(0, 0, width, height);
+      particles.forEach(p => {
+        p.x += p.vx; p.y += p.vy;
+        if (p.x < 0 || p.x > width) p.vx *= -1;
+        if (p.y < 0 || p.y > height) p.vy *= -1;
+        ctx.beginPath(); ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2); ctx.fillStyle = p.color; ctx.fill();
+      });
+      requestAnimationFrame(animate);
+    };
+    animate();
+    const handleResize = () => { width = window.innerWidth; height = window.innerHeight; canvas.width = width; canvas.height = height; };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+  return <canvas ref={canvasRef} className="absolute inset-0 z-0 pointer-events-none" />;
+};
+
+function useProducts(filter: FilterState) {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  const fetchProducts = useCallback(async () => {
+    setLoading(true); setError(null);
+    try {
+      let query = supabase.from('products').select('*').eq('status', ProductStatus.AVAILABLE);
+      if (filter.category !== 'all') query = query.eq('category', filter.category);
+      if (filter.search) query = query.ilike('title', `%${filter.search}%`);
+      if (filter.sort === SortOption.NEWEST) query = query.order('posted_at', { ascending: false });
+      else if (filter.sort === SortOption.PRICE_ASC) query = query.order('price', { ascending: true });
+      else if (filter.sort === SortOption.PRICE_DESC) query = query.order('price', { ascending: false });
+      
+      const { data, error: dbError } = await query.limit(12);
+      if (dbError) throw dbError;
+      setProducts((data || []).map((p: any) => ({
+        ...p,
+        images: p.images || [],
+        postedAt: p.posted_at || p.created_at,
+        trade_method: p.trade_method as TradeMethod
+      })));
+    } catch (err: any) { setError(err.message); } finally { setLoading(false); }
+  }, [filter]);
+
+  useEffect(() => { fetchProducts(); }, [fetchProducts]);
+  return { products, loading, error, refetch: fetchProducts };
+}
+
+const Button: React.FC<ButtonProps> = ({ 
+  variant = 'primary', size = 'md', loading, icon, iconPosition = 'left', fullWidth, children, className, disabled, ...props 
+}) => {
+  const baseStyle = "inline-flex items-center justify-center font-bold rounded-xl transition-all duration-200 active:scale-95 disabled:opacity-50 disabled:pointer-events-none focus:outline-none focus:ring-2 focus:ring-offset-2";
+  const variants = {
     primary: "bg-[#00418E] text-white hover:bg-[#003370] shadow-lg shadow-blue-900/20",
     secondary: "bg-[#00B0F0] text-white hover:bg-[#0090C0] shadow-lg shadow-cyan-500/20",
-    danger: "bg-red-500 text-white hover:bg-red-600 shadow-lg shadow-red-500/20",
-    ghost: "bg-transparent text-slate-600 hover:bg-slate-100",
-    outline: "bg-white border-2 border-slate-200 text-slate-700 hover:border-[#00418E] hover:text-[#00418E]"
+    outline: "border-2 border-slate-200 bg-white text-slate-700 hover:border-[#00418E] hover:text-[#00418E]",
+    ghost: "bg-transparent text-slate-500 hover:bg-slate-100",
+    danger: "bg-red-500 text-white hover:bg-red-600",
+    success: "bg-green-500 text-white hover:bg-green-600"
   };
+  const sizes = { xs: "px-2.5 py-1 text-xs", sm: "px-3 py-1.5 text-xs", md: "px-5 py-2.5 text-sm", lg: "px-8 py-3.5 text-base", xl: "px-10 py-4 text-lg" };
+
   return (
-    <button disabled={disabled || loading} className={`inline-flex items-center justify-center px-6 py-3 rounded-xl font-bold transition-all active:scale-95 disabled:opacity-60 disabled:pointer-events-none ${styles[variant]} ${fullWidth ? 'w-full' : ''} ${className}`} {...props}>
-      {loading ? <RefreshCw className="animate-spin mr-2" size={18}/> : icon ? <span className="mr-2">{icon}</span> : null}
+    <button className={Utils.cn(baseStyle, variants[variant], sizes[size], fullWidth ? 'w-full' : '', className)} disabled={disabled || loading} {...props}>
+      {loading && <RefreshCw className="animate-spin mr-2" size={16}/>}
+      {!loading && icon && iconPosition === 'left' && <span className="mr-2">{icon}</span>}
       {children}
+      {!loading && icon && iconPosition === 'right' && <span className="ml-2">{icon}</span>}
     </button>
   );
 };
 
-const InputGroup: React.FC<{ label: string, error?: string, required?: boolean, children: React.ReactNode, subLabel?: string }> = ({ label, error, required, children, subLabel }) => (
-  <div className="input-wrapper mb-6">
-    <div className="flex justify-between items-baseline mb-2">
-      <label className="text-sm font-bold text-slate-700 uppercase tracking-wide flex items-center gap-1">{label} {required && <span className="text-red-500">*</span>}</label>
-      {subLabel && <span className="text-xs text-slate-400 font-medium italic">{subLabel}</span>}
-    </div>
-    {children}
-    {error && <div className="mt-1.5 flex items-center gap-1.5 text-xs font-bold text-red-500 bg-red-50 p-2 rounded-lg border border-red-100"><AlertTriangle size={12}/>{error}</div>}
-  </div>
-);
-
-const StepWizard: React.FC<{ current: number, steps: string[], onChange: (s: number) => void }> = ({ current, steps, onChange }) => (
-  <div className="w-full max-w-3xl mx-auto mb-12 relative">
-    <div className="absolute top-1/2 left-0 w-full h-1 bg-slate-200 -z-10 rounded-full overflow-hidden">
-      <div className="h-full bg-gradient-to-r from-[#00418E] to-[#00B0F0] transition-all duration-500 ease-out" style={{ width: `${((current - 1) / (steps.length - 1)) * 100}%` }}></div>
-    </div>
-    <div className="flex justify-between">
-      {steps.map((label, idx) => {
-        const stepNum = idx + 1;
-        const status = current === stepNum ? 'step-active' : current > stepNum ? 'step-completed' : 'step-pending';
-        return (
-          <button key={idx} onClick={() => current > stepNum && onChange(stepNum)} disabled={current <= stepNum} className="group flex flex-col items-center gap-3 bg-transparent border-none outline-none cursor-pointer disabled:cursor-default">
-            <div className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm border-2 step-node ${status}`}>{current > stepNum ? <Check size={20}/> : stepNum}</div>
-            <span className={`text-xs font-bold uppercase tracking-wider transition-colors ${current >= stepNum ? 'text-[#00418E]' : 'text-slate-400'}`}>{label}</span>
-          </button>
-        );
-      })}
-    </div>
-  </div>
-);
-
-const ImageEditor: React.FC<{ url: string, onClose: () => void, onSave: (newUrl: string) => void }> = ({ url, onClose, onSave }) => {
-  const [rotation, setRotation] = useState(0);
-  const [processing, setProcessing] = useState(false);
-
-  const handleSave = async () => {
-    setProcessing(true);
-    const newUrl = await ImageProcessor.rotateImage(url, rotation);
-    onSave(newUrl);
-    setProcessing(false);
-    onClose();
-  };
-
-  return (
-    <div className="fixed inset-0 z-50 bg-black/90 flex flex-col items-center justify-center p-4 backdrop-blur-sm animate-enter">
-      <div className="w-full max-w-4xl flex-1 flex items-center justify-center relative overflow-hidden rounded-2xl bg-[#0F172A] border border-white/10 shadow-2xl">
-        <img src={url} alt="Editing" className="max-w-full max-h-[70vh] object-contain transition-transform duration-300" style={{ transform: `rotate(${rotation}deg)` }} />
-      </div>
-      <div className="w-full max-w-md mt-6 bg-white rounded-2xl p-4 flex items-center justify-between shadow-xl">
-        <button onClick={onClose} className="p-3 text-slate-500 hover:bg-slate-100 rounded-xl transition"><X/></button>
-        <div className="flex gap-4">
-          <button onClick={() => setRotation(r => r - 90)} className="p-3 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition" title="Xoay trái"><RotateCcw className="-scale-x-100"/></button>
-          <button onClick={() => setRotation(r => r + 90)} className="p-3 text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-xl transition" title="Xoay phải"><RotateCcw/></button>
-        </div>
-        <button onClick={handleSave} disabled={processing} className="px-6 py-3 bg-[#00418E] text-white rounded-xl font-bold hover:bg-[#003370] transition flex items-center gap-2">
-          {processing ? <Loader2 className="animate-spin"/> : <Check/>} Lưu
-        </button>
-      </div>
-    </div>
-  );
-};
-
-const PostItemPage: React.FC = () => {
-  const { user, isRestricted } = useAuth();
-  const { addToast } = useToast();
+const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
-  const editId = searchParams.get('edit');
-  
-  const [state, dispatch] = useReducer(formReducer, initialState);
-  const [editImageIndex, setEditImageIndex] = useState<number | null>(null);
+  const [imageLoaded, setImageLoaded] = useState(false);
+  const displayImage = product.images && product.images.length > 0 ? product.images[0] : 'https://placehold.co/400x300?text=No+Image';
 
-  useEffect(() => {
-    if (editId) {
-      const fetchProduct = async () => {
-        dispatch({ type: 'SET_LOADING', status: true });
-        const { data, error } = await supabase.from('products').select('*').eq('id', editId).single();
-        if (data) {
-          dispatch({ type: 'RESET_FORM', payload: {
-            title: data.title, description: data.description, price: data.price.toString(),
-            category: data.category, condition: data.condition, tradeMethod: data.trade_method,
-            images: [], previewUrls: data.images || [], location: 'HCMUT', tags: data.tags || []
-          }});
-        } else {
-          addToast('Không tìm thấy sản phẩm', 'error');
-          navigate('/my-items');
-        }
-        dispatch({ type: 'SET_LOADING', status: false });
-      };
-      fetchProduct();
-    }
-  }, [editId, navigate, addToast]);
-
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files.length > 0) {
-      const files = Array.from(e.target.files);
-      const totalImages = state.previewUrls.length + files.length;
-      
-      if (totalImages > 8) return addToast('Tối đa 8 ảnh.', 'warning');
-
-      const urls = await Promise.all(files.map(file => ImageProcessor.readFileAsDataURL(file)));
-      dispatch({ type: 'ADD_IMAGE', files, urls });
-      e.target.value = '';
-    }
+  const categoryLabels: Record<ProductCategory, string> = {
+    [ProductCategory.TEXTBOOK]: 'Giáo trình',
+    [ProductCategory.ELECTRONICS]: 'Điện tử',
+    [ProductCategory.SUPPLIES]: 'Dụng cụ',
+    [ProductCategory.CLOTHING]: 'Thời trang',
+    [ProductCategory.OTHER]: 'Khác',
   };
-
-  const validateStep = (step: number): boolean => {
-    let isValid = true;
-    if (step === 1) {
-      const err = Validator.images(state.previewUrls);
-      if (err) { dispatch({ type: 'SET_ERROR', field: 'images', error: err }); isValid = false; }
-      else dispatch({ type: 'SET_ERROR', field: 'images', error: null });
-    }
-    if (step === 2) {
-      const titleErr = Validator.title(state.title);
-      const priceErr = Validator.price(state.price);
-      const descErr = Validator.description(state.description);
-      
-      if (titleErr) dispatch({ type: 'SET_ERROR', field: 'title', error: titleErr });
-      if (priceErr) dispatch({ type: 'SET_ERROR', field: 'price', error: priceErr });
-      if (descErr) dispatch({ type: 'SET_ERROR', field: 'description', error: descErr });
-      
-      if (titleErr || priceErr || descErr) isValid = false;
-    }
-    return isValid;
-  };
-
-  const handleNextStep = () => {
-    if (validateStep(state.currentStep)) {
-      dispatch({ type: 'SET_STEP', step: state.currentStep + 1 });
-      window.scrollTo({ top: 0, behavior: 'smooth' });
-    } else {
-      addToast('Vui lòng kiểm tra lại thông tin', 'error');
-    }
-  };
-
-  const handleAIAnalyze = () => {
-    if (state.previewUrls.length === 0) return addToast('Cần ít nhất 1 ảnh để AI phân tích', 'warning');
-    dispatch({ type: 'TOGGLE_AI_MODAL', show: true });
-    
-    setTimeout(() => {
-      dispatch({ type: 'SET_FIELD', field: 'title', value: 'Máy tính Casio FX-580VN X Chính hãng' });
-      dispatch({ type: 'SET_FIELD', field: 'description', value: 'Máy còn mới 99%, đầy đủ chức năng, phù hợp cho sinh viên thi Đại cương. Bảo hành 6 tháng.' });
-      dispatch({ type: 'SET_FIELD', field: 'category', value: ProductCategory.SUPPLIES });
-      dispatch({ type: 'SET_FIELD', field: 'condition', value: ProductCondition.LIKE_NEW });
-      dispatch({ type: 'SET_FIELD', field: 'price', value: '550000' });
-      dispatch({ type: 'TOGGLE_AI_MODAL', show: false });
-      addToast('AI đã điền thông tin tự động!', 'success');
-    }, 2500);
-  };
-
-  const handleSubmit = async () => {
-    if (!user) return navigate('/auth');
-    dispatch({ type: 'SET_LOADING', status: true });
-
-    try {
-      let finalImageUrls = [...state.previewUrls.filter(u => u.startsWith('http'))];
-      const newImages = state.images;
-
-      if (newImages.length > 0) {
-        const uploadPromises = newImages.map(async (file) => {
-          const fileName = `${user.id}/${Date.now()}_${Math.random().toString(36).substring(7)}`;
-          const { error } = await supabase.storage.from('product-images').upload(fileName, file);
-          if (error) throw error;
-          const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
-          return data.publicUrl;
-        });
-        const uploadedUrls = await Promise.all(uploadPromises);
-        finalImageUrls = [...finalImageUrls, ...uploadedUrls];
-      }
-
-      const payload = {
-        title: state.title,
-        description: state.description,
-        price: parseInt(state.price.replace(/\D/g, '')),
-        category: state.category,
-        condition: state.condition,
-        trade_method: state.tradeMethod,
-        images: finalImageUrls,
-        seller_id: user.id,
-        tags: state.tags,
-        status: 'available',
-        updated_at: new Date().toISOString()
-      };
-
-      if (editId) {
-        const { error } = await supabase.from('products').update(payload).eq('id', editId);
-        if (error) throw error;
-        addToast('Cập nhật tin đăng thành công!', 'success');
-      } else {
-        const { error } = await supabase.from('products').insert(payload);
-        if (error) throw error;
-        addToast('Đăng tin thành công!', 'success');
-      }
-      
-      navigate('/market');
-    } catch (error: any) {
-      console.error(error);
-      addToast(error.message || 'Lỗi hệ thống, vui lòng thử lại', 'error');
-    } finally {
-      dispatch({ type: 'SET_LOADING', status: false });
-    }
-  };
-
-  const formatPrice = (val: string) => {
-    const raw = val.replace(/\D/g, '');
-    const p = parseInt(raw);
-    if (!p) dispatch({ type: 'SET_PRICE_ANALYSIS', analysis: null });
-    else if (p < 100000) dispatch({ type: 'SET_PRICE_ANALYSIS', analysis: 'low' });
-    else if (p > 1000000) dispatch({ type: 'SET_PRICE_ANALYSIS', analysis: 'high' });
-    else dispatch({ type: 'SET_PRICE_ANALYSIS', analysis: 'good' });
-    return raw.replace(/\B(?=(\d{3})+(?!\d))/g, '.');
-  };
-
-  if (isRestricted) return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 p-4">
-      <div className="bg-white rounded-3xl p-8 shadow-2xl max-w-md w-full text-center border-t-8 border-red-500">
-        <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-6"><Lock size={40} className="text-red-600"/></div>
-        <h2 className="text-2xl font-black text-slate-800 mb-2">Tài khoản bị hạn chế</h2>
-        <p className="text-slate-500 mb-8">Bạn không thể đăng tin mới do vi phạm chính sách cộng đồng.</p>
-        <Button fullWidth onClick={() => navigate('/')}>Quay về trang chủ</Button>
-      </div>
-    </div>
-  );
 
   return (
-    <div className="min-h-screen font-sans text-slate-800 pb-20 selection:bg-blue-100">
-      <VisualStyles />
-      
-      {state.showAiModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-md animate-enter">
-          <div className="bg-white rounded-3xl p-8 max-w-sm w-full text-center relative overflow-hidden shadow-2xl">
-            <div className="absolute inset-0 bg-gradient-to-br from-indigo-50 to-purple-50 -z-10"></div>
-            <div className="w-24 h-24 bg-white rounded-full mx-auto mb-6 flex items-center justify-center shadow-lg relative">
-              <Sparkles size={48} className="text-indigo-600 animate-pulse"/>
-              <div className="absolute inset-0 border-4 border-indigo-100 rounded-full animate-spin-slow border-t-indigo-500"></div>
-            </div>
-            <h3 className="text-2xl font-black text-slate-800 mb-2">Gemini AI</h3>
-            <p className="text-slate-500 font-medium">Đang phân tích hình ảnh của bạn...</p>
-            <div className="mt-6 space-y-2">
-              <div className="h-2 bg-slate-200 rounded-full overflow-hidden"><div className="h-full bg-indigo-500 w-2/3 animate-[shimmer_1s_infinite]"></div></div>
-              <p className="text-xs text-slate-400 font-mono">Processing tensor data...</p>
-            </div>
-          </div>
+    <div onClick={() => navigate(`/product/${product.id}`)} className="glass-card-hover bg-white rounded-2xl overflow-hidden cursor-pointer group relative flex flex-col h-full border border-slate-200 transition-all duration-300">
+      <div className="aspect-[4/3] relative overflow-hidden bg-slate-100">
+        {!imageLoaded && <div className="skeleton-shimmer absolute inset-0 w-full h-full" />}
+        <img src={displayImage} alt={product.title} className={Utils.cn("w-full h-full object-cover transition-transform duration-700 group-hover:scale-110", imageLoaded ? "opacity-100" : "opacity-0")} onLoad={() => setImageLoaded(true)} onError={(e) => { (e.target as HTMLImageElement).src = 'https://placehold.co/400x300?text=Error'; setImageLoaded(true); }}/>
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-300"/>
+        <div className="absolute top-3 left-3 flex flex-col gap-1">
+          {product.price === 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg flex items-center gap-1"><Gift size={10}/> FREE</span>}
+          {product.condition === 'new' && <span className="bg-green-500 text-white text-[10px] font-bold px-2 py-1 rounded shadow-lg">NEW</span>}
         </div>
-      )}
-
-      {editImageIndex !== null && (
-        <ImageEditor 
-          url={state.previewUrls[editImageIndex]} 
-          onClose={() => setEditImageIndex(null)}
-          onSave={(url) => { dispatch({ type: 'UPDATE_IMAGE', index: editImageIndex, url }); setEditImageIndex(null); }}
-        />
-      )}
-
-      <div className="fixed top-0 left-0 w-full h-[600px] bg-gradient-to-b from-[#00418E]/5 to-transparent -z-10 pointer-events-none"></div>
-
-      <div className="max-w-5xl mx-auto px-4 pt-10">
-        <div className="flex flex-col md:flex-row justify-between items-center mb-10 gap-4 animate-enter">
-          <div className="text-center md:text-left">
-            <h1 className="text-4xl md:text-5xl font-black text-[#00418E] mb-2 tracking-tight">{editId ? 'Hiệu Chỉnh Tin' : 'Đăng Tin Mới'}</h1>
-            <p className="text-slate-500 font-medium flex items-center justify-center md:justify-start gap-2">
-              <Sparkles size={16} className="text-yellow-500 fill-yellow-500"/> AI hỗ trợ điền thông tin tự động
-            </p>
-          </div>
-          <Button variant="ghost" icon={<X/>} onClick={() => navigate('/market')}>Hủy bỏ</Button>
+        <button className="absolute bottom-3 right-3 bg-white text-[#00418E] p-2.5 rounded-full shadow-lg translate-y-10 opacity-0 group-hover:translate-y-0 group-hover:opacity-100 transition-all duration-300 hover:bg-[#00418E] hover:text-white"><ArrowRight size={18}/></button>
+      </div>
+      <div className="p-4 flex flex-col flex-1">
+        <div className="flex justify-between items-start mb-2">
+           <span className="text-[10px] font-bold text-[#00418E] bg-blue-50 px-2 py-0.5 rounded border border-blue-100 uppercase tracking-wider truncate max-w-[60%]">
+             {categoryLabels[product.category]}
+           </span>
+           <span className="text-[10px] text-slate-400 flex items-center gap-1 whitespace-nowrap"><Clock size={10}/> {Utils.timeAgo(product.postedAt || product.created_at)}</span>
         </div>
-
-        <StepWizard current={state.currentStep} steps={['Hình ảnh', 'Chi tiết', 'Giao dịch', 'Xác nhận']} onChange={(s) => dispatch({ type: 'SET_STEP', step: s })} />
-
-        <div className="glass-panel rounded-[2.5rem] p-6 md:p-10 animate-enter" style={{ minHeight: '500px' }}>
-          
-          {state.currentStep === 1 && (
-            <div className="space-y-8">
-              <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-bold flex items-center gap-3"><Camera className="text-blue-600"/> Thư viện ảnh</h2>
-                <span className={`px-3 py-1 rounded-full text-xs font-bold ${state.previewUrls.length > 0 ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{state.previewUrls.length}/8 ảnh</span>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div className="space-y-4">
-                  <div className="grid grid-cols-3 sm:grid-cols-4 gap-4">
-                    {state.previewUrls.map((url, idx) => (
-                      <div key={idx} className="relative aspect-square rounded-2xl overflow-hidden group border-2 border-transparent hover:border-blue-500 transition-all cursor-pointer shadow-sm bg-white" onClick={() => setEditImageIndex(idx)}>
-                        <img src={url} className="w-full h-full object-cover transition-transform group-hover:scale-110"/>
-                        <div className="absolute inset-0 bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 backdrop-blur-[2px]">
-                          <button onClick={(e) => { e.stopPropagation(); setEditImageIndex(idx); }} className="p-1.5 bg-white rounded-full text-slate-800 hover:bg-blue-50 transition"><Edit3 size={14}/></button>
-                          <button onClick={(e) => { e.stopPropagation(); dispatch({ type: 'REMOVE_IMAGE', index: idx }); }} className="p-1.5 bg-white rounded-full text-red-500 hover:bg-red-50 transition"><Trash2 size={14}/></button>
-                        </div>
-                        {idx === 0 && <span className="absolute top-2 left-2 bg-[#00418E] text-white text-[10px] font-bold px-2 py-0.5 rounded-md shadow-md">Bìa</span>}
-                      </div>
-                    ))}
-                    {state.previewUrls.length < 8 && (
-                      <label className="aspect-square rounded-2xl border-2 border-dashed border-slate-300 flex flex-col items-center justify-center cursor-pointer hover:border-blue-500 hover:bg-blue-50/50 transition-all group bg-slate-50/30">
-                        <div className="p-3 bg-white rounded-full shadow-sm mb-2 group-hover:scale-110 transition-transform"><Upload size={24} className="text-blue-500"/></div>
-                        <span className="text-xs font-bold text-slate-500 group-hover:text-blue-600">Thêm ảnh</span>
-                        <input type="file" multiple accept="image/*" className="hidden" onChange={handleImageUpload}/>
-                      </label>
-                    )}
-                  </div>
-                  {state.errors.images && <p className="text-red-500 text-sm font-bold flex items-center gap-1"><AlertCircle size={14}/> {state.errors.images}</p>}
-                </div>
-
-                <div className="bg-slate-50 rounded-3xl p-8 border border-slate-200 flex flex-col items-center justify-center text-center">
-                  <div className="w-full aspect-video bg-white rounded-2xl shadow-sm border border-slate-200 mb-6 overflow-hidden relative flex items-center justify-center">
-                    {state.previewUrls.length > 0 ? (
-                      <img src={state.previewUrls[0]} className="w-full h-full object-contain p-2"/>
-                    ) : (
-                      <div className="text-slate-300 flex flex-col items-center"><ImageIcon size={64} className="mb-2"/><p className="text-sm font-medium">Chưa có ảnh bìa</p></div>
-                    )}
-                  </div>
-                  <div className="space-y-2 max-w-xs">
-                    <h4 className="font-bold text-slate-800">Mẹo chụp ảnh đẹp</h4>
-                    <p className="text-xs text-slate-500 leading-relaxed">Sử dụng ánh sáng tự nhiên, phông nền đơn giản và chụp nhiều góc độ để tăng độ tin cậy.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {state.currentStep === 2 && (
-            <div className="space-y-8">
-              <div className="flex justify-between items-center">
-                <h2 className="text-2xl font-bold flex items-center gap-3"><FileText className="text-blue-600"/> Thông tin chi tiết</h2>
-                <button onClick={handleAIAnalyze} className="px-5 py-2.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white rounded-xl font-bold text-xs flex items-center gap-2 shadow-lg shadow-indigo-500/20 hover:scale-105 transition-transform"><Wand2 size={16}/> Auto-Fill AI</button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-12 gap-8">
-                <div className="md:col-span-8 space-y-6">
-                  <InputGroup label="Tiêu đề" error={state.errors.title} required>
-                    <input value={state.title} onChange={e => dispatch({ type: 'SET_FIELD', field: 'title', value: e.target.value })} placeholder="VD: Giáo trình Giải tích 1 - NXB ĐHQG" className="w-full p-4 bg-white border border-slate-200 rounded-xl font-bold text-lg outline-none focus:border-[#00418E] focus:ring-4 focus:ring-blue-500/10 transition-all"/>
-                  </InputGroup>
-
-                  <div className="grid grid-cols-2 gap-6">
-                    <InputGroup label="Danh mục" required>
-                      <div className="relative">
-                        <select value={state.category} onChange={e => dispatch({ type: 'SET_FIELD', field: 'category', value: e.target.value })} className="w-full p-4 pl-12 bg-white border border-slate-200 rounded-xl font-bold text-slate-700 outline-none appearance-none cursor-pointer focus:border-[#00418E]">
-                          {Object.values(ProductCategory).map(c => <option key={c} value={c}>{c === 'textbook' ? 'Giáo trình' : c === 'electronics' ? 'Điện tử' : c === 'supplies' ? 'Dụng cụ' : c === 'clothing' ? 'Thời trang' : 'Khác'}</option>)}
-                        </select>
-                        <Tag className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20}/>
-                        <ChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" size={20}/>
-                      </div>
-                    </InputGroup>
-
-                    <InputGroup label="Giá bán" error={state.errors.price} required>
-                      <div className="relative">
-                        <input value={formatPrice(state.price)} onChange={e => dispatch({ type: 'SET_FIELD', field: 'price', value: e.target.value.replace(/\./g, '') })} placeholder="0" className="w-full p-4 pl-10 bg-white border border-slate-200 rounded-xl font-bold text-lg outline-none focus:border-[#00418E] text-[#00418E]"/>
-                        <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold">₫</span>
-                      </div>
-                    </InputGroup>
-                  </div>
-
-                  <InputGroup label="Mô tả chi tiết" error={state.errors.description} required>
-                    <textarea rows={6} value={state.description} onChange={e => dispatch({ type: 'SET_FIELD', field: 'description', value: e.target.value })} placeholder="Mô tả chi tiết về tình trạng, xuất xứ, lý do bán..." className="w-full p-4 bg-white border border-slate-200 rounded-xl font-medium outline-none focus:border-[#00418E] resize-none leading-relaxed"/>
-                  </InputGroup>
-                </div>
-
-                <div className="md:col-span-4 space-y-6">
-                  <div className="bg-white border border-slate-200 p-6 rounded-2xl shadow-sm">
-                    <label className="text-sm font-bold text-slate-700 uppercase tracking-wide mb-4 block">Tình trạng</label>
-                    <div className="space-y-2">
-                      {[ { val: ProductCondition.NEW, label: 'Mới 100%', color: 'border-green-200 bg-green-50 text-green-700' }, { val: ProductCondition.LIKE_NEW, label: 'Như mới (99%)', color: 'border-blue-200 bg-blue-50 text-blue-700' }, { val: ProductCondition.GOOD, label: 'Tốt', color: 'border-indigo-200 bg-indigo-50 text-indigo-700' }, { val: ProductCondition.FAIR, label: 'Khá', color: 'border-orange-200 bg-orange-50 text-orange-700' } ].map(cond => (
-                        <button key={cond.val} onClick={() => dispatch({ type: 'SET_FIELD', field: 'condition', value: cond.val })} className={`w-full p-3 rounded-xl border-2 text-left font-bold text-sm flex items-center justify-between transition-all ${state.condition === cond.val ? cond.color : 'border-transparent bg-slate-50 text-slate-500 hover:bg-slate-100'}`}>
-                          {cond.label} {state.condition === cond.val && <CheckCircle2 size={16}/>}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {state.currentStep === 3 && (
-            <div className="space-y-8">
-              <h2 className="text-2xl font-bold flex items-center gap-3"><MapPin className="text-blue-600"/> Phương thức giao dịch</h2>
-              
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <InputGroup label="Hình thức">
-                  <div className="flex gap-4">
-                    {[ { val: TradeMethod.DIRECT, label: 'Gặp trực tiếp', icon: <MapPin/> }, { val: TradeMethod.SHIPPING, label: 'Giao hàng', icon: <Box/> } ].map(m => (
-                      <button key={m.val} onClick={() => dispatch({ type: 'SET_FIELD', field: 'tradeMethod', value: m.val })} className={`flex-1 p-6 rounded-2xl border-2 text-left transition-all ${state.tradeMethod === m.val ? 'border-blue-500 bg-blue-50' : 'border-slate-200 bg-white hover:border-slate-300'}`}>
-                        <div className={`mb-3 ${state.tradeMethod === m.val ? 'text-blue-600' : 'text-slate-400'}`}>{m.icon}</div>
-                        <div className={`font-bold text-lg ${state.tradeMethod === m.val ? 'text-blue-900' : 'text-slate-700'}`}>{m.label}</div>
-                      </button>
-                    ))}
-                  </div>
-                </InputGroup>
-
-                {state.tradeMethod === TradeMethod.DIRECT && (
-                  <InputGroup label="Địa điểm hẹn gặp">
-                    <div className="relative h-64 bg-slate-100 rounded-2xl border border-slate-200 overflow-hidden cursor-crosshair group">
-                      <div className="absolute inset-0" style={{ backgroundImage: 'linear-gradient(#cbd5e1 1px, transparent 1px), linear-gradient(90deg, #cbd5e1 1px, transparent 1px)', backgroundSize: '20px 20px', opacity: 0.5 }}></div>
-                      {[ { id: 'h6', x: 30, y: 40, label: 'Sảnh H6' }, { id: 'lib', x: 50, y: 60, label: 'Thư viện' }, { id: 'b4', x: 70, y: 30, label: 'Canteen B4' } ].map(loc => (
-                        <button key={loc.id} onClick={() => dispatch({ type: 'SET_FIELD', field: 'location', value: loc.label })} style={{ left: `${loc.x}%`, top: `${loc.y}%` }} className={`absolute transform -translate-x-1/2 -translate-y-1/2 transition-all duration-300 ${state.location === loc.label ? 'scale-125 z-20' : 'scale-100 hover:scale-110'}`}>
-                          <MapPin size={32} className={`${state.location === loc.label ? 'text-red-600 fill-red-600' : 'text-slate-400 fill-slate-200'} drop-shadow-md`}/>
-                          <span className={`absolute top-full left-1/2 -translate-x-1/2 mt-1 px-2 py-0.5 bg-white rounded shadow-sm text-[10px] font-bold whitespace-nowrap ${state.location === loc.label ? 'text-red-600' : 'text-slate-500 opacity-0 group-hover:opacity-100'}`}>{loc.label}</span>
-                        </button>
-                      ))}
-                      <div className="absolute bottom-3 right-3 bg-white/90 backdrop-blur px-3 py-1.5 rounded-lg text-xs font-bold border shadow-sm">📍 {state.location || 'Chọn địa điểm trên bản đồ'}</div>
-                    </div>
-                  </InputGroup>
-                )}
-              </div>
-            </div>
-          )}
-
-          {state.currentStep === 4 && (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-start">
-              <div>
-                <h2 className="text-2xl font-bold mb-6 text-center lg:text-left">Xem trước tin đăng</h2>
-                <div className="w-[320px] mx-auto bg-white rounded-[3rem] border-[8px] border-[#0F172A] shadow-2xl overflow-hidden relative aspect-[9/18]">
-                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-32 h-6 bg-[#0F172A] rounded-b-xl z-20"></div>
-                  <div className="h-full overflow-y-auto custom-scrollbar bg-slate-50">
-                    <div className="relative aspect-square bg-slate-200">
-                      <img src={state.previewUrls[0]} className="w-full h-full object-cover"/>
-                      <div className="absolute bottom-0 left-0 w-full h-24 bg-gradient-to-t from-black/70 to-transparent"></div>
-                      <div className="absolute bottom-4 left-4 text-white font-bold text-xl">{parseInt(state.price.replace(/\./g,'')).toLocaleString('vi-VN')}₫</div>
-                    </div>
-                    <div className="p-5 space-y-4">
-                      <div className="flex justify-between items-start">
-                        <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-1 rounded uppercase tracking-wider">{state.category}</span>
-                        <span className="text-xs text-slate-400">Vừa xong</span>
-                      </div>
-                      <h3 className="font-bold text-slate-900 text-lg leading-snug">{state.title}</h3>
-                      <div className="flex gap-2">
-                        <span className="bg-green-100 text-green-700 px-2 py-1 rounded text-xs font-bold">{state.condition}</span>
-                        <span className="bg-slate-100 text-slate-600 px-2 py-1 rounded text-xs font-bold">{state.tradeMethod === TradeMethod.DIRECT ? 'Trực tiếp' : 'Ship COD'}</span>
-                      </div>
-                      <div className="h-px bg-slate-200 my-2"></div>
-                      <p className="text-sm text-slate-600 leading-relaxed whitespace-pre-wrap">{state.description}</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="space-y-6">
-                <div className="bg-blue-50 border border-blue-100 p-6 rounded-2xl">
-                  <h4 className="font-bold text-blue-900 mb-2 flex items-center gap-2"><CheckCircle2 size={18}/> Tin đăng hợp lệ</h4>
-                  <p className="text-sm text-blue-700">Nội dung của bạn đã tuân thủ quy tắc cộng đồng. Tin sẽ được hiển thị ngay lập tức sau khi đăng.</p>
-                </div>
-                <div className="space-y-3">
-                  <Button fullWidth size="xl" onClick={handleSubmit} loading={state.isLoading} icon={<Rocket/>} className="shadow-xl shadow-blue-500/30">
-                    {state.isLoading ? 'Đang xử lý...' : 'XÁC NHẬN ĐĂNG TIN'}
-                  </Button>
-                  <Button fullWidth variant="outline" onClick={() => dispatch({ type: 'SET_STEP', step: 3 })}>Chỉnh sửa lại</Button>
-                </div>
-              </div>
-            </div>
-          )}
-
-          <div className="flex justify-between mt-12 pt-6 border-t border-slate-100">
-            {state.currentStep > 1 ? (
-              <Button variant="ghost" onClick={() => dispatch({ type: 'SET_STEP', step: state.currentStep - 1 })} icon={<ArrowLeft/>}>Quay lại</Button>
-            ) : <div/>}
-            
-            {state.currentStep < 4 && (
-              <Button onClick={handleNextStep} icon={<ArrowRight/>} iconPosition="right">Tiếp tục</Button>
-            )}
-          </div>
-
+        <h3 className="font-bold text-slate-800 text-sm mb-1 line-clamp-2 min-h-[40px] group-hover:text-[#00418E] transition-colors leading-relaxed">{product.title}</h3>
+        <div className="pt-3 mt-auto border-t border-slate-50 flex items-center justify-between">
+           <span className="font-black text-slate-900 text-lg tracking-tight">{product.price === 0 ? 'Tặng miễn phí' : Utils.formatCurrency(product.price)}</span>
+           <div className="flex items-center gap-1 text-slate-400 text-xs"><Eye size={12}/> {product.view_count || 0}</div>
         </div>
       </div>
     </div>
   );
 };
 
-export default PostItemPage;
+const HomePage: React.FC = () => {
+  const navigate = useNavigate();
+  const [filter, setFilter] = useState<FilterState>({ category: 'all', sort: SortOption.NEWEST, search: '' });
+  const { products, loading, error, refetch } = useProducts(filter);
+  const handleSearch = (term: string) => { if (term.trim()) navigate(`/market?search=${encodeURIComponent(term)}`); };
+
+  return (
+    <div className="min-h-screen font-sans selection:bg-[#00418E] selection:text-white pb-20 relative">
+      <GlobalStyles />
+      <ParticleCanvas />
+      <div className="aurora-bg absolute top-0 left-0 w-full h-[120vh] bg-radial-gradient from-blue-500/5 to-transparent pointer-events-none -z-10"></div>
+
+      <section className="relative pt-32 pb-20 px-4 overflow-hidden">
+        <div className="max-w-5xl mx-auto text-center relative z-10">
+          <div className="animate-enter flex justify-center mb-8"><div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-white/80 border border-white/50 backdrop-blur-sm shadow-sm hover:shadow-md transition-shadow cursor-default ring-1 ring-white/60"><Sparkles size={14} className="text-yellow-500 fill-yellow-500 animate-pulse"/><span className="text-xs font-bold text-slate-600 tracking-widest uppercase">Cổng thông tin Sinh viên Bách Khoa</span></div></div>
+          <h1 className="animate-enter text-5xl md:text-7xl font-black text-slate-900 mb-6 leading-[1.1] tracking-tight drop-shadow-sm">Trao đổi đồ cũ <br/><span className="text-transparent bg-clip-text bg-gradient-to-r from-[#00418E] via-[#00B0F0] to-purple-600">Thông minh & Tiết kiệm</span></h1>
+          <p className="animate-enter text-slate-500 text-lg md:text-xl max-w-2xl mx-auto mb-12 leading-relaxed font-medium">Nền tảng mua bán phi lợi nhuận dành riêng cho sinh viên. Tìm giáo trình, laptop, và dụng cụ học tập giá rẻ ngay tại trường.</p>
+          <div className="animate-enter w-full max-w-2xl mx-auto relative group z-20 mb-16">
+             <div className="absolute -inset-1 bg-gradient-to-r from-[#00418E] to-[#00B0F0] rounded-full blur opacity-20 group-hover:opacity-40 transition duration-1000"></div>
+             <form onSubmit={(e) => { e.preventDefault(); handleSearch((e.target as any)[0].value); }} className="relative flex items-center bg-white rounded-full border border-slate-200 p-2 shadow-xl hover:shadow-2xl transition-all">
+                <Search className="ml-4 text-slate-400" size={20}/>
+                <input placeholder="Bạn đang tìm gì? (VD: Giải tích 1, Casio 580...)" className="w-full h-12 bg-transparent border-none outline-none text-slate-900 px-4 placeholder-slate-400 text-base font-medium" />
+                <button type="submit" className="h-10 px-8 bg-[#00418E] hover:bg-[#003370] text-white rounded-full font-bold transition-all shadow-md active:scale-95 flex items-center gap-2">Tìm kiếm</button>
+             </form>
+          </div>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 animate-enter px-4">
+             {[ { title: 'Dạo Chợ', desc: 'Săn deal hời', icon: <ShoppingBag size={24}/>, link: '/market', color: 'text-cyan-600', bg: 'bg-cyan-50', border: 'border-cyan-100' }, { title: 'Đăng Tin', desc: 'Bán nhanh gọn', icon: <PlusCircle size={24}/>, link: '/post-item', color: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-100' }, { title: 'Đã Lưu', desc: 'Món yêu thích', icon: <Heart size={24}/>, link: '/saved', color: 'text-pink-600', bg: 'bg-pink-50', border: 'border-pink-100' }, { title: 'Quản Lý', desc: 'Tin của tôi', icon: <Package size={24}/>, link: '/my-items', color: 'text-orange-600', bg: 'bg-orange-50', border: 'border-orange-100' } ].map((action, i) => (
+                <Link to={action.link} key={i} className={`bg-white p-5 rounded-2xl flex flex-col items-center justify-center text-center gap-3 group cursor-pointer border hover:border-slate-300 shadow-sm hover:shadow-lg transition-all ${action.border}`}>
+                   <div className={`w-12 h-12 rounded-xl flex items-center justify-center ${action.bg} ${action.color} group-hover:scale-110 transition-transform`}>{action.icon}</div>
+                   <div><h3 className="font-bold text-slate-900 text-sm">{action.title}</h3><p className="text-slate-500 text-[10px] mt-0.5 font-bold uppercase tracking-wider">{action.desc}</p></div>
+                </Link>
+             ))}
+          </div>
+        </div>
+      </section>
+
+      <div className="sticky top-0 z-40 bg-[#F8FAFC]/90 backdrop-blur-md border-y border-slate-200 py-3 mb-12 shadow-sm">
+         <div className="max-w-7xl mx-auto px-4 overflow-x-auto hide-scrollbar">
+            <div className="flex gap-3 min-w-max justify-center">
+               {[ { id: 'all', label: 'Tất cả', icon: <Grid size={16}/> }, { id: ProductCategory.TEXTBOOK, label: 'Giáo trình', icon: <BookOpen size={16}/> }, { id: ProductCategory.ELECTRONICS, label: 'Công nghệ', icon: <Monitor size={16}/> }, { id: ProductCategory.SUPPLIES, label: 'Dụng cụ', icon: <Calculator size={16}/> }, { id: ProductCategory.CLOTHING, label: 'Đồng phục', icon: <Shirt size={16}/> }, { id: ProductCategory.OTHER, label: 'Khác', icon: <MoreHorizontal size={16}/> } ].map(cat => (
+                  <button key={cat.id} onClick={() => setFilter(prev => ({ ...prev, category: cat.id as any }))} className={Utils.cn("flex items-center gap-2 px-5 py-2.5 rounded-full border transition-all text-sm font-bold active:scale-95 select-none", filter.category === cat.id ? "bg-[#00418E] border-[#00418E] text-white shadow-md" : "bg-white border-slate-200 text-slate-600 hover:border-blue-400 hover:text-blue-600")}>{cat.icon}<span>{cat.label}</span></button>
+               ))}
+            </div>
+         </div>
+      </div>
+
+      <section className="max-w-7xl mx-auto px-4 mb-24 min-h-[600px]">
+         <div className="flex flex-col md:flex-row items-center justify-between mb-10 gap-6">
+            <div className="text-center md:text-left"><h2 className="text-3xl font-black text-slate-900 flex items-center gap-3 justify-center md:justify-start"><Flame className="text-orange-500 fill-orange-500 animate-pulse"/> {filter.category === 'all' ? 'Mới lên sàn' : 'Kết quả lọc'}</h2><p className="text-slate-500 mt-1 font-medium text-sm">{loading ? 'Đang cập nhật dữ liệu...' : `Hiển thị ${products.length} sản phẩm mới nhất.`}</p></div>
+            <div className="flex bg-white p-1 rounded-xl border border-slate-200 shadow-sm">{[ { id: SortOption.NEWEST, label: 'Mới nhất' }, { id: SortOption.PRICE_ASC, label: 'Giá tốt' }, { id: SortOption.MOST_VIEWED, label: 'Hot' } ].map(opt => (<button key={opt.id} onClick={() => setFilter(prev => ({...prev, sort: opt.id}))} className={Utils.cn("px-4 py-2 rounded-lg text-xs font-bold transition-all", filter.sort === opt.id ? "bg-slate-900 text-white shadow-md" : "text-slate-500 hover:text-slate-700 hover:bg-slate-50")}>{opt.label}</button>))}</div>
+         </div>
+         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+            {loading ? [...Array(8)].map((_, i) => <div key={i} className="bg-white rounded-2xl border border-slate-100 p-4 space-y-3 h-[340px]"><div className="skeleton-shimmer w-full h-[200px] rounded-xl"/><div className="skeleton-shimmer w-3/4 h-4 rounded mt-4"/><div className="skeleton-shimmer w-1/2 h-4 rounded"/></div>) : error ? <div className="col-span-full text-center py-20"><WifiOff size={40} className="mx-auto text-red-500 mb-4"/><p className="text-slate-500">Lỗi kết nối</p><Button onClick={refetch} variant="outline" className="mt-4">Thử lại</Button></div> : products.length > 0 ? products.map((p) => <div key={p.id} className="animate-enter"><ProductCard product={p}/></div>) : <div className="col-span-full py-20 text-center border-2 border-dashed border-slate-200 rounded-3xl"><Ghost size={48} className="mx-auto text-slate-300 mb-4"/><h3 className="text-xl font-bold text-slate-800">Chưa có sản phẩm</h3><Link to="/post-item"><Button icon={<PlusCircle size={18}/>} className="mt-4">Đăng tin ngay</Button></Link></div>}
+         </div>
+         {products.length > 0 && !loading && <div className="mt-16 text-center"><Link to="/market" className="inline-flex items-center gap-2 px-10 py-4 bg-white border-2 border-slate-200 hover:border-[#00418E] text-slate-700 hover:text-[#00418E] rounded-full font-bold text-base transition-all group hover:shadow-xl shadow-sm">Xem toàn bộ thị trường <ArrowRight size={20} className="group-hover:translate-x-1 transition-transform"/></Link></div>}
+      </section>
+
+      <section className="bg-white border-y border-slate-200 py-16 mb-24">
+         <div className="max-w-7xl mx-auto px-4"><div className="grid grid-cols-2 md:grid-cols-4 gap-8">{[ { label: 'Sản phẩm', val: '8.500+', icon: <Package/>, color: 'blue' }, { label: 'Thành viên', val: '25.000+', icon: <Users/>, color: 'purple' }, { label: 'Giao dịch', val: '14.200+', icon: <ShoppingBag/>, color: 'green' }, { label: 'Hài lòng', val: '99.9%', icon: <Smile/>, color: 'orange' } ].map((s, i) => (<div key={i} className="flex flex-col items-center text-center group cursor-default"><div className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-transform group-hover:scale-110 bg-${s.color}-50 text-${s.color}-600`}>{s.icon}</div><h4 className="text-3xl font-black text-slate-900 mb-1">{s.val}</h4><p className="text-xs font-bold text-slate-400 uppercase tracking-wider">{s.label}</p></div>))}</div></div>
+      </section>
+      
+      <section className="max-w-7xl mx-auto px-4 mb-24">
+        <div className="bg-[#0F172A] rounded-[2.5rem] p-12 relative overflow-hidden text-white shadow-2xl">
+          <div className="absolute top-0 right-0 w-[600px] h-[600px] bg-blue-600/20 rounded-full blur-[120px] -mr-20 -mt-20"></div>
+          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
+            <div className="space-y-8">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-blue-500/20 border border-blue-500/30 text-blue-300 text-xs font-bold uppercase tracking-wider"><Zap size={14}/> Tính năng mới</div>
+              <h2 className="text-4xl md:text-5xl font-black leading-tight">Đăng tin siêu tốc với <br/><span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-400 to-purple-400">Công nghệ AI</span></h2>
+              <p className="text-slate-400 text-lg leading-relaxed max-w-md">Không cần nhập liệu thủ công. Chỉ cần chụp ảnh, hệ thống sẽ tự động phân tích, điền tiêu đề, mô tả và định giá sản phẩm cho bạn trong 3 giây.</p>
+              <div className="flex gap-4"><Button size="lg" icon={<Rocket size={20}/>} onClick={() => navigate('/post-item')}>Thử ngay</Button><Button variant="ghost" className="text-white hover:bg-white/10" icon={<PlayCircle size={20}/>}>Xem demo</Button></div>
+            </div>
+            <div className="relative hidden lg:block">
+              <div className="absolute inset-0 bg-gradient-to-r from-blue-500 to-purple-600 rounded-2xl blur-lg opacity-30 transform rotate-6"></div>
+              <div className="bg-slate-800/50 backdrop-blur-xl border border-white/10 p-6 rounded-2xl shadow-2xl transform rotate-3 hover:rotate-0 transition-transform duration-500">
+                <div className="flex items-center gap-4 mb-6 border-b border-white/10 pb-4"><div className="w-12 h-12 bg-blue-500 rounded-full flex items-center justify-center shadow-lg"><Sparkles size={24}/></div><div><h4 className="font-bold text-lg">AI Analysis</h4><p className="text-xs text-blue-200">Đang xử lý hình ảnh...</p></div></div>
+                <div className="space-y-4"><div className="flex gap-3"><div className="w-20 h-20 bg-slate-700 rounded-lg animate-pulse"></div><div className="flex-1 space-y-2"><div className="h-4 bg-slate-700 rounded w-3/4 animate-pulse"></div><div className="h-4 bg-slate-700 rounded w-1/2 animate-pulse"></div></div></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <footer className="bg-[#0F172A] text-slate-400 pt-24 pb-12 border-t border-slate-800">
+         <div className="max-w-7xl mx-auto px-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-12 mb-20">
+               <div className="space-y-6"><div className="flex items-center gap-3 text-white"><div className="w-12 h-12 bg-[#00418E] rounded-2xl flex items-center justify-center font-black shadow-lg shadow-blue-900 text-xl">BK</div><div><h4 className="font-black text-2xl tracking-tight text-white">CHỢ BK</h4><p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest mt-1">Student Marketplace</p></div></div><p className="leading-relaxed text-sm text-slate-400 max-w-xs">Dự án phi lợi nhuận hỗ trợ sinh viên ĐH Bách Khoa TP.HCM.</p></div>
+               <div><h4 className="font-bold text-white mb-8 text-sm uppercase tracking-wider">Khám phá</h4><ul className="space-y-4 text-sm font-medium"><li><Link to="/market" className="hover:text-[#00B0F0] transition-colors flex items-center gap-2 hover:translate-x-1 duration-200"><ChevronRight size={14}/> Dạo chợ online</Link></li><li><Link to="/post-item" className="hover:text-[#00B0F0] transition-colors flex items-center gap-2 hover:translate-x-1 duration-200"><ChevronRight size={14}/> Đăng tin bán</Link></li></ul></div>
+               <div><h4 className="font-bold text-white mb-8 text-sm uppercase tracking-wider">Hỗ trợ</h4><ul className="space-y-4 text-sm font-medium"><li><a href="#" className="hover:text-[#00B0F0] transition-colors">Trung tâm trợ giúp</a></li><li><a href="#" className="hover:text-[#00B0F0] transition-colors">Chính sách bảo mật</a></li></ul></div>
+               <div><h4 className="font-bold text-white mb-8 text-sm uppercase tracking-wider">Liên hệ</h4><ul className="space-y-5 text-sm font-medium"><li className="flex items-center gap-4"><Smartphone size={20} className="text-[#00B0F0] shrink-0"/><span>(028) 3864 7256</span></li></ul></div>
+            </div>
+            <div className="pt-8 border-t border-slate-800 flex flex-col md:flex-row justify-between items-center gap-4 text-xs font-bold text-slate-500 uppercase tracking-wider"><p>&copy; {new Date().getFullYear()} HCMUT Student Project.</p></div>
+         </div>
+      </footer>
+    </div>
+  );
+};
+
+export default HomePage;
