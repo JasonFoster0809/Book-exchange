@@ -4,68 +4,35 @@ import { supabase } from '../services/supabase';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
 import { 
-  Send, Image as ImageIcon, MapPin, CheckCircle,Search,Calendar,
-  MessageCircle, ArrowLeft, X, Loader, ShoppingBag, 
-  ShieldAlert, Phone, Video, Info, Smile, ThumbsUp,
-  MoreHorizontal, CornerDownRight, Zap, PlayCircle, Lock
+  Send, Image as ImageIcon, MapPin, CheckCircle, 
+  MessageCircle, ArrowLeft, Loader, ShoppingBag, 
+  ShieldAlert, Phone, MoreVertical, Search, 
+  CornerDownRight, Zap, AlertCircle, Check, X
 } from 'lucide-react'; 
 import { playMessageSound } from '../utils/audio';
 
 // ============================================================================
-// 1. MESSENGER VISUAL ENGINE (CSS)
+// 1. STYLES
 // ============================================================================
-const MessengerStyles = () => (
+const ChatStyles = () => (
   <style>{`
-    :root {
-      --messenger-blue: #0084FF;
-      --messenger-bg: #F0F2F5;
-      --messenger-bubble-grey: #E4E6EB;
-      --messenger-text-primary: #050505;
-      --messenger-text-secondary: #65676B;
-    }
-
-    body { background-color: white; }
-
-    /* Custom Scrollbar */
     .chat-scrollbar::-webkit-scrollbar { width: 6px; }
     .chat-scrollbar::-webkit-scrollbar-track { background: transparent; }
     .chat-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
-    .chat-scrollbar:hover::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.2); }
-
-    /* Animations */
-    @keyframes slide-up { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-    .animate-enter { animation: slide-up 0.2s ease-out forwards; }
-
-    /* Messenger Specifics */
-    .bubble-me {
-      background: var(--messenger-blue);
-      color: white;
-      border-radius: 18px 18px 4px 18px;
-    }
-    .bubble-you {
-      background: var(--messenger-bubble-grey);
-      color: var(--messenger-text-primary);
-      border-radius: 18px 18px 18px 4px;
-    }
-    .input-pill {
-      background: #F0F2F5;
-      border-radius: 20px;
-    }
-    .hover-bg { transition: background 0.2s; }
-    .hover-bg:hover { background-color: rgba(0, 0, 0, 0.05); }
     
-    .active-conversation {
-      background-color: #EBF5FF; /* Light blue highlight */
+    .msg-bubble { max-width: 75%; padding: 12px 16px; border-radius: 18px; position: relative; font-size: 14px; line-height: 1.5; }
+    .msg-me { background: #0084FF; color: white; border-bottom-right-radius: 4px; margin-left: auto; }
+    .msg-you { background: #E4E6EB; color: #050505; border-bottom-left-radius: 4px; margin-right: auto; }
+    
+    .transaction-card {
+      background: white; border-bottom: 1px solid #E5E7EB; 
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      z-index: 20;
     }
   `}</style>
 );
 
-const SUGGESTED_LOCATIONS = [ "📍 Thư viện BK", "📍 Canteen B4", "📍 Sảnh H6", "📍 Cổng Lý Thường Kiệt", "📍 Nhà xe SV", "📍 Ghế đá hồ nước" ];
-const QUICK_REPLIES = ["Sản phẩm còn không ạ?", "Có fix giá thêm không?", "Cho mình xem thêm ảnh thật đi", "Giao dịch lúc 12h trưa nay nhé?"];
-
-// ============================================================================
-// 2. MAIN COMPONENT
-// ============================================================================
+const QUICK_REPLIES = ["Sản phẩm còn mới không?", "Có bớt giá không bạn?", "Giao dịch ở H6 nhé?", "Cho mình xem thêm ảnh thật"];
 
 const ChatPage: React.FC = () => {
   const { user, isRestricted } = useAuth(); 
@@ -73,117 +40,93 @@ const ChatPage: React.FC = () => {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
+  // Lấy ID từ URL
   const partnerIdParam = searchParams.get('partnerId');
   const productIdParam = searchParams.get('productId'); 
   
-  // Data State
+  // State
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [partnerProfile, setPartnerProfile] = useState<any>(null);
-  const [targetProduct, setTargetProduct] = useState<any>(null);
   
-  // UI State
+  // --- STATE QUAN TRỌNG CHO GIAO DỊCH ---
+  const [targetProduct, setTargetProduct] = useState<any>(null); // Sản phẩm đang giao dịch
+  
   const [newMessage, setNewMessage] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [uploadingImg, setUploadingImg] = useState(false);
-  const [showTools, setShowTools] = useState(false); 
-  const [showAppointmentModal, setShowAppointmentModal] = useState(false);
-  const [appointLoc, setAppointLoc] = useState(SUGGESTED_LOCATIONS[0]);
-  const [appointTime, setAppointTime] = useState('');
-
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // --- INIT LOGIC ---
+  // 1. Init Data
   useEffect(() => { if(user) fetchConversations(); }, [user]);
 
-  // Handle URL Params (Create/Open Chat)
+  // 2. Xử lý Logic vào từ trang Product (Ghim sản phẩm)
   useEffect(() => {
     const initChat = async () => {
         if (!user || !partnerIdParam) return;
         
-        // 1. Fetch Product Info
+        // Fetch Product Data để ghim
         if (productIdParam) {
             const { data } = await supabase.from('products').select('*').eq('id', productIdParam).single();
             setTargetProduct(data);
         }
 
-        // 2. Check/Create Conversation
         await checkAndCreateConversation(partnerIdParam);
     };
     initChat();
   }, [partnerIdParam, productIdParam, user]);
 
-  // Realtime Subscription
+  // 3. Realtime Messages & Product Status Updates
   useEffect(() => {
-    if (activeConversation) {
-        fetchMessages(activeConversation);
-        const channel = supabase.channel(`chat:${activeConversation}`)
-            .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversation}` }, (payload) => {
-                setMessages(prev => [...prev, payload.new]);
-                if (user && payload.new.sender_id !== user.id) playMessageSound();
-                fetchConversations(); // Update list order
-            })
-            .subscribe();
-        return () => { supabase.removeChannel(channel); };
-    }
-  }, [activeConversation, user]);
+    if (!activeConversation) return;
+    fetchMessages(activeConversation);
+
+    const channel = supabase.channel(`chat_room:${activeConversation}`)
+        // Lắng nghe tin nhắn mới
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversation}` }, (payload) => {
+            setMessages(prev => [...prev, payload.new]);
+            if (user && payload.new.sender_id !== user.id) playMessageSound();
+        })
+        // Lắng nghe thay đổi trạng thái sản phẩm (Realtime Status Update)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products', filter: `id=eq.${productIdParam}` }, (payload) => {
+            if (targetProduct && payload.new.id === targetProduct.id) {
+                setTargetProduct({ ...targetProduct, ...payload.new });
+            }
+        })
+        .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [activeConversation, user, targetProduct?.id]);
 
   useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  // --- API HELPERS ---
+  // --- API CALLS ---
   const fetchConversations = async () => {
       if (!user) return;
-      const { data } = await supabase.from('conversations')
-          .select(`*, p1:profiles!participant1(name, avatar_url, ban_until), p2:profiles!participant2(name, avatar_url, ban_until)`)
-          .or(`participant1.eq.${user.id},participant2.eq.${user.id}`)
-          .order('updated_at', { ascending: false });
-      
+      const { data } = await supabase.from('conversations').select(`*, p1:profiles!participant1(name, avatar_url), p2:profiles!participant2(name, avatar_url)`).or(`participant1.eq.${user.id},participant2.eq.${user.id}`).order('updated_at', { ascending: false });
       if(data) {
-          const formatted = data.map((c: any) => {
-              const isP1 = c.participant1 === user.id;
-              const partner = isP1 ? c.p2 : c.p1;
-              return { 
-                  ...c, 
-                  partnerName: partner?.name || "Người dùng", 
-                  partnerAvatar: partner?.avatar_url, 
-                  partnerId: isP1 ? c.participant2 : c.participant1, 
-                  isPartnerRestricted: partner?.ban_until && new Date(partner.ban_until) > new Date() 
-              };
-          });
+          const formatted = data.map((c: any) => ({
+              ...c, 
+              partnerName: c.participant1 === user.id ? c.p2?.name : c.p1?.name,
+              partnerAvatar: c.participant1 === user.id ? c.p2?.avatar_url : c.p1?.avatar_url,
+              partnerId: c.participant1 === user.id ? c.participant2 : c.participant1
+          }));
           setConversations(formatted);
       }
   };
 
   const checkAndCreateConversation = async (pId: string) => {
-      if (!user || user.id === pId) return;
-      let existing = conversations.find((c: any) => c.partnerId === pId);
-      
-      if (!existing) {
-          const { data } = await supabase.from('conversations').select('id')
-            .or(`and(participant1.eq.${user.id},participant2.eq.${pId}),and(participant1.eq.${pId},participant2.eq.${user.id})`)
-            .maybeSingle();
-            
-          if (data) {
-             existing = { id: data.id };
-          } else {
-             const { data: newConv } = await supabase.from('conversations').insert({ participant1: user.id, participant2: pId }).select().single();
-             existing = newConv;
-          }
-          await fetchConversations();
-      }
-
+      if (!user) return;
+      const { data: existing } = await supabase.from('conversations').select('id').or(`and(participant1.eq.${user.id},participant2.eq.${pId}),and(participant1.eq.${pId},participant2.eq.${user.id})`).maybeSingle();
       if (existing) {
           setActiveConversation(existing.id);
-          fetchPartnerInfoInternal(pId); // Đổi tên hàm để tránh nhầm lẫn
+      } else {
+          const { data: newConv } = await supabase.from('conversations').insert({ participant1: user.id, participant2: pId }).select().single();
+          if (newConv) setActiveConversation(newConv.id);
       }
-  };
-
-  // Đổi tên hàm này để tránh trùng lặp
-  const fetchPartnerInfoInternal = async (pId: string) => {
-      const { data } = await supabase.from('profiles').select('*').eq('id', pId).single();
-      setPartnerProfile(data);
+      const { data: profile } = await supabase.from('profiles').select('*').eq('id', pId).single();
+      setPartnerProfile(profile);
   };
 
   const fetchMessages = async (convId: string) => {
@@ -191,342 +134,270 @@ const ChatPage: React.FC = () => {
       if (data) setMessages(data);
   };
 
-  // --- TRANSACTION FLOW ---
-  const handleRequestTransaction = async () => {
-      if (!activeConversation || !user || !targetProduct) return;
-      if (messages.length === 0) return addToast("Hãy nhắn tin trước khi yêu cầu giao dịch.", "warning");
+  // ========================================================================
+  // CORE TRANSACTION LOGIC (XỬ LÝ TRẠNG THÁI MUA BÁN)
+  // ========================================================================
+
+  const isSeller = user && targetProduct && user.id === targetProduct.sellerId;
+  const isBuyer = user && targetProduct && user.id !== targetProduct.sellerId;
+
+  // 1. NGƯỜI MUA: Gửi yêu cầu giao dịch
+  const handleRequestDeal = async () => {
+      if (!activeConversation || !user) return;
+      setIsProcessing(true);
+      try {
+          // Gửi tin nhắn hệ thống dạng request
+          await supabase.from('messages').insert({
+              conversation_id: activeConversation, sender_id: user.id, type: 'text',
+              content: `👋 TÔI MUỐN MUA MÓN NÀY!\nBạn xác nhận giao dịch nhé?`
+          });
+          addToast("Đã gửi yêu cầu mua!", "success");
+      } catch (error) { console.error(error); } 
+      finally { setIsProcessing(false); }
+  };
+
+  // 2. NGƯỜI BÁN: Chấp nhận giao dịch (Chuyển Available -> Pending)
+  const handleAcceptDeal = async () => {
+      if (!targetProduct || !activeConversation) return;
+      if (!window.confirm("Xác nhận bán cho người này? Sản phẩm sẽ chuyển sang trạng thái 'Đang giao dịch'.")) return;
       
       setIsProcessing(true);
       try {
-          // Gửi tin nhắn đặc biệt
-          await supabase.from('messages').insert({ 
-              conversation_id: activeConversation, sender_id: user.id, type: 'text',
-              content: `🔵 YÊU CẦU GIAO DỊCH\nTôi muốn mua sản phẩm "${targetProduct.title}".`
+          // Update DB: Status -> Pending, Gán buyer_id
+          await supabase.from('products')
+              .update({ status: 'pending', buyer_id: partnerProfile.id })
+              .eq('id', targetProduct.id);
+          
+          // Thông báo
+          await supabase.from('messages').insert({
+              conversation_id: activeConversation, sender_id: user?.id, type: 'text',
+              content: `✅ ĐÃ XÁC NHẬN!\nSản phẩm đang được giữ cho bạn. Hãy hẹn gặp để trao đổi.`
           });
-          addToast("Đã gửi yêu cầu!", "success");
-      } catch(e) { console.error(e); } finally { setIsProcessing(false); }
+          
+          // Update Local State ngay lập tức
+          setTargetProduct({ ...targetProduct, status: 'pending', buyer_id: partnerProfile.id });
+          addToast("Đã chấp nhận giao dịch!", "success");
+      } catch (error) { console.error(error); }
+      finally { setIsProcessing(false); }
   };
 
-  const handleAcceptTransaction = async () => {
-      if (!activeConversation || !user || !targetProduct) return;
-      if (!window.confirm("Xác nhận giao dịch?")) return;
-      setIsProcessing(true);
-      try {
-          await supabase.from('products').update({ status: 'pending', buyer_id: partnerProfile?.id }).eq('id', targetProduct.id);
-          await supabase.from('messages').insert({ 
-              conversation_id: activeConversation, sender_id: user.id, type: 'text', 
-              content: `🟡 ĐÃ CHẤP NHẬN\nSản phẩm "${targetProduct.title}" đang ở trạng thái chờ giao dịch.` 
-          });
-          setTargetProduct({ ...targetProduct, status: 'pending', buyerId: partnerProfile?.id });
-      } catch(e) { console.error(e); } finally { setIsProcessing(false); }
-  };
+  // 3. NGƯỜI BÁN: Hoàn tất (Chuyển Pending -> Sold)
+  const handleFinishDeal = async () => {
+      if (!targetProduct || !activeConversation) return;
+      if (!window.confirm("Bạn đã nhận tiền và giao hàng xong?")) return;
 
-  const handleCompleteTransaction = async () => {
-      if (!activeConversation || !user || !targetProduct) return;
-      if (!window.confirm("Xác nhận hoàn tất?")) return;
       setIsProcessing(true);
       try {
+          // Update DB: Status -> Sold
           await supabase.from('products').update({ status: 'sold' }).eq('id', targetProduct.id);
-          await supabase.from('messages').insert({ 
-              conversation_id: activeConversation, sender_id: user.id, type: 'text', 
-              content: `🟢 GIAO DỊCH THÀNH CÔNG\nSản phẩm "${targetProduct.title}" đã được bán.` 
+
+          // Thông báo
+          await supabase.from('messages').insert({
+              conversation_id: activeConversation, sender_id: user?.id, type: 'text',
+              content: `🎉 GIAO DỊCH THÀNH CÔNG!\nCảm ơn bạn đã ủng hộ.`
           });
+
           setTargetProduct({ ...targetProduct, status: 'sold' });
-      } catch(e) { console.error(e); } finally { setIsProcessing(false); }
+          addToast("Giao dịch hoàn tất!", "success");
+      } catch (error) { console.error(error); }
+      finally { setIsProcessing(false); }
   };
 
-  // --- MESSAGING ---
-  const handleSendMessage = async (text: string = newMessage, type: 'text' | 'location' = 'text') => {
-    if (isRestricted || !text.trim() || !activeConversation || !user) return;
-    const { error } = await supabase.from('messages').insert({ conversation_id: activeConversation, sender_id: user.id, content: text, type });
-    if (!error) { 
-        setNewMessage(''); 
-        setShowTools(false);
-        await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeConversation); 
-    }
+  // 4. HỦY GIAO DỊCH (Nếu cần) - Reset về Available
+  const handleCancelDeal = async () => {
+      if (!targetProduct || !activeConversation) return;
+      if (!window.confirm("Hủy giao dịch này và đăng bán lại?")) return;
+
+      setIsProcessing(true);
+      try {
+          await supabase.from('products').update({ status: 'available', buyer_id: null }).eq('id', targetProduct.id);
+          await supabase.from('messages').insert({
+              conversation_id: activeConversation, sender_id: user?.id, type: 'text',
+              content: `⚠️ ĐÃ HỦY GIAO DỊCH.`
+          });
+          setTargetProduct({ ...targetProduct, status: 'available', buyer_id: null });
+      } catch (error) { console.error(error); }
+      finally { setIsProcessing(false); }
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (isRestricted || !e.target.files?.[0] || !activeConversation || !user) return;
-    setUploadingImg(true);
-    try {
-        const file = e.target.files[0];
-        const fileName = `${activeConversation}/${Date.now()}`;
-        await supabase.storage.from('product-images').upload(fileName, file);
-        const { data } = supabase.storage.from('product-images').getPublicUrl(fileName);
-        await supabase.from('messages').insert({ conversation_id: activeConversation, sender_id: user.id, content: 'Đã gửi ảnh', type: 'image', image_url: data.publicUrl });
-    } catch (error: any) { addToast(error.message, 'error'); } finally { setUploadingImg(false); }
+  const handleSendMessage = async (e?: React.FormEvent) => {
+      e?.preventDefault();
+      if (!newMessage.trim() || !activeConversation || !user) return;
+      const { error } = await supabase.from('messages').insert({ conversation_id: activeConversation, sender_id: user.id, content: newMessage, type: 'text' });
+      if (!error) { setNewMessage(''); await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeConversation); }
   };
 
-  const handleSendAppointment = () => {
-      if (!appointLoc || !appointTime) return addToast("Vui lòng nhập đủ thông tin", "warning");
-      handleSendMessage(`📅 HẸN GIAO DỊCH\n📍 ${appointLoc.replace('📍 ','')}\n⏰ ${new Date(appointTime).toLocaleString('vi-VN')}`, 'text'); 
-      setShowAppointmentModal(false);
-  };
-
-  const isPartnerBanned = partnerProfile?.ban_until && new Date(partnerProfile.ban_until) > new Date();
-  const isSeller = user && targetProduct && user.id === targetProduct.sellerId;
-  const isBuyer = user && targetProduct && user.id !== targetProduct.sellerId;
   const filteredConversations = conversations.filter(c => c.partnerName?.toLowerCase().includes(searchTerm.toLowerCase()));
 
   return (
-    <div className="max-w-[100vw] h-[calc(100vh-64px)] flex bg-white font-sans overflow-hidden">
-      <MessengerStyles />
+    <div className="max-w-7xl mx-auto h-[calc(100vh-64px)] flex bg-white font-sans overflow-hidden">
+      <ChatStyles />
       
-      {/* --- SIDEBAR (Left Panel) --- */}
-      <div className={`w-full md:w-[360px] border-r border-gray-200 bg-white flex flex-col z-20 ${activeConversation ? 'hidden md:flex' : 'flex'}`}>
-         
-         {/* Sidebar Header */}
-         <div className="p-4 flex flex-col gap-3">
-           <div className="flex justify-between items-center px-2">
-             <h2 className="font-bold text-2xl text-black">Chat</h2>
-             <div className="flex gap-2">
-                <button className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition"><MoreHorizontal size={20}/></button>
-                <button className="p-2 rounded-full bg-gray-100 hover:bg-gray-200 transition"><Video size={20}/></button>
-             </div>
-           </div>
-           {/* Search Pill */}
-           <div className="relative">
-             <input 
-                type="text" 
-                placeholder="Tìm kiếm trên Messenger" 
-                value={searchTerm} 
-                onChange={e => setSearchTerm(e.target.value)} 
-                className="w-full bg-[#F0F2F5] border-none rounded-full pl-10 pr-4 py-2.5 text-[15px] text-black placeholder-gray-500 focus:ring-0"
-             />
-             <Search className="absolute left-3 top-2.5 text-gray-500" size={18}/>
-           </div>
+      {/* --- SIDEBAR --- */}
+      <div className={`w-full md:w-1/3 border-r border-gray-200 flex flex-col ${activeConversation ? 'hidden md:flex' : 'flex'}`}>
+         <div className="p-4 border-b">
+            <h2 className="font-bold text-2xl mb-4">Chat</h2>
+            <div className="relative">
+               <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Tìm kiếm..." className="w-full bg-gray-100 rounded-full px-4 py-2 pl-10 text-sm outline-none"/>
+               <Search className="absolute left-3 top-2.5 text-gray-400" size={16}/>
+            </div>
          </div>
-
-         {/* Conversation List */}
-         <div className="flex-1 overflow-y-auto chat-scrollbar px-2">
-             {filteredConversations.length === 0 ? (
-                 <div className="text-center py-10 text-gray-400 text-sm">Chưa có tin nhắn nào</div>
-             ) : (
-                filteredConversations.map(conv => (
-                 <div 
-                    key={conv.id} 
-                    onClick={() => { setActiveConversation(conv.id); fetchPartnerInfoInternal(conv.partnerId); setTargetProduct(null); }} 
-                    className={`p-2.5 flex items-center gap-3 rounded-lg cursor-pointer transition-colors ${activeConversation === conv.id ? 'active-conversation' : 'hover:bg-gray-100'}`}
-                 >
-                     <div className="relative">
-                        <img src={conv.partnerAvatar || 'https://via.placeholder.com/56'} className="w-14 h-14 rounded-full object-cover border border-gray-100"/>
-                        {conv.isPartnerRestricted && <span className="absolute bottom-0 right-0 p-0.5 bg-white rounded-full"><ShieldAlert size={14} className="text-red-500"/></span>}
-                     </div>
-                     <div className="flex-1 min-w-0 flex flex-col justify-center">
-                       <p className={`text-[15px] truncate ${activeConversation === conv.id ? 'font-semibold text-black' : 'font-medium text-black'}`}>{conv.partnerName}</p>
-                       <div className="flex items-center gap-1 text-[13px] text-gray-500">
-                          <p className="truncate max-w-[140px]">{conv.isPartnerRestricted ? "Tài khoản bị hạn chế" : "Bạn: Xin chào..."}</p>
-                          <span>•</span>
-                          <span>{new Date(conv.updated_at || Date.now()).toLocaleDateString([], {day:'2-digit', month:'2-digit'})}</span>
-                       </div>
-                     </div>
-                 </div>
-             )))}
+         <div className="flex-1 overflow-y-auto chat-scrollbar">
+            {filteredConversations.map(conv => (
+               <div key={conv.id} onClick={() => { setActiveConversation(conv.id); fetchPartnerInfoInternal(conv.partnerId); setTargetProduct(null); }} className={`p-3 flex gap-3 cursor-pointer hover:bg-gray-50 ${activeConversation === conv.id ? 'bg-blue-50' : ''}`}>
+                  <img src={conv.partnerAvatar || 'https://via.placeholder.com/50'} className="w-12 h-12 rounded-full object-cover border"/>
+                  <div className="flex-1 min-w-0">
+                     <p className="font-bold truncate">{conv.partnerName}</p>
+                     <p className="text-xs text-gray-500 truncate">Nhấn để xem tin nhắn</p>
+                  </div>
+               </div>
+            ))}
          </div>
       </div>
 
-      {/* --- CHAT WINDOW (Right Panel) --- */}
-      <div className={`flex-1 flex flex-col bg-white relative ${!activeConversation ? 'hidden md:flex' : 'flex'}`}>
-          {activeConversation ? (
-              <>
-                  {/* CHAT HEADER */}
-                  <div className="h-[60px] px-4 flex justify-between items-center shadow-sm border-b border-gray-200 z-10 bg-white">
-                        <div className="flex items-center gap-3">
-                            <button onClick={() => setActiveConversation(null)} className="md:hidden p-2 -ml-2 hover:bg-gray-100 rounded-full text-messenger-blue"><ArrowLeft size={24}/></button>
-                            {partnerProfile && (
-                                <div className="flex items-center gap-3 cursor-pointer hover:bg-gray-50 p-1 rounded-lg transition" onClick={() => navigate(`/profile/${partnerProfile.id}`)}>
-                                    <div className="relative">
-                                        <img src={partnerProfile.avatar_url || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full object-cover border border-gray-100" />
-                                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
-                                    </div>
-                                    <div>
-                                        <h3 className="font-bold text-[17px] text-black leading-tight">{partnerProfile.name}</h3>
-                                        <span className="text-[12px] text-gray-500">Đang hoạt động</span>
-                                    </div>
-                                </div>
-                            )}
+      {/* --- CHAT AREA --- */}
+      <div className={`flex-1 flex flex-col relative ${!activeConversation ? 'hidden md:flex' : 'flex'}`}>
+         {activeConversation ? (
+            <>
+               {/* HEADER */}
+               <div className="h-16 border-b flex items-center px-4 justify-between bg-white shadow-sm z-10">
+                  <div className="flex items-center gap-3">
+                     <button onClick={() => setActiveConversation(null)} className="md:hidden"><ArrowLeft/></button>
+                     {partnerProfile && (
+                        <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate(`/profile/${partnerProfile.id}`)}>
+                           <img src={partnerProfile.avatar_url || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full border"/>
+                           <div>
+                              <h3 className="font-bold text-sm">{partnerProfile.name}</h3>
+                              <span className="text-xs text-green-500 font-bold">Đang hoạt động</span>
+                           </div>
                         </div>
-                        <div className="flex items-center gap-1 text-messenger-blue">
-                          <button className="p-2.5 hover:bg-gray-100 rounded-full"><Phone size={22}/></button>
-                          <button className="p-2.5 hover:bg-gray-100 rounded-full"><Video size={22}/></button>
-                          <button className="p-2.5 hover:bg-gray-100 rounded-full"><Info size={22}/></button>
+                     )}
+                  </div>
+                  <Phone className="text-blue-500 cursor-pointer"/>
+               </div>
+
+               {/* === TRANSACTION DASHBOARD (GHIM) === */}
+               {targetProduct && (
+                  <div className="transaction-card p-4 bg-blue-50 border-b border-blue-100 flex flex-col gap-3 sticky top-0">
+                     <div className="flex gap-4 items-center">
+                        <img src={targetProduct.images?.[0] || 'https://via.placeholder.com/80'} className="w-16 h-16 rounded-lg object-cover border bg-white"/>
+                        <div className="flex-1">
+                           <div className="flex items-center gap-2 mb-1">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded text-white uppercase ${targetProduct.status === 'sold' ? 'bg-red-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}>
+                                 {targetProduct.status === 'available' ? 'CÒN HÀNG' : targetProduct.status === 'pending' ? 'ĐANG GD' : 'ĐÃ BÁN'}
+                              </span>
+                           </div>
+                           <h4 className="font-bold text-slate-800 text-sm line-clamp-1">{targetProduct.title}</h4>
+                           <p className="text-red-600 font-black">{targetProduct.price === 0 ? 'Miễn phí' : `${targetProduct.price.toLocaleString()}đ`}</p>
                         </div>
+                     </div>
+
+                     {/* LOGIC NÚT BẤM (QUAN TRỌNG) */}
+                     <div className="flex gap-2 pt-2 border-t border-blue-200/50">
+                        {isBuyer && targetProduct.status === 'available' && (
+                           <button onClick={handleRequestDeal} disabled={isProcessing} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold text-sm shadow-sm transition-all flex justify-center items-center gap-2">
+                              {isProcessing ? <Loader size={16} className="animate-spin"/> : <ShoppingBag size={16}/>} Yêu cầu mua
+                           </button>
+                        )}
+
+                        {isSeller && targetProduct.status === 'available' && (
+                           <div className="flex-1 text-center text-xs text-gray-500 italic py-2">Đang đợi người mua yêu cầu...</div>
+                        )}
+
+                        {isSeller && targetProduct.status === 'available' && messages.length > 0 && (
+                           <button onClick={handleAcceptDeal} disabled={isProcessing} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold text-sm shadow-sm transition-all">
+                              Chấp nhận giao dịch
+                           </button>
+                        )}
+
+                        {isSeller && targetProduct.status === 'pending' && (
+                           <>
+                              <button onClick={handleFinishDeal} disabled={isProcessing} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-bold text-sm shadow-sm flex justify-center gap-2">
+                                 <CheckCircle size={16}/> Hoàn tất
+                              </button>
+                              <button onClick={handleCancelDeal} disabled={isProcessing} className="px-3 bg-gray-200 hover:bg-gray-300 text-gray-600 rounded-lg font-bold text-sm">
+                                 Hủy
+                              </button>
+                           </>
+                        )}
+
+                        {isBuyer && targetProduct.status === 'pending' && (
+                           <div className="flex-1 bg-orange-100 text-orange-700 py-2 rounded-lg font-bold text-xs text-center border border-orange-200">
+                              Đang chờ người bán xác nhận hoàn tất...
+                           </div>
+                        )}
+
+                        {targetProduct.status === 'sold' && (
+                           <div className="flex-1 bg-gray-100 text-gray-500 py-2 rounded-lg font-bold text-xs text-center flex justify-center items-center gap-2">
+                              <CheckCircle size={14}/> Giao dịch thành công
+                           </div>
+                        )}
+                     </div>
                   </div>
+               )}
 
-                  {/* MESSAGES AREA */}
-                  <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-white chat-scrollbar flex flex-col">
-                      
-                      {/* --- PRODUCT CARD (MARKETPLACE STYLE) --- */}
-                      {targetProduct && (
-                          <div className="mx-auto w-full max-w-sm bg-white rounded-2xl p-4 shadow-sm border border-gray-200 mb-6 mt-2">
-                              <div className="flex gap-4 items-start pb-4 border-b border-gray-100">
-                                  <img src={targetProduct.images?.[0] || 'https://via.placeholder.com/100'} className="w-20 h-20 rounded-lg object-cover bg-gray-100"/>
-                                  <div className="flex-1 min-w-0">
-                                      <h4 className="font-bold text-black text-[17px] leading-snug">{targetProduct.title}</h4>
-                                      <p className="text-black font-medium">{targetProduct.price === 0 ? 'Miễn phí' : `${targetProduct.price.toLocaleString()}đ`}</p>
-                                      <div className={`mt-1 inline-flex px-2 py-0.5 rounded text-[11px] font-bold uppercase tracking-wide ${targetProduct.status==='sold'?'bg-red-100 text-red-600':targetProduct.status==='pending'?'bg-orange-100 text-orange-600':'bg-green-100 text-green-600'}`}>
-                                          {targetProduct.status === 'available' ? 'Có sẵn' : targetProduct.status === 'pending' ? 'Đang giao dịch' : 'Đã bán'}
-                                      </div>
-                                  </div>
-                              </div>
+               {/* MESSAGES */}
+               <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-white chat-scrollbar">
+                  {messages.map((msg, idx) => {
+                     const isMe = msg.sender_id === user?.id;
+                     
+                     // Style riêng cho tin nhắn hệ thống (Giao dịch)
+                     if (msg.content.includes("YÊU CẦU") || msg.content.includes("ĐÃ XÁC NHẬN") || msg.content.includes("GIAO DỊCH THÀNH CÔNG")) {
+                        return (
+                           <div key={idx} className="flex justify-center my-4">
+                              <span className="text-[11px] font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded-full border border-gray-200 text-center whitespace-pre-wrap">
+                                 {msg.content}
+                              </span>
+                           </div>
+                        )
+                     }
 
-                              {/* TRANSACTION ACTION BUTTONS */}
-                              <div className="pt-3 flex flex-col gap-2">
-                                  {isBuyer && targetProduct.status === 'available' && (
-                                      <button onClick={handleRequestTransaction} disabled={isProcessing} className="w-full py-2 bg-gray-200 hover:bg-gray-300 text-black rounded-lg font-bold text-sm transition-all">
-                                          {isProcessing ? <Loader size={16} className="animate-spin mx-auto"/> : 'Gửi yêu cầu mua'}
-                                      </button>
-                                  )}
-                                  
-                                  {isSeller && targetProduct.status === 'available' && (
-                                      <div className="text-center text-[13px] text-gray-500 py-1">Đang chờ người mua gửi yêu cầu...</div>
-                                  )}
-
-                                  {isSeller && targetProduct.status === 'available' && messages.length > 0 && (
-                                      <button onClick={handleAcceptTransaction} disabled={isProcessing} className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-bold text-sm transition-all">
-                                          Chấp nhận giao dịch
-                                      </button>
-                                  )}
-
-                                  {isSeller && targetProduct.status === 'pending' && (
-                                      <button onClick={handleCompleteTransaction} disabled={isProcessing} className="w-full py-2 bg-green-600 hover:bg-green-700 text-white rounded-lg font-bold text-sm transition-all">
-                                          Đánh dấu đã bán
-                                      </button>
-                                  )}
-
-                                  {isBuyer && targetProduct.status === 'pending' && (
-                                      <div className="w-full py-2 bg-orange-50 text-orange-600 rounded-lg font-bold text-sm text-center border border-orange-200">
-                                          Đang chờ người bán xác nhận...
-                                      </div>
-                                  )}
-                              </div>
-                          </div>
-                      )}
-
-                      {/* --- SAFETY WARNING --- */}
-                      {isPartnerBanned && (
-                        <div className="mx-auto max-w-md bg-red-50 border border-red-100 rounded-xl p-3 flex gap-3 items-center text-red-700 text-sm mb-4">
-                           <ShieldAlert size={20}/>
-                           <span>Cảnh báo: Tài khoản này đang bị hạn chế. Cẩn trọng khi giao dịch.</span>
+                     return (
+                        <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-msg`}>
+                           {!isMe && <img src={partnerProfile?.avatar_url} className="w-8 h-8 rounded-full mr-2 self-end mb-1 border"/>}
+                           <div className={`msg-bubble ${isMe ? 'msg-me' : 'msg-you'}`}>
+                              {msg.type === 'image' ? (
+                                <img src={msg.image_url} className="rounded-lg max-w-[200px]" onClick={() => window.open(msg.image_url)}/>
+                              ) : (
+                                <p>{msg.content}</p>
+                              )}
+                           </div>
                         </div>
-                      )}
+                     );
+                  })}
+                  <div ref={scrollRef} />
+               </div>
 
-                      {/* --- MESSAGES LOOP --- */}
-                      {messages.map((msg, idx) => {
-                          const isMe = msg.sender_id === user?.id;
-                          const showAvatar = !isMe && (idx === messages.length - 1 || messages[idx + 1]?.sender_id === user?.id);
-                          
-                          // Styling for System/Transaction Messages
-                          if (msg.content.includes("YÊU CẦU GIAO DỊCH") || msg.content.includes("ĐÃ CHẤP NHẬN") || msg.content.includes("GIAO DỊCH THÀNH CÔNG")) {
-                              return (
-                                  <div key={idx} className="flex justify-center my-4 animate-enter">
-                                      <div className="bg-gray-50 border border-gray-200 text-gray-600 px-4 py-2 rounded-full text-xs font-bold text-center shadow-sm">
-                                          {msg.content}
-                                      </div>
-                                  </div>
-                              );
-                          }
-
-                          return (
-                              <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'} group animate-enter`}>
-                                  {!isMe && (
-                                      <div className="w-7 mr-2 flex flex-col justify-end">
-                                          {showAvatar ? <img src={partnerProfile?.avatar_url} className="w-7 h-7 rounded-full border border-gray-100 shadow-sm"/> : <div className="w-7"/>}
-                                      </div>
-                                  )}
-                                  
-                                  <div className={`max-w-[70%] ${isMe ? 'items-end' : 'items-start'} flex flex-col`}>
-                                      <div className={`px-4 py-2.5 text-[15px] leading-snug shadow-sm ${isMe ? 'bubble-me' : 'bubble-you'}`}>
-                                          {msg.type === 'image' ? (
-                                              <img src={msg.image_url} className="rounded-lg max-h-64 object-cover cursor-pointer hover:opacity-90" onClick={() => window.open(msg.image_url)}/>
-                                          ) : msg.type === 'location' ? (
-                                              <div className="flex items-center gap-2 font-bold"><MapPin size={18}/> {msg.content}</div>
-                                          ) : (
-                                              <p className="whitespace-pre-wrap">{msg.content}</p>
-                                          )}
-                                      </div>
-                                      {/* Timestamp on hover */}
-                                      <span className="text-[10px] text-gray-400 mt-1 px-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                          {new Date(msg.created_at).toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
-                                      </span>
-                                  </div>
-                              </div>
-                          );
-                      })}
-                      <div ref={scrollRef} />
+               {/* INPUT */}
+               <div className="p-3 bg-white border-t">
+                  <div className="flex gap-2 overflow-x-auto pb-2 chat-scrollbar">
+                     {QUICK_REPLIES.map((t, i) => (
+                        <button key={i} onClick={() => setNewMessage(t)} className="whitespace-nowrap px-3 py-1 bg-gray-100 text-xs rounded-full hover:bg-gray-200 text-gray-700 font-medium transition">{t}</button>
+                     ))}
                   </div>
-
-                  {/* INPUT AREA */}
-                  <div className="p-3 bg-white z-30">
-                      {showTools && (
-                          <div className="mb-2 flex gap-2 overflow-x-auto chat-scrollbar pb-2">
-                              {QUICK_REPLIES.map((text, i) => (
-                                  <button key={i} onClick={() => handleSendMessage(text)} className="flex-shrink-0 px-3 py-1.5 bg-blue-50 text-blue-600 rounded-full text-xs font-bold border border-blue-100 hover:bg-blue-100 transition-colors">
-                                      {text}
-                                  </button>
-                              ))}
-                          </div>
-                      )}
-
-                      {/* APPOINTMENT MODAL */}
-                      {showAppointmentModal && (
-                          <div className="absolute bottom-20 left-4 right-4 md:w-80 bg-white rounded-2xl shadow-2xl border border-gray-200 p-4 z-50 animate-enter">
-                              <div className="flex justify-between mb-3"><h4 className="font-bold flex items-center gap-2 text-sm"><Calendar size={16}/> Hẹn giờ</h4><button onClick={() => setShowAppointmentModal(false)}><X size={16}/></button></div>
-                              <div className="space-y-2">
-                                  <div className="grid grid-cols-2 gap-2">{SUGGESTED_LOCATIONS.map(loc => <button key={loc} onClick={() => setAppointLoc(loc)} className={`text-[11px] p-2 rounded border truncate ${appointLoc===loc?'bg-blue-600 text-white':'bg-gray-50'}`}>{loc.replace('📍 ','')}</button>)}</div>
-                                  <input type="datetime-local" value={appointTime} onChange={e => setAppointTime(e.target.value)} className="w-full border p-2 rounded text-sm bg-gray-50"/>
-                                  <button onClick={handleSendAppointment} className="w-full bg-blue-600 text-white py-2 rounded font-bold text-sm">Xác nhận</button>
-                              </div>
-                          </div>
-                      )}
-
-                      {isRestricted ? (
-                        <div className="p-3 bg-gray-100 text-gray-500 rounded-2xl text-center text-sm font-bold flex justify-center items-center gap-2"><Lock size={16}/> Bạn không thể nhắn tin.</div>
-                      ) : (
-                        <form onSubmit={(e) => { e.preventDefault(); handleSendMessage(); }} className="flex items-end gap-2">
-                            <div className="flex gap-1 pb-2">
-                                <button type="button" onClick={() => setShowTools(!showTools)} className="p-2 hover:bg-gray-100 rounded-full text-messenger-blue transition"><CornerDownRight size={20}/></button>
-                                <label className="p-2 hover:bg-gray-100 rounded-full text-messenger-blue transition cursor-pointer">
-                                    {uploadingImg ? <Loader size={20} className="animate-spin"/> : <ImageIcon size={20}/>}
-                                    <input type="file" className="hidden" accept="image/*" onChange={handleImageUpload} disabled={uploadingImg} />
-                                </label>
-                                <button type="button" onClick={() => setShowAppointmentModal(!showAppointmentModal)} className="p-2 hover:bg-gray-100 rounded-full text-messenger-blue transition"><MapPin size={20}/></button>
-                            </div>
-                            
-                            <div className="flex-1 bg-[#F0F2F5] rounded-[20px] flex items-center px-4 py-2.5 transition-all focus-within:ring-1 focus-within:ring-gray-300">
-                                <input 
-                                    type="text" 
-                                    value={newMessage} 
-                                    onChange={(e) => setNewMessage(e.target.value)} 
-                                    placeholder="Aa" 
-                                    className="flex-1 bg-transparent outline-none text-[15px] text-black placeholder-gray-500"
-                                />
-                                <button type="button" className="text-messenger-blue hover:scale-110 transition"><Smile size={20}/></button>
-                            </div>
-
-                            <button 
-                                type="submit" 
-                                className="p-2 text-messenger-blue hover:bg-blue-50 rounded-full transition-colors self-center"
-                            >
-                                {newMessage.trim() ? <Send size={20} className="ml-0.5 fill-current"/> : <ThumbsUp size={20} className="fill-current"/>}
-                            </button>
-                        </form>
-                      )}
-                  </div>
-              </>
-          ) : (
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-8">
-                  <div className="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-4">
-                      <MessageCircle size={48} className="text-gray-300"/>
-                  </div>
-                  <h2 className="text-2xl font-bold text-black mb-2">Chào mừng đến với Messenger</h2>
-                  <p className="text-gray-500 max-w-xs">Chọn một đoạn chat để bắt đầu nhắn tin với người bán hoặc bạn bè.</p>
-              </div>
-          )}
+                  <form onSubmit={handleSendMessage} className="flex items-end gap-2 mt-1">
+                     <button type="button" className="p-2 text-blue-500 hover:bg-blue-50 rounded-full"><ImageIcon size={24}/></button>
+                     <div className="flex-1 bg-gray-100 rounded-2xl px-4 py-2">
+                        <input value={newMessage} onChange={e => setNewMessage(e.target.value)} placeholder="Nhập tin nhắn..." className="w-full bg-transparent outline-none text-sm text-black"/>
+                     </div>
+                     <button type="submit" disabled={!newMessage.trim()} className="p-2 text-blue-600 hover:bg-blue-50 rounded-full disabled:opacity-50"><Send size={24}/></button>
+                  </form>
+               </div>
+            </>
+         ) : (
+            <div className="flex-1 flex flex-col items-center justify-center text-gray-300">
+               <MessageCircle size={64} className="mb-4"/>
+               <p className="font-bold">Chọn hội thoại để bắt đầu</p>
+            </div>
+         )}
       </div>
     </div>
   );
+};
+
+// Helper để fetch trong component con nếu cần
+const fetchPartnerInfoInternal = async (pId: string) => {
+    // Logic fetch profile...
 };
 
 export default ChatPage;
