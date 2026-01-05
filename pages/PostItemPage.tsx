@@ -1,9 +1,10 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { 
   Upload, X, Image as ImageIcon, DollarSign, Tag, 
   FileText, ArrowRight, ArrowLeft, CheckCircle2, 
-  Sparkles, Loader2, Info, Camera, Box, AlertCircle
+  Sparkles, Loader2, Info, Camera, Box, AlertCircle,
+  MapPin // <-- Đã thêm MapPin vào đây
 } from 'lucide-react';
 import { supabase } from '../services/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -162,7 +163,7 @@ const PostItemPage: React.FC = () => {
     price: '',
     category: ProductCategory.TEXTBOOK,
     condition: ProductCondition.GOOD,
-    tradeMethod: TradeMethod.DIRECT,
+    tradeMethod: 'direct' as TradeMethod, // Default to string literal cast
   });
 
   useEffect(() => {
@@ -433,9 +434,10 @@ const PostItemPage: React.FC = () => {
               <div className="input-group">
                 <label className="block text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">Phương thức giao dịch</label>
                 <div className="flex gap-2">
+                  {/* Fixed Usage: Using string literals cast to TradeMethod to avoid Enum errors */}
                   {[
-                    { val: TradeMethod.DIRECT, label: 'Trực tiếp', icon: <MapPin size={16}/> },
-                    { val: TradeMethod.SHIPPING, label: 'Giao hàng', icon: <Box size={16}/> }
+                    { val: 'direct' as TradeMethod, label: 'Trực tiếp', icon: <MapPin size={16}/> },
+                    { val: 'shipping' as TradeMethod, label: 'Giao hàng', icon: <Box size={16}/> }
                   ].map(m => (
                     <button 
                       key={m.val}
