@@ -4,7 +4,7 @@ import { supabase } from '../services/supabase';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
 import { 
-  Send, Image as ImageIcon, MapPin, CheckCircle, 
+  Send, Image as ImageIcon, MapPin, CheckCircle,Search,Calendar,
   MessageCircle, ArrowLeft, X, Loader, ShoppingBag, 
   ShieldAlert, Phone, Video, Info, Smile, ThumbsUp,
   MoreHorizontal, CornerDownRight, Zap, PlayCircle, Lock
