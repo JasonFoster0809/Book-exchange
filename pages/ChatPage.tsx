@@ -451,5 +451,6 @@ const fetchMessages = async (convId: string) => {
           setPartnerProfile(data);
       } else {
           console.error("Lỗi fetch profile đối phương:", error);
+      }
 
 export default ChatPage;
