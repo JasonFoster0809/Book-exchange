@@ -33,11 +33,12 @@ import {
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 
-// --- TYPES & ENUMS (Giữ nguyên logic) ---
+// --- TYPES & ENUMS ---
 type ID = string | number;
 type Timestamp = string;
 
-enum ProductCategory {
+// Đổi tên Enum cho khớp với Post
+enum PostCategory {
   TEXTBOOK = "Textbook",
   ELECTRONICS = "Electronics",
   SUPPLIES = "School Supplies",
@@ -53,7 +54,8 @@ enum SortOption {
   MOST_VIEWED = "most_viewed",
 }
 
-interface Product {
+// Interface Post (thay cho Product)
+interface Post {
   id: ID;
   created_at: Timestamp;
   title: string;
@@ -109,13 +111,12 @@ const Utils = {
     classes.filter(Boolean).join(" "),
 };
 
-// --- STYLES NÂNG CẤP ---
+// --- STYLES ---
 const GlobalStyles = () => (
   <style>{`
     :root { --primary: #00418E; --secondary: #00B0F0; --accent: #7C3AED; --light: #F8FAFC; }
     body { background-color: var(--light); color: #0F172A; font-family: 'Inter', system-ui, sans-serif; overflow-x: hidden; }
     
-    /* Scrollbar đẹp hơn */
     ::-webkit-scrollbar { width: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
     ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
@@ -149,7 +150,6 @@ const GlobalStyles = () => (
 
 // --- COMPONENTS ---
 
-// 1. Background động thay cho Canvas hạt cũ
 const AnimatedBackground = () => (
   <div className="absolute inset-0 overflow-hidden pointer-events-none -z-10">
     <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-300 rounded-full mix-blend-multiply filter blur-[128px] opacity-40 animate-blob"></div>
@@ -159,13 +159,13 @@ const AnimatedBackground = () => (
   </div>
 );
 
-// 2. Custom Hook Fetch Products
-function useProducts(filter: FilterState) {
-  const [products, setProducts] = useState<Product[]>([]);
+// Đổi tên Hook: usePosts
+function usePosts(filter: FilterState) {
+  const [posts, setPosts] = useState<Post[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchProducts = useCallback(async () => {
+  const fetchPosts = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -186,7 +186,7 @@ function useProducts(filter: FilterState) {
       const { data, error: dbError } = await query.limit(12);
       if (dbError) throw dbError;
 
-      setProducts((data || []).map((p: any) => ({
+      setPosts((data || []).map((p: any) => ({
           ...p,
           images: p.post_images ? p.post_images.map((img: any) => img.path) : [],
           postedAt: p.published_at || p.created_at,
@@ -200,8 +200,8 @@ function useProducts(filter: FilterState) {
     }
   }, [filter]);
 
-  useEffect(() => { fetchProducts(); }, [fetchProducts]);
-  return { products, loading, error, refetch: fetchProducts };
+  useEffect(() => { fetchPosts(); }, [fetchPosts]);
+  return { posts, loading, error, refetch: fetchPosts };
 }
 
 const Button: React.FC<ButtonProps> = ({ variant = "primary", size = "md", loading, icon, iconPosition = "left", fullWidth, children, className, disabled, ...props }) => {
@@ -227,80 +227,77 @@ const Button: React.FC<ButtonProps> = ({ variant = "primary", size = "md", loadi
   );
 };
 
-const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
+// Đổi tên Component: PostCard
+const PostCard: React.FC<{ post: Post }> = ({ post }) => {
   const navigate = useNavigate();
   const [imageLoaded, setImageLoaded] = useState(false);
-  const displayImage = product.images && product.images.length > 0 ? product.images[0] : "https://placehold.co/400x300?text=No+Image";
+  const displayImage = post.images && post.images.length > 0 ? post.images[0] : "https://placehold.co/400x300?text=No+Image";
 
   const categoryLabels: Record<string, string> = {
-    [ProductCategory.TEXTBOOK]: "Giáo trình",
-    [ProductCategory.ELECTRONICS]: "Điện tử",
-    [ProductCategory.SUPPLIES]: "Dụng cụ",
-    [ProductCategory.CLOTHING]: "Thời trang",
-    [ProductCategory.OTHER]: "Khác",
+    [PostCategory.TEXTBOOK]: "Giáo trình",
+    [PostCategory.ELECTRONICS]: "Điện tử",
+    [PostCategory.SUPPLIES]: "Dụng cụ",
+    [PostCategory.CLOTHING]: "Thời trang",
+    [PostCategory.OTHER]: "Khác",
   };
-  const displayCategory = categoryLabels[product.category] || product.category;
+  const displayCategory = categoryLabels[post.category] || post.category;
 
   return (
-    <div onClick={() => navigate(`/product/${product.id}`)} className="glass-card-hover group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-white/60 bg-white/40 backdrop-blur-md shadow-sm transition-all duration-300">
-      {/* Hình ảnh */}
+    // Lưu ý: Route vẫn giữ là /product/:id để tránh lỗi nếu App.tsx chưa đổi
+    <div onClick={() => navigate(`/product/${post.id}`)} className="glass-card-hover group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-white/60 bg-white/40 backdrop-blur-md shadow-sm transition-all duration-300">
       <div className="relative aspect-4/3 overflow-hidden bg-slate-100">
         {!imageLoaded && <div className="skeleton-shimmer absolute inset-0 h-full w-full" />}
         <img
           src={displayImage}
-          alt={product.title}
+          alt={post.title}
           className={Utils.cn("h-full w-full object-cover transition-transform duration-700 group-hover:scale-110", imageLoaded ? "opacity-100" : "opacity-0")}
           onLoad={() => setImageLoaded(true)}
           onError={(e) => { (e.target as HTMLImageElement).src = "https://placehold.co/400x300?text=Error"; setImageLoaded(true); }}
         />
         
-        {/* Shine Effect on Hover */}
         <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/30 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000 z-10 pointer-events-none"></div>
 
-        {/* Badges */}
         <div className="absolute top-3 left-3 flex flex-col gap-1 z-20">
-          {(product.price === 0 || product.trade_type === 'free') && (
+          {(post.price === 0 || post.trade_type === 'free') && (
             <span className="flex items-center gap-1 rounded-full bg-red-500/90 backdrop-blur-sm px-2.5 py-1 text-[10px] font-bold text-white shadow-lg border border-red-400">
               <Gift size={10} /> FREE
             </span>
           )}
-          {product.trade_type === 'swap' && (
+          {post.trade_type === 'swap' && (
             <span className="flex items-center gap-1 rounded-full bg-purple-500/90 backdrop-blur-sm px-2.5 py-1 text-[10px] font-bold text-white shadow-lg border border-purple-400">
               <RefreshCw size={10} /> SWAP
             </span>
           )}
-          {product.condition === "Brand New" && (
+          {post.condition === "Brand New" && (
             <span className="rounded-full bg-green-500/90 backdrop-blur-sm px-2.5 py-1 text-[10px] font-bold text-white shadow-lg border border-green-400">
               NEW
             </span>
           )}
         </div>
 
-        {/* Nút xem nhanh */}
         <button className="absolute right-3 bottom-3 translate-y-10 rounded-full bg-white p-2.5 text-[#00418E] opacity-0 shadow-lg transition-all duration-300 group-hover:translate-y-0 group-hover:opacity-100 hover:bg-[#00418E] hover:text-white z-20">
           <ArrowRight size={18} />
         </button>
       </div>
 
-      {/* Nội dung */}
       <div className="flex flex-1 flex-col p-4 relative">
         <div className="mb-2 flex items-start justify-between">
           <span className="max-w-[60%] truncate rounded-full border border-blue-100 bg-blue-50/80 px-2.5 py-0.5 text-[10px] font-bold tracking-wider text-[#00418E] uppercase">
             {displayCategory}
           </span>
           <span className="flex items-center gap-1 text-[10px] whitespace-nowrap text-slate-400">
-            <Clock size={10} /> {Utils.timeAgo(product.published_at || product.created_at)}
+            <Clock size={10} /> {Utils.timeAgo(post.published_at || post.created_at)}
           </span>
         </div>
         <h3 className="mb-1 line-clamp-2 min-h-[40px] text-sm leading-relaxed font-bold text-slate-800 transition-colors group-hover:text-[#00418E]">
-          {product.title}
+          {post.title}
         </h3>
         <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3">
           <span className="text-lg font-black tracking-tight text-[#0F172A] group-hover:text-[#00418E] transition-colors">
-            {product.trade_type === 'free' || product.price === 0 ? "Tặng miễn phí" : product.trade_type === 'swap' ? "Trao đổi" : Utils.formatCurrency(product.price)}
+            {post.trade_type === 'free' || post.price === 0 ? "Tặng miễn phí" : post.trade_type === 'swap' ? "Trao đổi" : Utils.formatCurrency(post.price)}
           </span>
           <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
-            <Eye size={12} /> {product.view_count || 0}
+            <Eye size={12} /> {post.view_count || 0}
           </div>
         </div>
       </div>
@@ -311,7 +308,7 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<FilterState>({ category: "all", sort: SortOption.NEWEST, search: "" });
-  const { products, loading, error, refetch } = useProducts(filter);
+  const { posts, loading, error, refetch } = usePosts(filter);
 
   const handleSearch = (term: string) => {
     if (term.trim()) navigate(`/market?search=${encodeURIComponent(term)}`);
@@ -398,11 +395,11 @@ const HomePage: React.FC = () => {
           <div className="flex min-w-max justify-center gap-3">
             {[
               { id: "all", label: "Tất cả", icon: <Grid size={16} /> },
-              { id: ProductCategory.TEXTBOOK, label: "Giáo trình", icon: <BookOpen size={16} /> },
-              { id: ProductCategory.ELECTRONICS, label: "Công nghệ", icon: <Monitor size={16} /> },
-              { id: ProductCategory.SUPPLIES, label: "Dụng cụ", icon: <Calculator size={16} /> },
-              { id: ProductCategory.CLOTHING, label: "Đồng phục", icon: <Shirt size={16} /> },
-              { id: ProductCategory.OTHER, label: "Khác", icon: <MoreHorizontal size={16} /> },
+              { id: PostCategory.TEXTBOOK, label: "Giáo trình", icon: <BookOpen size={16} /> },
+              { id: PostCategory.ELECTRONICS, label: "Công nghệ", icon: <Monitor size={16} /> },
+              { id: PostCategory.SUPPLIES, label: "Dụng cụ", icon: <Calculator size={16} /> },
+              { id: PostCategory.CLOTHING, label: "Đồng phục", icon: <Shirt size={16} /> },
+              { id: PostCategory.OTHER, label: "Khác", icon: <MoreHorizontal size={16} /> },
             ].map((cat) => (
               <button
                 key={cat.id}
@@ -422,7 +419,7 @@ const HomePage: React.FC = () => {
         </div>
       </div>
 
-      {/* --- PRODUCTS LIST --- */}
+      {/* --- POSTS LIST --- */}
       <section className="mx-auto mb-24 min-h-[600px] max-w-7xl px-4">
         <div className="mb-10 flex flex-col items-center justify-between gap-6 md:flex-row">
           <div className="text-center md:text-left">
@@ -431,7 +428,7 @@ const HomePage: React.FC = () => {
               {filter.category === "all" ? "Mới lên sàn" : "Kết quả lọc"}
             </h2>
             <p className="mt-2 text-sm font-medium text-slate-500">
-              {loading ? "Đang cập nhật dữ liệu..." : `Hiển thị ${products.length} sản phẩm mới nhất.`}
+              {loading ? "Đang cập nhật dữ liệu..." : `Hiển thị ${posts.length} tin đăng mới nhất.`}
             </p>
           </div>
           <div className="flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
@@ -465,20 +462,20 @@ const HomePage: React.FC = () => {
               <p className="text-slate-500">Lỗi kết nối</p>
               <Button onClick={refetch} variant="outline" className="mt-4">Thử lại</Button>
             </div>
-          ) : products.length > 0 ? (
-            products.map((p) => (
-              <div key={p.id} className="animate-enter"><ProductCard product={p} /></div>
+          ) : posts.length > 0 ? (
+            posts.map((p) => (
+              <div key={p.id} className="animate-enter"><PostCard post={p} /></div>
             ))
           ) : (
             <div className="col-span-full rounded-3xl border-2 border-dashed border-slate-200 bg-white/50 py-20 text-center">
               <Ghost size={48} className="mx-auto mb-4 text-slate-300" />
-              <h3 className="text-xl font-bold text-slate-800">Chưa có sản phẩm</h3>
+              <h3 className="text-xl font-bold text-slate-800">Chưa có tin đăng nào</h3>
               <Link to="/post-item"><Button icon={<PlusCircle size={18} />} className="mt-4">Đăng tin ngay</Button></Link>
             </div>
           )}
         </div>
 
-        {products.length > 0 && !loading && (
+        {posts.length > 0 && !loading && (
           <div className="mt-16 text-center">
             <Link to="/market" className="group inline-flex items-center gap-2 rounded-full border border-white bg-white/80 backdrop-blur px-10 py-4 text-base font-bold text-slate-700 shadow-md transition-all hover:border-[#00418E] hover:text-[#00418E] hover:shadow-xl hover:scale-105">
               Xem toàn bộ thị trường <ArrowRight size={20} className="transition-transform group-hover:translate-x-1" />
