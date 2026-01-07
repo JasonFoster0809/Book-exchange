@@ -27,6 +27,7 @@ import {
   WifiOff,
   RefreshCw,
   MoreHorizontal,
+  Smartphone,
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 
