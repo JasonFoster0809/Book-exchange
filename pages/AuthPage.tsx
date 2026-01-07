@@ -1,184 +1,244 @@
-import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import { BookOpen, Mail, Lock, User, ArrowRight, Loader, ChevronLeft } from 'lucide-react';
-import { useToast } from '../contexts/ToastContext';
+import React, { useState } from "react";
+import { useNavigate, useLocation } from "react-router-dom";
+import { supabase } from "../services/supabase";
+import { useToast } from "../contexts/ToastContext";
+import { 
+  Mail, 
+  Lock, 
+  User, 
+  ArrowRight, 
+  Loader, 
+  Sparkles,
+  CheckCircle,
+  AlertCircle
+} from "lucide-react";
+
+// --- STYLES ---
+const GlobalStyles = () => (
+  <style>{`
+    :root { --primary: #00418E; --secondary: #00B0F0; }
+    body { font-family: 'Inter', system-ui, sans-serif; overflow-x: hidden; }
+    
+    /* Animations */
+    @keyframes blob { 0% { transform: translate(0px, 0px) scale(1); } 33% { transform: translate(30px, -50px) scale(1.1); } 66% { transform: translate(-20px, 20px) scale(0.9); } 100% { transform: translate(0px, 0px) scale(1); } }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+
+    .animate-blob { animation: blob 7s infinite; }
+    .animate-enter { animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
+    .delay-100 { animation-delay: 100ms; }
+    .delay-200 { animation-delay: 200ms; }
+
+    /* Glass Panel */
+    .glass-panel { 
+      background: rgba(255, 255, 255, 0.75); 
+      backdrop-filter: blur(16px); 
+      -webkit-backdrop-filter: blur(16px); 
+      border: 1px solid rgba(255, 255, 255, 0.5); 
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.1); 
+    }
+    
+    .input-group:focus-within { border-color: #00418E; box-shadow: 0 0 0 4px rgba(0, 65, 142, 0.1); }
+  `}</style>
+);
+
+const AnimatedBackground = () => (
+  <div className="fixed inset-0 overflow-hidden pointer-events-none -z-10 bg-[#F8FAFC]">
+    <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-300 rounded-full mix-blend-multiply filter blur-[128px] opacity-40 animate-blob"></div>
+    <div className="absolute top-0 right-1/4 w-96 h-96 bg-purple-300 rounded-full mix-blend-multiply filter blur-[128px] opacity-40 animate-blob animation-delay-2000"></div>
+    <div className="absolute -bottom-32 left-1/3 w-96 h-96 bg-cyan-300 rounded-full mix-blend-multiply filter blur-[128px] opacity-40 animate-blob animation-delay-4000"></div>
+    <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-20"></div>
+  </div>
+);
 
 const AuthPage: React.FC = () => {
-  const [isLogin, setIsLogin] = useState(true);
-  const [isForgotPassword, setIsForgotPassword] = useState(false); // Trạng thái quên mật khẩu
-  const [loading, setLoading] = useState(false);
-  const { signIn, signUp, resetPassword } = useAuth(); // Lấy thêm hàm resetPassword
-  const { addToast } = useToast();
   const navigate = useNavigate();
-
+  const location = useLocation();
+  const { addToast } = useToast();
+  
+  // State
+  const [isLogin, setIsLogin] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState({
-    email: '',
-    password: '',
-    name: '',
+    email: "",
+    password: "",
+    fullName: "",
   });
 
-  // Xử lý Đăng nhập / Đăng ký
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (formData.password.length < 6) {
-        addToast("Mật khẩu phải có ít nhất 6 ký tự.", "warning");
-        return;
-    }
+  // Toggle Mode
+  const toggleMode = () => {
+    setIsLogin(!isLogin);
+    setFormData({ email: "", password: "", fullName: "" });
+  };
 
+  // Handle Input Change
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+  };
+
+  // Main Auth Handler
+  const handleAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
     setLoading(true);
+
     try {
       if (isLogin) {
-        const { error } = await signIn(formData.email, formData.password);
+        // --- LOGIC ĐĂNG NHẬP ---
+        const { error } = await supabase.auth.signInWithPassword({
+          email: formData.email,
+          password: formData.password,
+        });
+        
         if (error) throw error;
-        addToast("Chào mừng bạn quay trở lại! 🎉", "success");
+        
+        addToast("Đăng nhập thành công!", "success");
+        navigate("/"); 
       } else {
-        if (!formData.name) {
-            addToast("Vui lòng điền Họ và tên.", "warning");
-            setLoading(false);
-            return;
+        // --- LOGIC ĐĂNG KÝ ---
+        if (!formData.fullName.trim()) {
+          throw new Error("Vui lòng nhập họ tên đầy đủ.");
         }
-        const { error } = await signUp(formData.email, formData.password, formData.name, ""); 
+
+        const { error } = await supabase.auth.signUp({
+          email: formData.email,
+          password: formData.password,
+          options: {
+            // Quan trọng: Gửi metadata để Trigger trong SQL tự động tạo Profile
+            data: {
+              full_name: formData.fullName,
+              name: formData.fullName, // Gửi cả 2 trường để chắc chắn khớp logic DB
+              avatar_url: `https://ui-avatars.com/api/?name=${encodeURIComponent(formData.fullName)}&background=random`
+            },
+          },
+        });
+
         if (error) throw error;
-        addToast("Đăng ký thành công! Hãy kiểm tra email để xác thực.", "success");
+
+        addToast("Đăng ký thành công! Vui lòng kiểm tra email để xác thực.", "info");
+        setIsLogin(true); // Chuyển về trang đăng nhập
       }
-      navigate('/');
     } catch (error: any) {
+      console.error("Auth Error:", error);
       let msg = error.message;
-      if (msg.includes("Invalid login credentials")) msg = "Sai email hoặc mật khẩu.";
-      if (msg.includes("User already registered")) msg = "Email này đã được đăng ký.";
+      if (msg === "Invalid login credentials") msg = "Email hoặc mật khẩu không đúng.";
+      if (msg.includes("already registered")) msg = "Email này đã được đăng ký.";
       addToast(msg, "error");
     } finally {
       setLoading(false);
     }
   };
 
-  // Xử lý Gửi email khôi phục mật khẩu
-  const handleResetPassword = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!formData.email) {
-      addToast("Vui lòng nhập email của bạn.", "warning");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { error } = await resetPassword(formData.email);
-      if (error) throw error;
-      addToast("Link khôi phục mật khẩu đã được gửi vào Email của bạn!", "success");
-      setIsForgotPassword(false); // Quay lại màn hình đăng nhập
-    } catch (error: any) {
-      addToast(error.message, "error");
-    } finally {
-      setLoading(false);
-    }
-  };
-
   return (
-    <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
-      <div className="sm:mx-auto sm:w-full sm:max-w-md text-center">
-        <div className="mx-auto h-16 w-16 bg-indigo-600 rounded-2xl flex items-center justify-center rotate-3 shadow-lg mb-4">
-             <BookOpen className="h-10 w-10 text-white" />
-        </div>
-        <h2 className="text-3xl font-extrabold text-gray-900">
-          {isForgotPassword ? 'Khôi phục mật khẩu' : isLogin ? 'Chào mừng trở lại' : 'Gia nhập UniMarket'}
-        </h2>
-        <p className="mt-2 text-sm text-gray-600">
-          {isForgotPassword ? 'Nhập email để nhận link đặt lại mật khẩu' : 'Cộng đồng trao đổi giáo trình & đồ dùng sinh viên'}
-        </p>
-      </div>
+    <div className="min-h-screen flex items-center justify-center p-4 pt-20 relative">
+      <GlobalStyles />
+      <AnimatedBackground />
 
-      <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md">
-        <div className="bg-white py-8 px-4 shadow-xl shadow-gray-100 sm:rounded-xl sm:px-10 border border-gray-100">
-          
-          {/* MÀN HÌNH QUÊN MẬT KHẨU */}
-          {isForgotPassword ? (
-            <form className="space-y-5" onSubmit={handleResetPassword}>
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Email đã đăng ký</label>
-                <div className="mt-1 relative rounded-md shadow-sm">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Mail className="h-5 w-5 text-gray-400" /></div>
-                  <input type="email" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2.5" placeholder="example@gmail.com" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} />
-                </div>
-              </div>
-              <button type="submit" disabled={loading} className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 transition-all">
-                {loading ? <Loader className="animate-spin h-5 w-5" /> : 'Gửi link khôi phục'}
-              </button>
-              <button type="button" onClick={() => setIsForgotPassword(false)} className="w-full flex justify-center items-center text-sm text-gray-500 hover:text-indigo-600 transition-colors">
-                <ChevronLeft size={16} /> Quay lại đăng nhập
-              </button>
-            </form>
-          ) : (
-            /* MÀN HÌNH ĐĂNG NHẬP / ĐĂNG KÝ */
-            <form className="space-y-5" onSubmit={handleSubmit}>
-              {!isLogin && (
-                <div>
-                  <label className="block text-sm font-medium text-gray-700">Họ và tên</label>
-                  <div className="mt-1 relative rounded-md shadow-sm">
-                    <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><User className="h-5 w-5 text-gray-400" /></div>
-                    <input type="text" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="Nguyễn Văn A" value={formData.name} onChange={(e) => setFormData({...formData, name: e.target.value})} />
-                  </div>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700">Email</label>
-                <div className="mt-1 relative rounded-md shadow-sm">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Mail className="h-5 w-5 text-gray-400" /></div>
-                  <input type="email" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="example@gmail.com" value={formData.email} onChange={(e) => setFormData({...formData, email: e.target.value})} />
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between">
-                  <label className="block text-sm font-medium text-gray-700">Mật khẩu</label>
-                  {isLogin && (
-                    <button type="button" onClick={() => setIsForgotPassword(true)} className="text-xs font-semibold text-indigo-600 hover:text-indigo-500">
-                      Quên mật khẩu?
-                    </button>
-                  )}
-                </div>
-                <div className="mt-1 relative rounded-md shadow-sm">
-                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none"><Lock className="h-5 w-5 text-gray-400" /></div>
-                  <input type="password" required className="focus:ring-indigo-500 focus:border-indigo-500 block w-full pl-10 sm:text-sm border-gray-300 rounded-md py-2" placeholder="••••••••" value={formData.password} onChange={(e) => setFormData({...formData, password: e.target.value})} />
-                </div>
-              </div>
-
-              <div>
-                <button 
-                  type="submit" 
-                  disabled={loading}
-                  className="w-full flex justify-center py-2.5 px-4 border border-transparent rounded-lg shadow-sm text-sm font-bold text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 transition-all disabled:opacity-70 disabled:cursor-not-allowed"
-                >
-                  {loading ? <Loader className="animate-spin h-5 w-5" /> : (isLogin ? 'Đăng Nhập' : 'Đăng Ký')}
-                </button>
-              </div>
-            </form>
-          )}
-
-          <div className="mt-6">
-            <div className="relative">
-              <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-gray-300" /></div>
-              <div className="relative flex justify-center text-sm"><span className="px-2 bg-white text-gray-500">Hoặc</span></div>
-            </div>
-
-            <div className="mt-6 grid grid-cols-1 gap-3">
-              <button 
-                onClick={() => {
-                    setFormData({ email: '', password: '', name: '' });
-                    setIsLogin(!isLogin);
-                    setIsForgotPassword(false);
-                }}
-                className="w-full flex justify-center items-center py-2.5 px-4 border border-gray-300 rounded-lg shadow-sm bg-white text-sm font-medium text-gray-700 hover:bg-gray-50 transition-all group"
-              >
-                {isLogin ? (
-                    <>Tạo tài khoản mới <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" /></>
-                ) : (
-                    <>Đã có tài khoản? Đăng nhập ngay</>
-                )}
-              </button>
-            </div>
+      <div className="w-full max-w-md animate-enter">
+        {/* Logo / Brand */}
+        <div className="text-center mb-8">
+          <div className="inline-flex items-center justify-center w-12 h-12 rounded-xl bg-blue-600 text-white shadow-lg shadow-blue-500/30 mb-4">
+            <span className="font-black text-xl">BK</span>
           </div>
+          <h1 className="text-3xl font-black text-slate-800 tracking-tight">
+            {isLogin ? "Chào mừng trở lại!" : "Tham gia cộng đồng"}
+          </h1>
+          <p className="text-slate-500 mt-2 text-sm font-medium">
+            {isLogin 
+              ? "Đăng nhập để tiếp tục mua bán và trao đổi." 
+              : "Tạo tài khoản miễn phí chỉ trong 30 giây."}
+          </p>
+        </div>
+
+        {/* Main Card */}
+        <div className="glass-panel rounded-3xl p-8 transition-all duration-500">
+          <form onSubmit={handleAuth} className="space-y-5">
+            
+            {/* Full Name (Register Only) */}
+            {!isLogin && (
+              <div className="space-y-1.5 animate-enter">
+                <label className="text-xs font-bold text-slate-600 uppercase tracking-wider ml-1">Họ và tên</label>
+                <div className="input-group flex items-center gap-3 bg-white/60 border border-slate-200 rounded-xl px-4 py-3 transition-all">
+                  <User size={18} className="text-slate-400" />
+                  <input
+                    name="fullName"
+                    value={formData.fullName}
+                    onChange={handleChange}
+                    placeholder="Nguyễn Văn A"
+                    className="flex-1 bg-transparent outline-none text-sm font-medium text-slate-800 placeholder-slate-400"
+                    required={!isLogin}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Email */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-600 uppercase tracking-wider ml-1">Email</label>
+              <div className="input-group flex items-center gap-3 bg-white/60 border border-slate-200 rounded-xl px-4 py-3 transition-all">
+                <Mail size={18} className="text-slate-400" />
+                <input
+                  type="email"
+                  name="email"
+                  value={formData.email}
+                  onChange={handleChange}
+                  placeholder="name@example.com"
+                  className="flex-1 bg-transparent outline-none text-sm font-medium text-slate-800 placeholder-slate-400"
+                  required
+                />
+              </div>
+            </div>
+
+            {/* Password */}
+            <div className="space-y-1.5">
+              <label className="text-xs font-bold text-slate-600 uppercase tracking-wider ml-1">Mật khẩu</label>
+              <div className="input-group flex items-center gap-3 bg-white/60 border border-slate-200 rounded-xl px-4 py-3 transition-all">
+                <Lock size={18} className="text-slate-400" />
+                <input
+                  type="password"
+                  name="password"
+                  value={formData.password}
+                  onChange={handleChange}
+                  placeholder="••••••••"
+                  className="flex-1 bg-transparent outline-none text-sm font-medium text-slate-800 placeholder-slate-400"
+                  required
+                  minLength={6}
+                />
+              </div>
+            </div>
+
+            {/* Submit Button */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full py-4 mt-2 rounded-xl bg-gradient-to-r from-[#00418E] to-[#00B0F0] text-white font-bold text-sm shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 disabled:opacity-70 disabled:cursor-not-allowed"
+            >
+              {loading ? (
+                <Loader size={20} className="animate-spin" />
+              ) : (
+                <>
+                  {isLogin ? "Đăng nhập" : "Tạo tài khoản"}
+                  <ArrowRight size={18} />
+                </>
+              )}
+            </button>
+          </form>
+
+          {/* Switch Mode */}
+          <div className="mt-6 pt-6 border-t border-slate-200 text-center">
+            <p className="text-sm text-slate-500 mb-4">
+              {isLogin ? "Chưa có tài khoản?" : "Đã có tài khoản?"}
+            </p>
+            <button
+              onClick={toggleMode}
+              className="px-6 py-2 rounded-full border border-slate-200 bg-white/50 text-slate-700 text-sm font-bold hover:bg-white hover:border-[#00418E] hover:text-[#00418E] transition-all shadow-sm"
+            >
+              {isLogin ? "Đăng ký ngay" : "Đăng nhập"}
+            </button>
+          </div>
+        </div>
+
+        {/* Footer Info */}
+        <div className="mt-8 text-center text-xs text-slate-400 font-medium">
+          <p>© {new Date().getFullYear()} HCMUT Marketplace. Bảo mật & An toàn.</p>
         </div>
       </div>
     </div>
