@@ -30,20 +30,28 @@ import {
   Smartphone,
   Laptop,
   GraduationCap,
+  Truck,
+  MapPin
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 
-// --- TYPES & ENUMS ---
+// --- TYPES & ENUMS (DÙNG LẠI CẤU TRÚC BẢNG PRODUCTS) ---
 type ID = string | number;
 type Timestamp = string;
 
-// Đổi tên Enum cho khớp với Post
-enum PostCategory {
-  TEXTBOOK = "Textbook",
-  ELECTRONICS = "Electronics",
-  SUPPLIES = "School Supplies",
-  CLOTHING = "Uniforms/Clothing",
-  OTHER = "Other",
+enum ProductCategory {
+  TEXTBOOK = "textbook",
+  ELECTRONICS = "electronics",
+  SUPPLIES = "supplies",
+  CLOTHING = "clothing",
+  OTHER = "other",
+}
+
+enum ProductStatus {
+  AVAILABLE = "available",
+  PENDING = "pending",
+  SOLD = "sold",
+  HIDDEN = "hidden",
 }
 
 enum SortOption {
@@ -54,27 +62,28 @@ enum SortOption {
   MOST_VIEWED = "most_viewed",
 }
 
-// Interface Post (thay cho Product)
-interface Post {
+// Interface Product (Cấu trúc cũ của bảng products)
+interface Product {
   id: ID;
   created_at: Timestamp;
   title: string;
   description: string;
   price: number;
-  images: string[];
-  category: string;
-  status: string;
-  owner_id: ID;
+  images: string[]; // Cột images dạng mảng
+  category: ProductCategory;
+  status: ProductStatus;
+  seller_id: ID;
   view_count: number;
-  condition: string;
+  like_count: number;
+  condition: "new" | "like_new" | "good" | "fair";
   tags: string[];
-  trade_type: "sell" | "swap" | "free";
-  location?: string;
-  published_at?: string;
+  trade_method: "direct" | "shipping"; // Cấu trúc cũ
+  location_name?: string;
+  postedAt?: string;
 }
 
 interface FilterState {
-  category: string | "all";
+  category: ProductCategory | "all";
   sort: SortOption;
   search: string;
 }
@@ -159,26 +168,26 @@ const AnimatedBackground = () => (
   </div>
 );
 
-// Đổi tên Hook: usePosts
-function usePosts(filter: FilterState) {
-  const [posts, setPosts] = useState<Post[]>([]);
+// Hook Fetch Products (Từ bảng PRODUCTS)
+function useProducts(filter: FilterState) {
+  const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchPosts = useCallback(async () => {
+  const fetchProducts = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
+      // Query bảng 'products'
       let query = supabase
-        .from("posts")
-        .select("*, post_images(path)") 
-        .eq("status", "approved") 
-        .eq("campus", "CS1"); 
+        .from("products")
+        .select("*")
+        .eq("status", "available"); // Logic cũ: status = available
 
       if (filter.category !== "all") query = query.eq("category", filter.category);
       if (filter.search) query = query.ilike("title", `%${filter.search}%`);
 
-      if (filter.sort === SortOption.NEWEST) query = query.order("published_at", { ascending: false });
+      if (filter.sort === SortOption.NEWEST) query = query.order("created_at", { ascending: false });
       else if (filter.sort === SortOption.PRICE_ASC) query = query.order("price", { ascending: true });
       else if (filter.sort === SortOption.PRICE_DESC) query = query.order("price", { ascending: false });
       else if (filter.sort === SortOption.MOST_VIEWED) query = query.order("view_count", { ascending: false });
@@ -186,10 +195,10 @@ function usePosts(filter: FilterState) {
       const { data, error: dbError } = await query.limit(12);
       if (dbError) throw dbError;
 
-      setPosts((data || []).map((p: any) => ({
+      setProducts((data || []).map((p: any) => ({
           ...p,
-          images: p.post_images ? p.post_images.map((img: any) => img.path) : [],
-          postedAt: p.published_at || p.created_at,
+          images: p.images || [], // Cột images là mảng chuỗi
+          postedAt: p.created_at,
         }))
       );
     } catch (err: any) {
@@ -200,8 +209,8 @@ function usePosts(filter: FilterState) {
     }
   }, [filter]);
 
-  useEffect(() => { fetchPosts(); }, [fetchPosts]);
-  return { posts, loading, error, refetch: fetchPosts };
+  useEffect(() => { fetchProducts(); }, [fetchProducts]);
+  return { products, loading, error, refetch: fetchProducts };
 }
 
 const Button: React.FC<ButtonProps> = ({ variant = "primary", size = "md", loading, icon, iconPosition = "left", fullWidth, children, className, disabled, ...props }) => {
@@ -227,29 +236,29 @@ const Button: React.FC<ButtonProps> = ({ variant = "primary", size = "md", loadi
   );
 };
 
-// Đổi tên Component: PostCard
-const PostCard: React.FC<{ post: Post }> = ({ post }) => {
+// --- PRODUCT CARD ---
+const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   const navigate = useNavigate();
   const [imageLoaded, setImageLoaded] = useState(false);
-  const displayImage = post.images && post.images.length > 0 ? post.images[0] : "https://placehold.co/400x300?text=No+Image";
+  const displayImage = product.images && product.images.length > 0 ? product.images[0] : "https://placehold.co/400x300?text=No+Image";
 
   const categoryLabels: Record<string, string> = {
-    [PostCategory.TEXTBOOK]: "Giáo trình",
-    [PostCategory.ELECTRONICS]: "Điện tử",
-    [PostCategory.SUPPLIES]: "Dụng cụ",
-    [PostCategory.CLOTHING]: "Thời trang",
-    [PostCategory.OTHER]: "Khác",
+    [ProductCategory.TEXTBOOK]: "Giáo trình",
+    [ProductCategory.ELECTRONICS]: "Điện tử",
+    [ProductCategory.SUPPLIES]: "Dụng cụ",
+    [ProductCategory.CLOTHING]: "Thời trang",
+    [ProductCategory.OTHER]: "Khác",
   };
-  const displayCategory = categoryLabels[post.category] || post.category;
+  const displayCategory = categoryLabels[product.category] || product.category;
 
   return (
-    // Lưu ý: Route vẫn giữ là /product/:id để tránh lỗi nếu App.tsx chưa đổi
-    <div onClick={() => navigate(`/product/${post.id}`)} className="glass-card-hover group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-white/60 bg-white/40 backdrop-blur-md shadow-sm transition-all duration-300">
+    // Quay lại link /product/
+    <div onClick={() => navigate(`/product/${product.id}`)} className="glass-card-hover group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl border border-white/60 bg-white/40 backdrop-blur-md shadow-sm transition-all duration-300">
       <div className="relative aspect-4/3 overflow-hidden bg-slate-100">
         {!imageLoaded && <div className="skeleton-shimmer absolute inset-0 h-full w-full" />}
         <img
           src={displayImage}
-          alt={post.title}
+          alt={product.title}
           className={Utils.cn("h-full w-full object-cover transition-transform duration-700 group-hover:scale-110", imageLoaded ? "opacity-100" : "opacity-0")}
           onLoad={() => setImageLoaded(true)}
           onError={(e) => { (e.target as HTMLImageElement).src = "https://placehold.co/400x300?text=Error"; setImageLoaded(true); }}
@@ -258,19 +267,19 @@ const PostCard: React.FC<{ post: Post }> = ({ post }) => {
         <div className="absolute inset-0 bg-gradient-to-tr from-white/0 via-white/30 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000 z-10 pointer-events-none"></div>
 
         <div className="absolute top-3 left-3 flex flex-col gap-1 z-20">
-          {(post.price === 0 || post.trade_type === 'free') && (
+          {product.price === 0 && (
             <span className="flex items-center gap-1 rounded-full bg-red-500/90 backdrop-blur-sm px-2.5 py-1 text-[10px] font-bold text-white shadow-lg border border-red-400">
               <Gift size={10} /> FREE
             </span>
           )}
-          {post.trade_type === 'swap' && (
-            <span className="flex items-center gap-1 rounded-full bg-purple-500/90 backdrop-blur-sm px-2.5 py-1 text-[10px] font-bold text-white shadow-lg border border-purple-400">
-              <RefreshCw size={10} /> SWAP
-            </span>
-          )}
-          {post.condition === "Brand New" && (
+          {product.condition === "new" && (
             <span className="rounded-full bg-green-500/90 backdrop-blur-sm px-2.5 py-1 text-[10px] font-bold text-white shadow-lg border border-green-400">
               NEW
+            </span>
+          )}
+          {product.trade_method === "shipping" && (
+            <span className="flex items-center gap-1 rounded-full bg-blue-500/90 backdrop-blur-sm px-2.5 py-1 text-[10px] font-bold text-white shadow-lg border border-blue-400">
+              <Truck size={10} /> SHIP
             </span>
           )}
         </div>
@@ -286,18 +295,18 @@ const PostCard: React.FC<{ post: Post }> = ({ post }) => {
             {displayCategory}
           </span>
           <span className="flex items-center gap-1 text-[10px] whitespace-nowrap text-slate-400">
-            <Clock size={10} /> {Utils.timeAgo(post.published_at || post.created_at)}
+            <Clock size={10} /> {Utils.timeAgo(product.postedAt || product.created_at)}
           </span>
         </div>
         <h3 className="mb-1 line-clamp-2 min-h-[40px] text-sm leading-relaxed font-bold text-slate-800 transition-colors group-hover:text-[#00418E]">
-          {post.title}
+          {product.title}
         </h3>
         <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3">
           <span className="text-lg font-black tracking-tight text-[#0F172A] group-hover:text-[#00418E] transition-colors">
-            {post.trade_type === 'free' || post.price === 0 ? "Tặng miễn phí" : post.trade_type === 'swap' ? "Trao đổi" : Utils.formatCurrency(post.price)}
+            {product.price === 0 ? "Tặng miễn phí" : Utils.formatCurrency(product.price)}
           </span>
           <div className="flex items-center gap-1 text-xs text-slate-400 bg-slate-100 px-2 py-1 rounded-full">
-            <Eye size={12} /> {post.view_count || 0}
+            <Eye size={12} /> {product.view_count || 0}
           </div>
         </div>
       </div>
@@ -308,7 +317,7 @@ const PostCard: React.FC<{ post: Post }> = ({ post }) => {
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<FilterState>({ category: "all", sort: SortOption.NEWEST, search: "" });
-  const { posts, loading, error, refetch } = usePosts(filter);
+  const { products, loading, error, refetch } = useProducts(filter);
 
   const handleSearch = (term: string) => {
     if (term.trim()) navigate(`/market?search=${encodeURIComponent(term)}`);
@@ -321,7 +330,6 @@ const HomePage: React.FC = () => {
 
       {/* --- HERO SECTION --- */}
       <section className="relative px-4 pt-32 pb-24">
-        {/* Floating Icons Background */}
         <div className="absolute inset-0 pointer-events-none z-0 overflow-hidden">
              <div className="absolute top-20 left-[10%] text-blue-200/40 animate-float"><BookOpen size={64} /></div>
              <div className="absolute top-40 right-[15%] text-purple-200/40 animate-float-delay"><Laptop size={80} /></div>
@@ -349,7 +357,6 @@ const HomePage: React.FC = () => {
             Tìm giáo trình, laptop, và dụng cụ học tập giá rẻ ngay tại trường.
           </p>
 
-          {/* Search Bar */}
           <div className="animate-enter delay-300 group relative z-20 mx-auto mb-20 w-full max-w-2xl">
             <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-[#00418E] to-[#00B0F0] opacity-30 blur-lg transition duration-1000 group-hover:opacity-50"></div>
             <form
@@ -367,7 +374,6 @@ const HomePage: React.FC = () => {
             </form>
           </div>
 
-          {/* Quick Actions Grid */}
           <div className="animate-enter delay-300 grid grid-cols-2 gap-4 px-4 md:grid-cols-4">
             {[
               { title: "Dạo Chợ", desc: "Săn deal hời", icon: <ShoppingBag size={24} />, link: "/market", color: "text-cyan-600", bg: "bg-cyan-50", border: "border-cyan-100" },
@@ -389,17 +395,17 @@ const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* --- CATEGORY BAR (Sticky) --- */}
+      {/* --- CATEGORY BAR --- */}
       <div className="sticky top-0 z-40 mb-12 border-y border-white/20 bg-white/70 py-4 shadow-sm backdrop-blur-xl">
         <div className="hide-scrollbar mx-auto max-w-7xl overflow-x-auto px-4">
           <div className="flex min-w-max justify-center gap-3">
             {[
               { id: "all", label: "Tất cả", icon: <Grid size={16} /> },
-              { id: PostCategory.TEXTBOOK, label: "Giáo trình", icon: <BookOpen size={16} /> },
-              { id: PostCategory.ELECTRONICS, label: "Công nghệ", icon: <Monitor size={16} /> },
-              { id: PostCategory.SUPPLIES, label: "Dụng cụ", icon: <Calculator size={16} /> },
-              { id: PostCategory.CLOTHING, label: "Đồng phục", icon: <Shirt size={16} /> },
-              { id: PostCategory.OTHER, label: "Khác", icon: <MoreHorizontal size={16} /> },
+              { id: ProductCategory.TEXTBOOK, label: "Giáo trình", icon: <BookOpen size={16} /> },
+              { id: ProductCategory.ELECTRONICS, label: "Công nghệ", icon: <Monitor size={16} /> },
+              { id: ProductCategory.SUPPLIES, label: "Dụng cụ", icon: <Calculator size={16} /> },
+              { id: ProductCategory.CLOTHING, label: "Đồng phục", icon: <Shirt size={16} /> },
+              { id: ProductCategory.OTHER, label: "Khác", icon: <MoreHorizontal size={16} /> },
             ].map((cat) => (
               <button
                 key={cat.id}
@@ -419,7 +425,7 @@ const HomePage: React.FC = () => {
         </div>
       </div>
 
-      {/* --- POSTS LIST --- */}
+      {/* --- PRODUCTS LIST --- */}
       <section className="mx-auto mb-24 min-h-[600px] max-w-7xl px-4">
         <div className="mb-10 flex flex-col items-center justify-between gap-6 md:flex-row">
           <div className="text-center md:text-left">
@@ -428,7 +434,7 @@ const HomePage: React.FC = () => {
               {filter.category === "all" ? "Mới lên sàn" : "Kết quả lọc"}
             </h2>
             <p className="mt-2 text-sm font-medium text-slate-500">
-              {loading ? "Đang cập nhật dữ liệu..." : `Hiển thị ${posts.length} tin đăng mới nhất.`}
+              {loading ? "Đang cập nhật dữ liệu..." : `Hiển thị ${products.length} sản phẩm mới nhất.`}
             </p>
           </div>
           <div className="flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
@@ -462,20 +468,20 @@ const HomePage: React.FC = () => {
               <p className="text-slate-500">Lỗi kết nối</p>
               <Button onClick={refetch} variant="outline" className="mt-4">Thử lại</Button>
             </div>
-          ) : posts.length > 0 ? (
-            posts.map((p) => (
-              <div key={p.id} className="animate-enter"><PostCard post={p} /></div>
+          ) : products.length > 0 ? (
+            products.map((p) => (
+              <div key={p.id} className="animate-enter"><ProductCard product={p} /></div>
             ))
           ) : (
             <div className="col-span-full rounded-3xl border-2 border-dashed border-slate-200 bg-white/50 py-20 text-center">
               <Ghost size={48} className="mx-auto mb-4 text-slate-300" />
-              <h3 className="text-xl font-bold text-slate-800">Chưa có tin đăng nào</h3>
+              <h3 className="text-xl font-bold text-slate-800">Chưa có sản phẩm nào</h3>
               <Link to="/post-item"><Button icon={<PlusCircle size={18} />} className="mt-4">Đăng tin ngay</Button></Link>
             </div>
           )}
         </div>
 
-        {posts.length > 0 && !loading && (
+        {products.length > 0 && !loading && (
           <div className="mt-16 text-center">
             <Link to="/market" className="group inline-flex items-center gap-2 rounded-full border border-white bg-white/80 backdrop-blur px-10 py-4 text-base font-bold text-slate-700 shadow-md transition-all hover:border-[#00418E] hover:text-[#00418E] hover:shadow-xl hover:scale-105">
               Xem toàn bộ thị trường <ArrowRight size={20} className="transition-transform group-hover:translate-x-1" />
@@ -526,7 +532,6 @@ const HomePage: React.FC = () => {
               </div>
             </div>
             
-            {/* AI Mockup Animation */}
             <div className="relative hidden lg:block">
               <div className="absolute inset-0 rotate-6 transform rounded-2xl bg-gradient-to-r from-blue-500 to-purple-600 opacity-30 blur-lg transition-transform group-hover:rotate-12 duration-700"></div>
               <div className="rotate-3 transform rounded-2xl border border-white/10 bg-slate-800/80 p-6 shadow-2xl backdrop-blur-xl transition-all duration-500 hover:rotate-0 hover:scale-105">
