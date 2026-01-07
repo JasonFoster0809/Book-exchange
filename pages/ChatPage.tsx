@@ -132,13 +132,30 @@ const ChatPage: React.FC = () => {
           const { data: newConv } = await supabase.from('conversations').insert({ participant1: user.id, participant2: pId }).select().single();
           if (newConv) setActiveConversation(newConv.id);
       }
-      const { data: profile } = await supabase.from('profiles').select('*').eq('id', pId).single();
-      setPartnerProfile(profile);
+      
+      // Fetch luôn info khi tạo/check conversation
+      fetchPartnerInfoInternal(pId);
   };
 
   const fetchMessages = async (convId: string) => {
       const { data } = await supabase.from('messages').select('*').eq('conversation_id', convId).order('created_at', { ascending: true });
       if (data) setMessages(data);
+  };
+
+  // --- HÀM BẠN MUỐN THÊM (ĐÃ ĐƯA VÀO ĐÚNG CHỖ) ---
+  const fetchPartnerInfoInternal = async (pId: string) => {
+      if (!pId) return;
+      const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', pId)
+          .single();
+      
+      if (data) {
+          setPartnerProfile(data);
+      } else {
+          console.error("Lỗi fetch profile đối phương:", error);
+      }
   };
 
   // ========================================================================
@@ -431,26 +448,5 @@ const ChatPage: React.FC = () => {
     </div>
   );
 };
-
-// Helper để fetch trong component con nếu cần
-const fetchMessages = async (convId: string) => {
-      const { data } = await supabase.from('messages').select('*').eq('conversation_id', convId).order('created_at', { ascending: true });
-      if (data) setMessages(data);
-  };
-
-  // --- THÊM ĐOẠN NÀY ---
-  const fetchPartnerInfoInternal = async (pId: string) => {
-      if (!pId) return;
-      const { data, error } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', pId)
-          .single();
-      
-      if (data) {
-          setPartnerProfile(data);
-      } else {
-          console.error("Lỗi fetch profile đối phương:", error);
-      }
 
 export default ChatPage;
