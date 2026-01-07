@@ -1,6 +1,4 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
 /* CSS thanh cuộn tùy chỉnh cho Chat */
 .custom-scrollbar::-webkit-scrollbar {
