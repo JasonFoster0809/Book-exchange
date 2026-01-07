@@ -20,7 +20,7 @@ const ChatStyles = () => (
     .chat-scrollbar::-webkit-scrollbar-track { background: transparent; }
     .chat-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
     
-    .msg-bubble { max-width: 75%; padding: 12px 16px; border-radius: 18px; position: relative; font-size: 14px; line-height: 1.5; }
+    .msg-bubble { max-width: 75%; padding: 12px 16px; border-radius: 18px; position: relative; font-size: 14px; line-height: 1.5; word-wrap: break-word; }
     .msg-me { background: #0084FF; color: white; border-bottom-right-radius: 4px; margin-left: auto; }
     .msg-you { background: #E4E6EB; color: #050505; border-bottom-left-radius: 4px; margin-right: auto; }
     
@@ -85,7 +85,14 @@ const ChatPage: React.FC = () => {
     const channel = supabase.channel(`chat_room:${activeConversation}`)
         // Lắng nghe tin nhắn mới
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversation}` }, (payload) => {
-            setMessages(prev => [...prev, payload.new]);
+            // Chỉ thêm nếu tin nhắn chưa tồn tại (tránh duplicate với hàm handleSendMessage)
+            setMessages(prev => {
+                const exists = prev.some(m => m.id === payload.new.id);
+                if (exists) return prev;
+                return [...prev, payload.new];
+            });
+            
+            // Chỉ phát âm thanh nếu không phải mình gửi
             if (user && payload.new.sender_id !== user.id) playMessageSound();
         })
         // Lắng nghe thay đổi trạng thái sản phẩm (Realtime Status Update)
@@ -151,6 +158,8 @@ const ChatPage: React.FC = () => {
               conversation_id: activeConversation, sender_id: user.id, type: 'text',
               content: `👋 TÔI MUỐN MUA MÓN NÀY!\nBạn xác nhận giao dịch nhé?`
           });
+          // Refresh lại tin nhắn sau khi gửi
+          fetchMessages(activeConversation);
           addToast("Đã gửi yêu cầu mua!", "success");
       } catch (error) { console.error(error); } 
       finally { setIsProcessing(false); }
@@ -173,6 +182,8 @@ const ChatPage: React.FC = () => {
               conversation_id: activeConversation, sender_id: user?.id, type: 'text',
               content: `✅ ĐÃ XÁC NHẬN!\nSản phẩm đang được giữ cho bạn. Hãy hẹn gặp để trao đổi.`
           });
+          
+          fetchMessages(activeConversation);
           
           // Update Local State ngay lập tức
           setTargetProduct({ ...targetProduct, status: 'pending', buyer_id: partnerProfile.id });
@@ -197,6 +208,7 @@ const ChatPage: React.FC = () => {
               content: `🎉 GIAO DỊCH THÀNH CÔNG!\nCảm ơn bạn đã ủng hộ.`
           });
 
+          fetchMessages(activeConversation);
           setTargetProduct({ ...targetProduct, status: 'sold' });
           addToast("Giao dịch hoàn tất!", "success");
       } catch (error) { console.error(error); }
@@ -215,6 +227,7 @@ const ChatPage: React.FC = () => {
               conversation_id: activeConversation, sender_id: user?.id, type: 'text',
               content: `⚠️ ĐÃ HỦY GIAO DỊCH.`
           });
+          fetchMessages(activeConversation);
           setTargetProduct({ ...targetProduct, status: 'available', buyer_id: null });
       } catch (error) { console.error(error); }
       finally { setIsProcessing(false); }
@@ -223,8 +236,29 @@ const ChatPage: React.FC = () => {
   const handleSendMessage = async (e?: React.FormEvent) => {
       e?.preventDefault();
       if (!newMessage.trim() || !activeConversation || !user) return;
-      const { error } = await supabase.from('messages').insert({ conversation_id: activeConversation, sender_id: user.id, content: newMessage, type: 'text' });
-      if (!error) { setNewMessage(''); await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeConversation); }
+
+      const messageContent = newMessage;
+      setNewMessage(''); // Xóa input ngay lập tức để tăng trải nghiệm UX
+
+      // Thêm .select().single() để lấy ngay row vừa tạo
+      const { data, error } = await supabase.from('messages').insert({ 
+          conversation_id: activeConversation, 
+          sender_id: user.id, 
+          content: messageContent, 
+          type: 'text' 
+      }).select().single();
+
+      if (!error && data) { 
+          // Cập nhật timestamp cuộc hội thoại
+          await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeConversation);
+          
+          // MANUAL UPDATE: Thêm ngay vào list messages hiện tại
+          setMessages(prev => [...prev, data]);
+      } else {
+          // Nếu lỗi thì hồi lại tin nhắn vào ô input
+          setNewMessage(messageContent);
+          console.error("Lỗi gửi tin nhắn:", error);
+      }
   };
 
   const filteredConversations = conversations.filter(c => c.partnerName?.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -339,14 +373,17 @@ const ChatPage: React.FC = () => {
                {/* MESSAGES */}
                <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-white chat-scrollbar">
                   {messages.map((msg, idx) => {
-                     const isMe = msg.sender_id === user?.id;
+                     // FIX: Sử dụng fallback cho cả snake_case và camelCase
+                     const senderId = msg.sender_id || msg.senderId; 
+                     const content = msg.content || msg.text;
+                     const isMe = senderId === user?.id;
                      
                      // Style riêng cho tin nhắn hệ thống (Giao dịch)
-                     if (msg.content.includes("YÊU CẦU") || msg.content.includes("ĐÃ XÁC NHẬN") || msg.content.includes("GIAO DỊCH THÀNH CÔNG")) {
+                     if (content && (content.includes("YÊU CẦU") || content.includes("ĐÃ XÁC NHẬN") || content.includes("GIAO DỊCH THÀNH CÔNG"))) {
                         return (
                            <div key={idx} className="flex justify-center my-4">
                               <span className="text-[11px] font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded-full border border-gray-200 text-center whitespace-pre-wrap">
-                                 {msg.content}
+                                 {content}
                               </span>
                            </div>
                         )
@@ -359,7 +396,7 @@ const ChatPage: React.FC = () => {
                               {msg.type === 'image' ? (
                                 <img src={msg.image_url} className="rounded-lg max-w-[200px]" onClick={() => window.open(msg.image_url)}/>
                               ) : (
-                                <p>{msg.content}</p>
+                                <p>{content}</p>
                               )}
                            </div>
                         </div>
@@ -396,8 +433,23 @@ const ChatPage: React.FC = () => {
 };
 
 // Helper để fetch trong component con nếu cần
-const fetchPartnerInfoInternal = async (pId: string) => {
-    // Logic fetch profile...
-};
+const fetchMessages = async (convId: string) => {
+      const { data } = await supabase.from('messages').select('*').eq('conversation_id', convId).order('created_at', { ascending: true });
+      if (data) setMessages(data);
+  };
+
+  // --- THÊM ĐOẠN NÀY ---
+  const fetchPartnerInfoInternal = async (pId: string) => {
+      if (!pId) return;
+      const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', pId)
+          .single();
+      
+      if (data) {
+          setPartnerProfile(data);
+      } else {
+          console.error("Lỗi fetch profile đối phương:", error);
 
 export default ChatPage;
