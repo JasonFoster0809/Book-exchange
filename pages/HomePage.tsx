@@ -4,14 +4,12 @@ import {
   Search,
   ArrowRight,
   Zap,
-  ShieldCheck,
   Users,
   BookOpen,
   Calculator,
   Shirt,
   Monitor,
   Grid,
-  MapPin,
   Flame,
   Gift,
   Eye,
@@ -21,15 +19,7 @@ import {
   Package,
   ChevronRight,
   Sparkles,
-  Bell,
-  X,
   Clock,
-  CheckCircle2,
-  Star,
-  Globe,
-  Server,
-  Smartphone,
-  Trophy,
   Smile,
   Rocket,
   PlayCircle,
@@ -43,19 +33,23 @@ import { supabase } from "../services/supabase";
 type ID = string | number;
 type Timestamp = string;
 
+// Enum khớp với SQL Schema mới
 enum ProductCategory {
-  TEXTBOOK = "textbook",
-  ELECTRONICS = "electronics",
-  SUPPLIES = "supplies",
-  CLOTHING = "clothing",
-  OTHER = "other",
+  TEXTBOOK = "Textbook",
+  ELECTRONICS = "Electronics",
+  SUPPLIES = "School Supplies",
+  CLOTHING = "Uniforms/Clothing",
+  OTHER = "Other",
 }
 
-enum ProductStatus {
-  AVAILABLE = "available",
-  PENDING = "pending",
+// Update Enum Status theo SQL (approved, pending_approval...)
+enum PostStatus {
+  PENDING = "pending_approval",
+  APPROVED = "approved",
+  REJECTED = "rejected",
+  ARCHIVED = "archived",
+  RESERVED = "reserved",
   SOLD = "sold",
-  HIDDEN = "hidden",
 }
 
 enum SortOption {
@@ -66,46 +60,33 @@ enum SortOption {
   MOST_VIEWED = "most_viewed",
 }
 
-enum TradeMethod {
-  DIRECT = "direct",
-  SHIPPING = "shipping",
-}
-
+// Interface Product mapping với bảng 'posts'
 interface Product {
   id: ID;
   created_at: Timestamp;
   title: string;
   description: string;
   price: number;
-  images: string[];
-  category: ProductCategory;
-  status: ProductStatus;
-  seller_id: ID;
+  images: string[]; // Sẽ map từ bảng post_images
+  category: string;
+  status: string;
+  owner_id: ID; // Đổi seller_id -> owner_id
   view_count: number;
-  like_count: number;
-  condition: "new" | "like_new" | "good" | "fair";
+  condition: string;
   tags: string[];
-  trade_method: TradeMethod;
-  location_name?: string;
-  postedAt?: string;
+  trade_type: "sell" | "swap" | "free"; // Thêm trade_type từ SQL
+  location?: string; // SQL column: location
+  published_at?: string; // SQL column: published_at
 }
 
 interface FilterState {
-  category: ProductCategory | "all";
+  category: string | "all";
   sort: SortOption;
-  minPrice?: number;
-  maxPrice?: number;
   search: string;
 }
 
 interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
-  variant?:
-    | "primary"
-    | "secondary"
-    | "outline"
-    | "ghost"
-    | "danger"
-    | "success";
+  variant?: "primary" | "secondary" | "outline" | "ghost" | "danger" | "success";
   size?: "xs" | "sm" | "md" | "lg" | "xl";
   loading?: boolean;
   icon?: React.ReactNode;
@@ -122,6 +103,7 @@ const Utils = {
     }).format(amount);
   },
   timeAgo: (dateString: string): string => {
+    if (!dateString) return "Vừa xong";
     const now = new Date();
     const date = new Date(dateString);
     const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
@@ -143,7 +125,7 @@ const GlobalStyles = () => (
     @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
     .animate-enter { animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
     .glass-card-hover:hover { transform: translateY(-4px); box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1); border-color: var(--secondary); }
-    .skeleton-shimmer { background: linear-linear(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
+    .skeleton-shimmer { background: linear-gradient(90deg, #f1f5f9 25%, #e2e8f0 50%, #f1f5f9 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
     @keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
   `}</style>
 );
@@ -201,6 +183,7 @@ const ParticleCanvas = () => {
   );
 };
 
+// --- HOOK FETCH SẢN PHẨM MỚI (UPDATE CHO TABLE POSTS) ---
 function useProducts(filter: FilterState) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -210,31 +193,47 @@ function useProducts(filter: FilterState) {
     setLoading(true);
     setError(null);
     try {
+      // Query bảng 'posts' và join 'post_images'
       let query = supabase
-        .from("products")
-        .select("*")
-        .eq("status", ProductStatus.AVAILABLE);
-      if (filter.category !== "all")
+        .from("posts")
+        .select("*, post_images(path)") 
+        .eq("status", "approved") // Chỉ lấy bài đã duyệt
+        .eq("campus", "CS1"); // Mặc định CS1 theo logic SQL mới
+
+      if (filter.category !== "all") {
         query = query.eq("category", filter.category);
-      if (filter.search) query = query.ilike("title", `%${filter.search}%`);
+      }
+        
+      if (filter.search) {
+        query = query.ilike("title", `%${filter.search}%`);
+      }
+
+      // Sort logic
       if (filter.sort === SortOption.NEWEST)
-        query = query.order("posted_at", { ascending: false });
+        query = query.order("published_at", { ascending: false }); // SQL dùng published_at
       else if (filter.sort === SortOption.PRICE_ASC)
         query = query.order("price", { ascending: true });
       else if (filter.sort === SortOption.PRICE_DESC)
         query = query.order("price", { ascending: false });
+      else if (filter.sort === SortOption.MOST_VIEWED)
+        query = query.order("view_count", { ascending: false });
 
       const { data, error: dbError } = await query.limit(12);
       if (dbError) throw dbError;
+
+      // Transform Data: Map cấu trúc SQL về cấu trúc UI
       setProducts(
         (data || []).map((p: any) => ({
           ...p,
-          images: p.images || [],
-          postedAt: p.posted_at || p.created_at,
-          trade_method: p.trade_method as TradeMethod,
-        })),
+          // Lấy ảnh từ bảng quan hệ post_images, sắp xếp theo sort_order nếu cần
+          images: p.post_images 
+            ? p.post_images.map((img: any) => img.path)
+            : [],
+          postedAt: p.published_at || p.created_at,
+        }))
       );
     } catch (err: any) {
+      console.error("Fetch Error:", err);
       setError(err.message);
     } finally {
       setLoading(false);
@@ -312,13 +311,16 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
       ? product.images[0]
       : "https://placehold.co/400x300?text=No+Image";
 
-  const categoryLabels: Record<ProductCategory, string> = {
+  // Map category code to label Vietnamese
+  const categoryLabels: Record<string, string> = {
     [ProductCategory.TEXTBOOK]: "Giáo trình",
     [ProductCategory.ELECTRONICS]: "Điện tử",
     [ProductCategory.SUPPLIES]: "Dụng cụ",
     [ProductCategory.CLOTHING]: "Thời trang",
     [ProductCategory.OTHER]: "Khác",
   };
+
+  const displayCategory = categoryLabels[product.category] || product.category;
 
   return (
     <div
@@ -343,14 +345,20 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
             setImageLoaded(true);
           }}
         />
-        <div className="absolute inset-0 bg-linear-to-t from-slate-900/60 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+        <div className="absolute inset-0 bg-gradient-to-t from-slate-900/60 via-transparent to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
         <div className="absolute top-3 left-3 flex flex-col gap-1">
-          {product.price === 0 && (
+          {/* Logic hiển thị Badge dựa trên trade_type và price */}
+          {(product.price === 0 || product.trade_type === 'free') && (
             <span className="flex items-center gap-1 rounded bg-red-500 px-2 py-1 text-[10px] font-bold text-white shadow-lg">
               <Gift size={10} /> FREE
             </span>
           )}
-          {product.condition === "new" && (
+          {product.trade_type === 'swap' && (
+            <span className="flex items-center gap-1 rounded bg-purple-500 px-2 py-1 text-[10px] font-bold text-white shadow-lg">
+              <RefreshCw size={10} /> SWAP
+            </span>
+          )}
+          {product.condition === "Brand New" && (
             <span className="rounded bg-green-500 px-2 py-1 text-[10px] font-bold text-white shadow-lg">
               NEW
             </span>
@@ -363,11 +371,11 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
       <div className="flex flex-1 flex-col p-4">
         <div className="mb-2 flex items-start justify-between">
           <span className="max-w-[60%] truncate rounded border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-bold tracking-wider text-[#00418E] uppercase">
-            {categoryLabels[product.category]}
+            {displayCategory}
           </span>
           <span className="flex items-center gap-1 text-[10px] whitespace-nowrap text-slate-400">
             <Clock size={10} />{" "}
-            {Utils.timeAgo(product.postedAt || product.created_at)}
+            {Utils.timeAgo(product.published_at || product.created_at)}
           </span>
         </div>
         <h3 className="mb-1 line-clamp-2 min-h-[40px] text-sm leading-relaxed font-bold text-slate-800 transition-colors group-hover:text-[#00418E]">
@@ -375,9 +383,11 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
         </h3>
         <div className="mt-auto flex items-center justify-between border-t border-slate-50 pt-3">
           <span className="text-lg font-black tracking-tight text-slate-900">
-            {product.price === 0
+            {product.trade_type === 'free' || product.price === 0
               ? "Tặng miễn phí"
-              : Utils.formatCurrency(product.price)}
+              : product.trade_type === 'swap' 
+                ? "Trao đổi"
+                : Utils.formatCurrency(product.price)}
           </span>
           <div className="flex items-center gap-1 text-xs text-slate-400">
             <Eye size={12} /> {product.view_count || 0}
@@ -404,7 +414,7 @@ const HomePage: React.FC = () => {
     <div className="relative min-h-screen font-sans selection:bg-[#00418E] selection:text-white">
       <GlobalStyles />
       <ParticleCanvas />
-      <div className="aurora-bg bg-radial-linear pointer-events-none absolute top-0 left-0 -z-10 h-[120vh] w-full from-blue-500/5 to-transparent"></div>
+      <div className="aurora-bg bg-radial-gradient pointer-events-none absolute top-0 left-0 -z-10 h-[120vh] w-full from-blue-500/5 to-transparent"></div>
 
       <section className="relative overflow-hidden px-4 pt-32 pb-20">
         <div className="relative z-10 mx-auto max-w-5xl text-center">
@@ -421,7 +431,7 @@ const HomePage: React.FC = () => {
           </div>
           <h1 className="animate-enter mb-6 text-5xl leading-[1.1] font-black tracking-tight text-slate-900 drop-shadow-sm md:text-7xl">
             Trao đổi đồ cũ <br />
-            <span className="bg-linear-to-r from-[#00418E] via-[#00B0F0] to-purple-600 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-[#00418E] via-[#00B0F0] to-purple-600 bg-clip-text text-transparent">
               Thông minh & Tiết kiệm
             </span>
           </h1>
@@ -430,7 +440,7 @@ const HomePage: React.FC = () => {
             trình, laptop, và dụng cụ học tập giá rẻ ngay tại trường.
           </p>
           <div className="animate-enter group relative z-20 mx-auto mb-16 w-full max-w-2xl">
-            <div className="absolute -inset-1 rounded-full bg-linear-to-r from-[#00418E] to-[#00B0F0] opacity-20 blur transition duration-1000 group-hover:opacity-40"></div>
+            <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-[#00418E] to-[#00B0F0] opacity-20 blur transition duration-1000 group-hover:opacity-40"></div>
             <form
               onSubmit={(e) => {
                 e.preventDefault();
@@ -715,7 +725,7 @@ const HomePage: React.FC = () => {
               </div>
               <h2 className="text-4xl leading-tight font-black md:text-5xl">
                 Đăng tin siêu tốc với <br />
-                <span className="bg-linear-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                <span className="bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
                   Công nghệ AI
                 </span>
               </h2>
@@ -742,7 +752,7 @@ const HomePage: React.FC = () => {
               </div>
             </div>
             <div className="relative hidden lg:block">
-              <div className="absolute inset-0 rotate-6 transform rounded-2xl bg-linear-to-r from-blue-500 to-purple-600 opacity-30 blur-lg"></div>
+              <div className="absolute inset-0 rotate-6 transform rounded-2xl bg-gradient-to-r from-blue-500 to-purple-600 opacity-30 blur-lg"></div>
               <div className="rotate-3 transform rounded-2xl border border-white/10 bg-slate-800/50 p-6 shadow-2xl backdrop-blur-xl transition-transform duration-500 hover:rotate-0">
                 <div className="mb-6 flex items-center gap-4 border-b border-white/10 pb-4">
                   <div className="flex h-12 w-12 items-center justify-center rounded-full bg-blue-500 shadow-lg">
