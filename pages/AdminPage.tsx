@@ -45,7 +45,7 @@ interface VerificationRequest {
   id: string;
   user_id: string;
   image_url: string; // URL ảnh thẻ sinh viên
-  student_code: string; // MSSV từ form
+  student_code: string; // FIX: Đổi từ student_id thành student_code cho khớp DB
   status: "pending" | "approved" | "rejected";
   created_at: string;
   profiles: {
@@ -168,7 +168,7 @@ const AdminPage: React.FC = () => {
     const banUntil = days
       ? new Date(Date.now() + days * 24 * 60 * 60 * 1000).toISOString()
       : null;
-    const isBanned = !!days; // Nếu có ngày -> Ban, null -> Unban
+    const isBanned = !!days;
 
     if (
       !window.confirm(
@@ -180,18 +180,16 @@ const AdminPage: React.FC = () => {
       return;
 
     try {
-      // Update DB Profiles
       const { error } = await supabase
         .from("profiles")
         .update({
           ban_until: banUntil,
-          is_banned: isBanned, // Cập nhật cờ is_banned cho chắc chắn
+          is_banned: isBanned,
         })
         .eq("id", userId);
 
       if (error) throw error;
 
-      // Update Local State
       setUsersList((prev) =>
         prev.map((u) =>
           u.id === userId
@@ -216,26 +214,23 @@ const AdminPage: React.FC = () => {
     studentCode?: string,
   ) => {
     try {
-      // 1. Update request status
       const { error: reqError } = await supabase
         .from("verification_requests")
         .update({ status })
         .eq("id", reqId);
       if (reqError) throw reqError;
 
-      // 2. Nếu approve -> Update profile user (Verified + MSSV)
       if (status === "approved") {
         const { error: profileError } = await supabase
           .from("profiles")
           .update({
-            is_verified: true, // DB cũ dùng is_verified, DB mới dùng verified_status='verified'
-            student_id: studentCode,
+            verified_status: "verified", // FIX: Dùng cột mới
+            student_code: studentCode,   // FIX: Dùng cột mới
           })
           .eq("id", userId);
         if (profileError) throw profileError;
       }
 
-      // Update Local State
       setVerifications((prev) => prev.filter((v) => v.id !== reqId));
       addToast(
         status === "approved"
@@ -281,12 +276,12 @@ const AdminPage: React.FC = () => {
     }
   };
 
-  // Filter Users Logic
+  // Filter Users Logic (FIX: Dùng student_code)
   const filteredUsers = usersList.filter(
     (u) =>
       u.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
       u.email?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      u.student_id?.toLowerCase().includes(searchTerm.toLowerCase()),
+      u.student_code?.toLowerCase().includes(searchTerm.toLowerCase()),
   );
 
   if (loading || isLoadingData)
@@ -404,6 +399,9 @@ const AdminPage: React.FC = () => {
                                 </p>
                                 <p className="text-xs text-slate-500">
                                   {u.email}
+                                </p>
+                                <p className="text-[10px] text-slate-400 font-bold">
+                                  MSSV: {u.student_code || '---'}
                                 </p>
                               </div>
                             </div>
