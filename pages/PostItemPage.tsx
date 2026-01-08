@@ -1,23 +1,21 @@
 import React, { useState, useEffect, useReducer } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import {
-  Upload, X, Image as ImageIcon, DollarSign, Tag, FileText,
-  ArrowRight, ArrowLeft, CheckCircle2, Sparkles, Loader2,
-  Camera, Box, AlertCircle, MapPin, Wand2, Trash2, Edit3,
-  RotateCcw, Save, Eye, Smartphone, Search, Rocket, ShieldCheck, Check
+  Upload, X, Image as ImageIcon, FileText, ArrowRight, ArrowLeft,
+  CheckCircle2, Loader2, Camera, MapPin, Rocket
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { ProductCategory, ProductCondition, TradeMethod } from "../types";
 
-// --- CONFIG & STYLES ---
+// --- CONFIG ---
 const CATEGORIES = [
-  { value: ProductCategory.TEXTBOOK, label: "Giáo trình & Tài liệu", icon: "📚" },
-  { value: ProductCategory.ELECTRONICS, label: "Thiết bị điện tử", icon: "💻" },
-  { value: ProductCategory.SUPPLIES, label: "Dụng cụ học tập", icon: "📐" },
-  { value: ProductCategory.CLOTHING, label: "Thời trang sinh viên", icon: "👕" },
-  { value: ProductCategory.OTHER, label: "Khác", icon: "📦" },
+  { value: ProductCategory.TEXTBOOK, label: "Giáo trình & Tài liệu" },
+  { value: ProductCategory.ELECTRONICS, label: "Thiết bị điện tử" },
+  { value: ProductCategory.SUPPLIES, label: "Dụng cụ học tập" },
+  { value: ProductCategory.CLOTHING, label: "Thời trang sinh viên" },
+  { value: ProductCategory.OTHER, label: "Khác" },
 ];
 
 const CONDITIONS = [
@@ -29,9 +27,10 @@ const CONDITIONS = [
 
 const LOCATIONS = ["Sảnh H6", "Canteen B4", "Thư viện", "Tòa A4", "Khu C6", "Nhà xe"];
 
+// --- STYLES ---
 const VisualEngine = () => (
   <style>{`
-    :root { --primary: #00418E; --secondary: #00B0F0; }
+    :root { --primary: #00418E; }
     body { background-color: #F8FAFC; color: #0F172A; }
     .glass-panel { background: rgba(255, 255, 255, 0.8); backdrop-filter: blur(20px); border: 1px solid rgba(255, 255, 255, 0.6); box-shadow: 0 20px 40px -10px rgba(0, 65, 142, 0.1); }
     .input-modern { width: 100%; padding: 16px; border-radius: 16px; border: 2px solid #E2E8F0; background: #F8FAFC; transition: all 0.2s; outline: none; }
@@ -52,8 +51,6 @@ const formReducer = (state: FormState, action: any): FormState => {
   switch (action.type) {
     case "SET_FIELD": return { ...state, [action.field]: action.value };
     case "RESET": return action.payload;
-    case "ADD_TAG": return state.tags.includes(action.tag) ? state : { ...state, tags: [...state.tags, action.tag] };
-    case "REMOVE_TAG": return { ...state, tags: state.tags.filter(t => t !== action.tag) };
     default: return state;
   }
 };
@@ -69,7 +66,6 @@ const PostItemPage: React.FC = () => {
   const [images, setImages] = useState<File[]>([]);
   const [previewUrls, setPreviewUrls] = useState<string[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [aiAnalyzing, setAiAnalyzing] = useState(false);
 
   const [state, dispatch] = useReducer(formReducer, {
     title: "", description: "", price: "",
@@ -77,7 +73,6 @@ const PostItemPage: React.FC = () => {
     tradeMethod: TradeMethod.DIRECT, location: "Sảnh H6", tags: []
   });
 
-  // Load Edit Data
   useEffect(() => {
     if (editId) {
       const load = async () => {
@@ -91,8 +86,8 @@ const PostItemPage: React.FC = () => {
               price: data.price.toString(),
               category: data.category,
               condition: data.condition,
-              tradeMethod: data.trade_method, // Map từ DB snake_case
-              location: data.location_name || "", // Map từ DB snake_case
+              tradeMethod: data.trade_method, // Map DB snake_case
+              location: data.location_name || "", // Map DB snake_case
               tags: data.tags || []
             }
           });
@@ -119,7 +114,6 @@ const PostItemPage: React.FC = () => {
     try {
       let finalUrls = previewUrls.filter(u => u.startsWith("http"));
       
-      // Upload ảnh mới
       if (images.length > 0) {
         for (const file of images) {
           const path = `${user.id}/${Date.now()}_${Math.random().toString(36).substr(2,9)}`;
@@ -131,7 +125,6 @@ const PostItemPage: React.FC = () => {
         }
       }
 
-      // Payload gửi lên DB (Snake Case)
       const payload = {
         title: state.title,
         description: state.description,
@@ -161,8 +154,6 @@ const PostItemPage: React.FC = () => {
     }
   };
 
-  // ... (Phần render UI giữ nguyên, chỉ sửa lại phần hiển thị Step cho ngắn gọn)
-  
   if (isRestricted) return <div className="h-screen flex items-center justify-center text-red-500 font-bold">Tài khoản bị hạn chế</div>;
 
   return (
@@ -179,7 +170,6 @@ const PostItemPage: React.FC = () => {
           <button onClick={() => navigate('/market')} className="text-slate-400 hover:text-red-500"><X size={28}/></button>
         </div>
 
-        {/* STEPPER UI */}
         <div className="glass-panel rounded-[2rem] p-8 animate-enter">
           {step === 1 && (
             <div className="space-y-6">
