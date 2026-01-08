@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Heart, MessageCircle, Share2, ArrowLeft, Eye, MapPin, Clock, Star, Box, CheckCircle2, ShieldCheck, Calendar } from "lucide-react";
+import { Heart, MessageCircle, Share2, ArrowLeft, Eye, MapPin, Clock, Star, Box, CheckCircle2, ShieldCheck, Calendar,Loader2,ArrowRight } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
