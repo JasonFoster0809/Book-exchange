@@ -43,7 +43,7 @@ export enum HuntStatus {
   COMPLETED = 'completed'
 }
 
-// --- THÊM CÁI NÀY ĐỂ FIX LỖI MARKETPLACE ---
+// --- THÊM ENUM NÀY ĐỂ FIX LỖI MARKETPLACE ---
 export enum SortOption {
   NEWEST = "newest",
   PRICE_ASC = "price_asc",
@@ -127,7 +127,7 @@ export interface Product {
   like_count?: number;
   tags?: string[];
 
-  // UI Fields
+  // UI Fields (Map từ DB sang)
   sellerId: string;         
   postedAt: string;         
   tradeMethod: TradeMethod | string; 
