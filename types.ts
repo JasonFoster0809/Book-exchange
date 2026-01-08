@@ -43,12 +43,18 @@ export enum HuntStatus {
   COMPLETED = 'completed'
 }
 
+// --- THÊM CÁI NÀY ĐỂ FIX LỖI MARKETPLACE ---
+export enum SortOption {
+  NEWEST = "newest",
+  PRICE_ASC = "price_asc",
+  PRICE_DESC = "price_desc",
+  MOST_VIEWED = "most_viewed",
+}
+
 // ==========================================
 // 2. USER & PROFILE INTERFACES
 // ==========================================
 
-// Interface dùng trong AuthContext (Frontend Logic)
-// Dữ liệu này đã được map từ DBProfile sang
 export interface User {
   id: string;
   email?: string;
@@ -56,17 +62,15 @@ export interface User {
   avatar: string;
   role: 'user' | 'admin';
   
-  // Các trường đã map lại tên cho dễ dùng ở Frontend
-  studentId: string;   // Map từ student_code
-  isVerified: boolean; // Map từ verified_status
-  banned?: boolean;    // Map từ is_banned
+  studentId: string;   
+  isVerified: boolean; 
+  banned?: boolean;    
   banUntil?: string | null; 
   
   rating?: number; 
   completedTrades?: number;
 }
 
-// Interface khớp 100% với bảng 'profiles' trong Database (SQL Mới)
 export interface DBProfile {
   id: string;
   name: string | null;
@@ -77,8 +81,7 @@ export interface DBProfile {
   major?: string | null;
   academic_year?: string | null;
   
-  // --- CỘT MỚI TRONG SQL ---
-  student_code: string | null; // Thay vì student_id cũ
+  student_code: string | null; 
   verified_status: 'unverified' | 'pending' | 'verified' | 'rejected';
   is_banned?: boolean;
   ban_until?: string | null;
@@ -90,22 +93,19 @@ export interface DBProfile {
   last_seen?: string;
 }
 
-// Interface cho bảng 'verification_requests' (Admin duyệt SV)
 export interface VerificationRequest {
   id: string;
   user_id: string;
-  student_code: string; // Khớp DB
+  student_code: string;
   image_url: string;
   status: 'pending' | 'approved' | 'rejected';
   admin_note?: string;
   created_at: string;
-  
-  // Join tables
   profiles?: DBProfile; 
 }
 
 // ==========================================
-// 3. PRODUCT INTERFACE (HYBRID)
+// 3. PRODUCT INTERFACE
 // ==========================================
 
 export interface Product {
@@ -118,8 +118,7 @@ export interface Product {
   status: ProductStatus | string;
   condition: ProductCondition | string;
   
-  // --- FIELDS TỪ DATABASE (snake_case) ---
-  // Có thể undefined nếu chưa fetch hoặc dùng alias
+  // DB Fields
   created_at?: string;      
   seller_id?: string;       
   location_name?: string;   
@@ -128,23 +127,19 @@ export interface Product {
   like_count?: number;
   tags?: string[];
 
-  // --- FIELDS CHO UI (camelCase - Map từ DB sang) ---
-  // Bắt buộc có để code cũ không bị lỗi
-  sellerId: string;         // Map từ seller_id
-  postedAt: string;         // Map từ created_at
-  tradeMethod: TradeMethod | string; // Map từ trade_method
-  location?: string;        // Map từ location_name
+  // UI Fields
+  sellerId: string;         
+  postedAt: string;         
+  tradeMethod: TradeMethod | string; 
+  location?: string;        
   
-  // --- FIX LỖI BUILD (Các trường cũ vẫn đang được gọi) ---
-  isLookingToBuy?: boolean; // Cần thêm dòng này để fix lỗi ProductCard
+  isLookingToBuy?: boolean; 
   buyerId?: string;
   campus?: Campus | string; 
   
-  // --- RELATIONS (JOIN DATA) ---
-  seller?: User | any;      // User object đã map
-  profiles?: DBProfile;     // Raw profile object từ DB
+  seller?: User | any;      
+  profiles?: DBProfile;     
 
-  // --- UI STATES ---
   isLiked?: boolean;
   isGoodPrice?: boolean;
 }
@@ -177,13 +172,10 @@ export interface ChatSession {
   id: string;
   participant1: string;
   participant2: string;
-  
-  // UI Helper fields
   partnerName?: string;
   partnerAvatar?: string;
   partnerId?: string;
   isPartnerRestricted?: boolean;
-  
   last_message?: string;
   unread_count?: number;
   updated_at?: string;
@@ -196,14 +188,12 @@ export interface Comment {
   content: string;
   created_at: string;
   
-  // UI Helper fields
   productId?: string;
   userId?: string;
   userName?: string;
   userAvatar?: string;
   createdAt?: string;
   
-  // Relations
   user?: { name: string; avatar_url: string };
   parentId?: string | null;
   replies?: Comment[];
@@ -216,8 +206,6 @@ export interface Report {
   reason: string;
   status: 'pending' | 'resolved' | 'dismissed';
   created_at: string;
-  
-  // Relations
   product?: Product;
   reporter?: DBProfile;
 }
