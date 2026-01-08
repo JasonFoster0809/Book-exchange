@@ -84,6 +84,9 @@ export interface Product {
   tradeMethod: TradeMethod | string; // Map từ trade_method
   location?: string;        // Map từ location_name
   
+  // --- FIX LỖI BUILD: Thêm lại trường này (Optional) ---
+  isLookingToBuy?: boolean; 
+  
   buyerId?: string;
   campus?: Campus | string; 
   
