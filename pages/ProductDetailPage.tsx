@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import {
   Heart, MessageCircle, Share2, ArrowLeft, Eye, MapPin,
   Clock, Star, Box, ShieldCheck, Calendar, ArrowRight,
-  Loader2, AlertTriangle, User, CheckCircle2
+  Loader2, AlertTriangle, User, CheckCircle2, Flag
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -14,19 +14,27 @@ import { Product } from "../types";
 const VisualEngine = () => (
   <style>{`
     :root { --primary: #00418E; }
-    body { background-color: #F8FAFC; }
+    body { background-color: #F8FAFC; font-family: 'Inter', sans-serif; }
     
     .glass-bar { 
-      background: rgba(255, 255, 255, 0.85); 
+      background: rgba(255, 255, 255, 0.8); 
       backdrop-filter: blur(16px); 
-      border-bottom: 1px solid rgba(255, 255, 255, 0.5); 
+      border-bottom: 1px solid rgba(255, 255, 255, 0.6); 
+      z-index: 50;
     }
 
     .glass-panel { 
-      background: rgba(255, 255, 255, 0.75); 
+      background: rgba(255, 255, 255, 0.8); 
       backdrop-filter: blur(24px); 
-      border: 1px solid rgba(255, 255, 255, 0.6); 
+      border: 1px solid rgba(255, 255, 255, 0.7); 
       box-shadow: 0 20px 40px -10px rgba(0, 65, 142, 0.1); 
+    }
+
+    .aurora-bg {
+      position: fixed; top: 0; left: 0; right: 0; height: 100vh; z-index: -1;
+      background: radial-gradient(at 0% 0%, rgba(0, 71, 171, 0.15) 0px, transparent 50%),
+                  radial-gradient(at 100% 0%, rgba(0, 229, 255, 0.1) 0px, transparent 50%);
+      filter: blur(80px);
     }
 
     .animate-enter { animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
@@ -36,13 +44,16 @@ const VisualEngine = () => (
   `}</style>
 );
 
-const AuroraBackground = () => (
-  <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
-    <div className="absolute top-0 left-0 w-full h-[600px] bg-gradient-to-b from-blue-50/80 to-transparent"></div>
-    <div className="absolute top-[-10%] right-[-10%] w-[600px] h-[600px] bg-blue-400/10 rounded-full mix-blend-multiply filter blur-[100px]"></div>
-    <div className="absolute top-[30%] left-[-10%] w-[500px] h-[500px] bg-cyan-400/10 rounded-full mix-blend-multiply filter blur-[100px]"></div>
-  </div>
-);
+// Mở rộng interface Product để chứa thông tin người bán
+interface ProductDetail extends Product {
+  seller?: {
+    id: string;
+    name: string;
+    avatar_url: string;
+    verified_status: string;
+    student_code: string;
+  };
+}
 
 const ProductDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
@@ -50,8 +61,7 @@ const ProductDetailPage: React.FC = () => {
   const { user: currentUser } = useAuth();
   const { addToast } = useToast();
 
-  const [product, setProduct] = useState<Product | null>(null);
-  const [seller, setSeller] = useState<any>(null);
+  const [product, setProduct] = useState<ProductDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeImg, setActiveImg] = useState(0);
   const [isLiked, setIsLiked] = useState(false);
@@ -61,32 +71,32 @@ const ProductDetailPage: React.FC = () => {
       if (!id) return;
       setLoading(true);
       try {
-        // 1. Fetch Product + Seller Info
+        // 1. Fetch Product + Seller Profile (Relation)
         const { data: pData, error } = await supabase
           .from("products")
-          .select(`*, profiles:seller_id (*)`)
+          .select(`*, profiles:seller_id(id, name, avatar_url, verified_status, student_code)`)
           .eq("id", id)
           .single();
 
         if (error || !pData) throw new Error("Sản phẩm không tồn tại");
 
-        // 2. Map Data (Snake -> Camel)
-        const mappedProduct: Product = {
+        // 2. Map Data (DB Snake_case -> App CamelCase)
+        const mappedProduct: ProductDetail = {
           ...pData,
           sellerId: pData.seller_id,
+          seller: pData.profiles, // Thông tin người bán
           images: pData.images || [],
-          postedAt: pData.created_at,
+          postedAt: pData.created_at, // Map created_at -> postedAt
           tradeMethod: pData.trade_method,
           location: pData.location_name || "TP.HCM"
         };
 
         setProduct(mappedProduct);
-        setSeller(pData.profiles);
         
-        // 3. Increment View
+        // 3. Tăng View (RPC)
         supabase.rpc("increment_view_count", { product_id: id });
 
-        // 4. Check Saved Status
+        // 4. Kiểm tra trạng thái Lưu tin (Saved)
         if (currentUser) {
           const { data: sData } = await supabase
             .from("saved_products")
@@ -98,6 +108,7 @@ const ProductDetailPage: React.FC = () => {
         }
 
       } catch (err) {
+        console.error(err);
         addToast("Không tìm thấy sản phẩm", "error");
         navigate("/market");
       } finally {
@@ -111,9 +122,8 @@ const ProductDetailPage: React.FC = () => {
     if (!currentUser) return navigate("/auth");
     if (!product) return;
     
-    // Optimistic UI update
     const oldState = isLiked;
-    setIsLiked(!isLiked);
+    setIsLiked(!isLiked); // Optimistic Update
 
     try {
       if (oldState) {
@@ -122,14 +132,32 @@ const ProductDetailPage: React.FC = () => {
         await supabase.from("saved_products").insert({ user_id: currentUser.id, product_id: product.id });
       }
     } catch {
-      setIsLiked(oldState); // Revert on error
+      setIsLiked(oldState); // Rollback nếu lỗi
+      addToast("Có lỗi xảy ra", "error");
     }
   };
 
   const startChat = () => {
     if (!currentUser) return navigate("/auth");
-    if (currentUser.id === seller?.id) return addToast("Đây là sản phẩm của bạn!", "info");
+    if (currentUser.id === product?.sellerId) return addToast("Đây là sản phẩm của bạn!", "info");
     navigate(`/chat?partnerId=${product?.sellerId}&productId=${product?.id}`);
+  };
+
+  const handleReport = () => {
+    if (!currentUser) return navigate("/auth");
+    // Logic báo cáo (có thể mở modal)
+    const reason = prompt("Lý do báo cáo vi phạm:");
+    if (reason) {
+        supabase.from("reports").insert({
+            reporter_id: currentUser.id,
+            product_id: product?.id,
+            reason: reason,
+            status: 'pending'
+        }).then(({ error }) => {
+            if (!error) addToast("Đã gửi báo cáo. Cảm ơn bạn!", "success");
+            else addToast("Lỗi gửi báo cáo", "error");
+        });
+    }
   };
 
   if (loading) return (
@@ -144,10 +172,10 @@ const ProductDetailPage: React.FC = () => {
   return (
     <div className="min-h-screen pb-32 font-sans text-slate-800">
       <VisualEngine />
-      <AuroraBackground />
+      <div className="aurora-bg"></div>
       
       {/* --- STICKY HEADER --- */}
-      <div className="sticky top-0 z-50 glass-bar transition-all">
+      <div className="sticky top-0 glass-bar transition-all">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
           <button onClick={() => navigate(-1)} className="group flex items-center gap-2 rounded-full py-2 pr-4 pl-2 hover:bg-slate-100/50 transition-colors">
             <div className="bg-white p-1.5 rounded-full shadow-sm group-hover:scale-110 transition-transform">
@@ -183,11 +211,16 @@ const ProductDetailPage: React.FC = () => {
           {/* Image Gallery */}
           <div className="space-y-4">
             <div className="aspect-[4/3] w-full rounded-[2rem] overflow-hidden bg-white shadow-xl border border-white/60 relative group">
-              <img 
-                src={product.images[activeImg]} 
-                className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-105"
-                alt="Product Main"
-              />
+              {product.images.length > 0 ? (
+                <img 
+                  src={product.images[activeImg]} 
+                  className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-105"
+                  alt="Product Main"
+                />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400">Không có ảnh</div>
+              )}
+              
               {product.images.length > 1 && (
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/50 backdrop-blur-md px-3 py-1 rounded-full text-white text-xs font-bold">
                   {activeImg + 1} / {product.images.length}
@@ -202,7 +235,7 @@ const ProductDetailPage: React.FC = () => {
                   <button 
                     key={i} 
                     onClick={() => setActiveImg(i)} 
-                    className={`relative w-20 h-20 flex-shrink-0 rounded-2xl overflow-hidden border-2 transition-all snap-start ${activeImg === i ? 'border-[#00418E] shadow-md scale-105' : 'border-transparent opacity-60 hover:opacity-100'}`}
+                    className={`relative w-20 h-20 flex-shrink-0 rounded-2xl overflow-hidden border-2 transition-all snap-start cursor-pointer ${activeImg === i ? 'border-[#00418E] shadow-md scale-105' : 'border-transparent opacity-60 hover:opacity-100'}`}
                   >
                     <img src={img} className="w-full h-full object-cover"/>
                   </button>
@@ -222,7 +255,7 @@ const ProductDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Safety Tips (New) */}
+          {/* Safety Tips */}
           <div className="bg-orange-50/80 border border-orange-100 p-6 rounded-[2rem] flex gap-4 items-start">
             <div className="bg-orange-100 p-2 rounded-full text-orange-600 shrink-0">
               <AlertTriangle size={20}/>
@@ -287,17 +320,18 @@ const ProductDetailPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Seller Card */}
+            {/* Seller Card (Đã cập nhật logic hiển thị từ Profiles) */}
             <div 
               className="group flex items-center gap-4 p-4 bg-white/50 border border-white rounded-2xl mb-8 cursor-pointer hover:bg-white hover:shadow-md transition-all" 
-              onClick={() => navigate(`/profile/${seller?.id}`)}
+              onClick={() => navigate(`/profile/${product.seller?.id}`)}
             >
               <div className="relative">
                 <img 
-                  src={seller?.avatar_url || `https://ui-avatars.com/api/?name=${seller?.name || 'User'}&background=random`} 
+                  src={product.seller?.avatar_url || `https://ui-avatars.com/api/?name=${product.seller?.name || 'User'}&background=random`} 
                   className="w-14 h-14 rounded-full border-2 border-white shadow-sm object-cover"
+                  alt={product.seller?.name}
                 />
-                {seller?.verified_status === 'verified' && (
+                {product.seller?.verified_status === 'verified' && (
                   <div className="absolute -bottom-1 -right-1 bg-blue-500 text-white p-0.5 rounded-full border-2 border-white" title="Đã xác thực SV">
                     <CheckCircle2 size={12}/>
                   </div>
@@ -306,9 +340,9 @@ const ProductDetailPage: React.FC = () => {
               
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-0.5">
-                  <h4 className="font-bold text-slate-900 truncate">{seller?.name || "Người dùng ẩn danh"}</h4>
+                  <h4 className="font-bold text-slate-900 truncate">{product.seller?.name || "Người dùng ẩn danh"}</h4>
                   <span className="px-1.5 py-0.5 bg-slate-100 rounded text-[10px] font-bold text-slate-500">
-                    {seller?.student_code ? 'SV BK' : 'Member'}
+                    {product.seller?.student_code ? 'SV BK' : 'Member'}
                   </span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-500">
@@ -331,8 +365,11 @@ const ProductDetailPage: React.FC = () => {
                 <MessageCircle size={24}/> Liên hệ người bán
               </button>
               
-              <button className="w-full bg-white text-slate-600 border border-slate-200 py-3 rounded-2xl font-bold hover:bg-slate-50 transition-colors text-sm">
-                Báo cáo tin này
+              <button 
+                onClick={handleReport}
+                className="w-full bg-white text-slate-600 border border-slate-200 py-3 rounded-2xl font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-colors text-sm flex items-center justify-center gap-2"
+              >
+                <Flag size={16}/> Báo cáo tin này
               </button>
             </div>
           </div>
