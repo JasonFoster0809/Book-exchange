@@ -24,7 +24,8 @@ interface AuthContextType {
   isRestricted: boolean;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string, name: string, studentId: string) => Promise<{ error: any }>;
-  signOut: () => Promise<void>;
+  // Sửa dòng này: Thay đổi từ Promise<void> thành Promise<{ error: any }>
+  signOut: () => Promise<{ error: any }>; 
   resetPassword: (email: string) => Promise<{ error: any }>;
   updatePassword: (newPassword: string) => Promise<{ error: any }>;
 }
@@ -191,7 +192,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (mounted.current) {
-        if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+        if ((event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') && session?.user) {
           fetchProfile(session.user);
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
@@ -214,13 +215,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     window.location.href = '/'; // Reload nhẹ để sạch state
   };
 
-  // Các hàm Auth khác giữ nguyên...
+  // Các hàm Auth khác
   const signIn = async (email: string, password: string) => supabase.auth.signInWithPassword({ email, password });
   const signUp = async (email: string, password: string, name: string, studentId: string) => {
     const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: name, student_code: studentId } } });
     return { error };
   };
-  const signOut = async () => await supabase.auth.signOut();
+  // Hàm này trả về object { error } nên interface cũng phải khai báo như vậy
+  const signOut = async () => await supabase.auth.signOut(); 
   const resetPassword = async (email: string) => supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/#/reset-password` });
   const updatePassword = async (newPassword: string) => supabase.auth.updateUser({ password: newPassword });
 
