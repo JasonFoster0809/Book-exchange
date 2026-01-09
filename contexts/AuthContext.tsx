@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase } from '../services/supabase';
 import { User } from '../types';
-import { ShieldAlert, LogOut, Lock, Clock, AlertTriangle } from 'lucide-react';
+import { ShieldAlert, LogOut, Lock, Clock, AlertTriangle, Mail, ChevronRight } from 'lucide-react';
 
 // --- TYPES ---
 interface DBProfile {
@@ -24,60 +24,95 @@ interface AuthContextType {
   isRestricted: boolean;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string, name: string, studentId: string) => Promise<{ error: any }>;
-  // Sửa dòng này: Thay đổi từ Promise<void> thành Promise<{ error: any }>
+  // Đã sửa lại kiểu trả về để khớp với Supabase v2
   signOut: () => Promise<{ error: any }>; 
   resetPassword: (email: string) => Promise<{ error: any }>;
   updatePassword: (newPassword: string) => Promise<{ error: any }>;
 }
 
-// --- BAN OVERLAY COMPONENT ---
+// --- PROFESSIONAL BANNED OVERLAY ---
 const BannedOverlay = ({ info, onLogout }: { info: { reason: string; until: string | null }, onLogout: () => void }) => {
   const isPermanent = !info.until || new Date(info.until).getFullYear() > 2100;
   
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-slate-900/80 backdrop-blur-md p-4 animate-in fade-in duration-300">
-      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-red-100">
-        <div className="bg-red-50 p-8 text-center border-b border-red-100">
-          <div className="w-20 h-20 bg-red-100 rounded-full flex items-center justify-center mx-auto mb-4 animate-bounce">
-            <ShieldAlert size={40} className="text-red-600" />
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#0F172A]/90 backdrop-blur-xl p-4 animate-in fade-in duration-500">
+      <div className="w-full max-w-lg bg-white rounded-[2rem] shadow-2xl overflow-hidden border border-white/10 ring-1 ring-black/5 relative">
+        {/* Header Decor */}
+        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-red-500 via-orange-500 to-red-500"></div>
+        <div className="absolute -top-20 -right-20 w-40 h-40 bg-red-500/10 rounded-full blur-3xl"></div>
+        
+        <div className="p-8 md:p-10 text-center">
+          {/* Icon Animation */}
+          <div className="relative mx-auto mb-6 w-24 h-24">
+            <div className="absolute inset-0 bg-red-100 rounded-full animate-ping opacity-20"></div>
+            <div className="relative bg-red-50 w-full h-full rounded-full flex items-center justify-center border border-red-100 shadow-inner">
+              <ShieldAlert size={48} className="text-red-600 drop-shadow-sm" />
+            </div>
           </div>
-          <h2 className="text-2xl font-black text-red-700 mb-2">Tài khoản bị khóa</h2>
-          <p className="text-red-600/80 font-medium">Quyền truy cập của bạn đã bị tạm ngưng.</p>
+
+          <h2 className="text-3xl font-black text-slate-900 mb-3 tracking-tight">Tài khoản bị hạn chế</h2>
+          <p className="text-slate-500 text-lg leading-relaxed mb-8">
+            Chúng tôi rất tiếc, nhưng tài khoản của bạn hiện không thể truy cập vào hệ thống.
+          </p>
+        
+          <div className="space-y-4 mb-8 text-left">
+            {/* Reason Card */}
+            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex gap-4 transition-transform hover:scale-[1.02]">
+              <div className="bg-white p-2.5 rounded-xl shadow-sm border border-slate-100 h-fit text-orange-500">
+                <AlertTriangle size={20} />
+              </div>
+              <div>
+                <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Lý do vi phạm</span>
+                <span className="block font-bold text-slate-800 text-sm md:text-base">
+                  {info.reason || "Vi phạm tiêu chuẩn cộng đồng"}
+                </span>
+              </div>
+            </div>
+
+            {/* Time Card */}
+            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex gap-4 transition-transform hover:scale-[1.02]">
+              <div className="bg-white p-2.5 rounded-xl shadow-sm border border-slate-100 h-fit text-blue-500">
+                <Clock size={20} />
+              </div>
+              <div>
+                <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Thời gian mở khóa</span>
+                <span className="block font-bold text-slate-800 text-sm md:text-base">
+                  {isPermanent ? (
+                    <span className="text-red-600">Vĩnh viễn</span>
+                  ) : (
+                    new Date(info.until!).toLocaleDateString('vi-VN', { 
+                      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' 
+                    })
+                  )}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Actions */}
+          <div className="flex flex-col gap-3">
+            <button 
+              onClick={onLogout}
+              className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm transition-all shadow-lg hover:shadow-slate-900/20 flex items-center justify-center gap-2 group"
+            >
+              <LogOut size={18} className="text-slate-400 group-hover:text-white transition-colors" /> 
+              Đăng xuất tài khoản
+            </button>
+            
+            <a 
+              href="mailto:support@hcmut.edu.vn?subject=Khieu_nai_khoa_tai_khoan"
+              className="w-full py-4 bg-white border border-slate-200 text-slate-600 hover:text-[#00418E] hover:border-blue-200 hover:bg-blue-50 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2"
+            >
+              <Mail size={18} /> Gửi khiếu nại
+            </a>
+          </div>
         </div>
         
-        <div className="p-8 space-y-6">
-          <div className="space-y-4">
-            <div className="flex items-start gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-100">
-              <div className="p-2 bg-white rounded-lg shadow-sm shrink-0">
-                <AlertTriangle size={20} className="text-orange-500" />
-              </div>
-              <div>
-                <p className="text-xs font-bold text-slate-400 uppercase mb-1">Lý do vi phạm</p>
-                <p className="font-bold text-slate-800 text-sm leading-relaxed">{info.reason}</p>
-              </div>
-            </div>
-
-            <div className="flex items-start gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-100">
-              <div className="p-2 bg-white rounded-lg shadow-sm shrink-0">
-                <Clock size={20} className="text-blue-500" />
-              </div>
-              <div>
-                <p className="text-xs font-bold text-slate-400 uppercase mb-1">Thời hạn mở khóa</p>
-                <p className="font-bold text-slate-800 text-sm">
-                  {isPermanent ? "Vĩnh viễn" : new Date(info.until!).toLocaleDateString('vi-VN', { 
-                    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' 
-                  })}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <button 
-            onClick={onLogout}
-            className="w-full py-3.5 bg-slate-900 text-white rounded-xl font-bold flex items-center justify-center gap-2 hover:bg-slate-800 transition-all hover:scale-[1.02] active:scale-[0.98]"
-          >
-            <LogOut size={18} /> Đăng xuất ngay
-          </button>
+        {/* Footer */}
+        <div className="bg-slate-50 py-3 px-8 text-center border-t border-slate-100">
+           <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">
+             BK Book Exchange Security
+           </p>
         </div>
       </div>
     </div>
@@ -93,7 +128,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [isAdmin, setIsAdmin] = useState(false);
   const [isRestricted, setIsRestricted] = useState(false);
   
-  // State mới để quản lý thông tin Ban
+  // State quản lý thông tin Ban
   const [bannedInfo, setBannedInfo] = useState<{ reason: string; until: string | null } | null>(null);
   
   const mounted = useRef(false);
@@ -106,7 +141,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         .eq('id', sessionUser.id)
         .maybeSingle();
 
-      // Auto-create Profile if missing
+      // Auto-create Profile if missing (Fail-safe)
       if (!data) {
         console.warn("Profile chưa tồn tại. Đang khởi tạo...");
         const meta = sessionUser.user_metadata || {};
@@ -125,6 +160,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         const { data: created, error: createErr } = await supabase.from('profiles').insert(newProfile).select().single();
         if (createErr) {
+          // Nếu tạo lỗi, logout để tránh kẹt
           await supabase.auth.signOut();
           setUser(null);
           setLoading(false);
@@ -136,13 +172,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (data && mounted.current) {
         const profile = data as unknown as DBProfile;
 
-        // 1. NẾU BỊ BAN -> HIỆN OVERLAY (Không dùng alert nữa)
+        // --- KIỂM TRA BAN ---
         if (profile.is_banned) {
-          await supabase.auth.signOut(); // Logout khỏi session
+          await supabase.auth.signOut(); // Force logout logic
           setUser(null);
           setIsAdmin(false);
           setLoading(false);
-          // Set state để hiện màn hình chặn
+          
+          // Hiện Overlay thông báo
           setBannedInfo({
             reason: profile.ban_reason || 'Vi phạm chính sách cộng đồng',
             until: profile.ban_until || null
@@ -150,7 +187,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           return;
         }
 
-        // Reset ban info nếu user sạch
+        // Reset nếu user sạch
         setBannedInfo(null);
 
         const userRole = profile.role === 'admin' ? 'admin' : 'user';
@@ -198,7 +235,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           setUser(null);
           setIsAdmin(false);
           setLoading(false);
-          // Không clear bannedInfo ở đây để giữ màn hình thông báo nếu vừa bị kick
+          // Không clear bannedInfo ở đây để giữ overlay nếu cần
         }
       }
     });
@@ -211,19 +248,26 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const handleLogout = async () => {
     await supabase.auth.signOut();
-    setBannedInfo(null); // Clear màn hình Ban khi user chủ động bấm nút Logout trên Overlay
-    window.location.href = '/'; // Reload nhẹ để sạch state
+    setBannedInfo(null);
+    window.location.href = '/'; 
   };
 
-  // Các hàm Auth khác
+  // --- EXPORTED FUNCTIONS ---
   const signIn = async (email: string, password: string) => supabase.auth.signInWithPassword({ email, password });
+  
   const signUp = async (email: string, password: string, name: string, studentId: string) => {
-    const { error } = await supabase.auth.signUp({ email, password, options: { data: { full_name: name, student_code: studentId } } });
+    const { error } = await supabase.auth.signUp({ 
+      email, 
+      password, 
+      options: { data: { full_name: name, student_code: studentId } } 
+    });
     return { error };
   };
-  // Hàm này trả về object { error } nên interface cũng phải khai báo như vậy
+
   const signOut = async () => await supabase.auth.signOut(); 
+  
   const resetPassword = async (email: string) => supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/#/reset-password` });
+  
   const updatePassword = async (newPassword: string) => supabase.auth.updateUser({ password: newPassword });
 
   return (
@@ -233,7 +277,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       ) : (
         !loading ? children : (
           <div className="h-screen flex items-center justify-center bg-white">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-indigo-600"></div>
+            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#00418E]"></div>
           </div>
         )
       )}
