@@ -4,110 +4,75 @@ import { supabase } from '../services/supabase';
 import { useSearchParams, useNavigate } from 'react-router-dom';
 import { useToast } from '../contexts/ToastContext';
 import { 
-  Send, Image as ImageIcon, Phone, Search, 
-  ArrowLeft, MoreVertical, ShoppingBag, CheckCircle, 
-  XCircle, Clock, ShieldCheck, CornerDownRight
+  Send, Image as ImageIcon, MapPin, CheckCircle, 
+  MessageCircle, ArrowLeft, Loader, ShoppingBag, 
+  ShieldAlert, Phone, MoreVertical, Search, 
+  CornerDownRight, Zap, AlertCircle, Check, X
 } from 'lucide-react'; 
 import { playMessageSound } from '../utils/audio';
 
-// --- STYLES ---
-const VisualEngine = () => (
+// ============================================================================
+// 1. STYLES
+// ============================================================================
+const ChatStyles = () => (
   <style>{`
-    :root { --primary: #00418E; --bg-chat: #F0F4F8; }
+    .chat-scrollbar::-webkit-scrollbar { width: 6px; }
+    .chat-scrollbar::-webkit-scrollbar-track { background: transparent; }
+    .chat-scrollbar::-webkit-scrollbar-thumb { background: rgba(0,0,0,0.1); border-radius: 10px; }
     
-    .chat-container { height: calc(100vh - 64px); background-color: var(--bg-chat); }
+    .msg-bubble { max-width: 75%; padding: 12px 16px; border-radius: 18px; position: relative; font-size: 14px; line-height: 1.5; word-wrap: break-word; }
+    .msg-me { background: #0084FF; color: white; border-bottom-right-radius: 4px; margin-left: auto; }
+    .msg-you { background: #E4E6EB; color: #050505; border-bottom-left-radius: 4px; margin-right: auto; }
     
-    .glass-sidebar {
-      background: rgba(255, 255, 255, 0.8);
-      backdrop-filter: blur(12px);
-      border-right: 1px solid rgba(255, 255, 255, 0.6);
+    .transaction-card {
+      background: white; border-bottom: 1px solid #E5E7EB; 
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      z-index: 20;
     }
-
-    .chat-window {
-      background-image: radial-gradient(#cbd5e1 1px, transparent 1px);
-      background-size: 20px 20px;
-      background-color: #F8FAFC;
-    }
-
-    .msg-bubble {
-      max-width: 75%;
-      padding: 12px 16px;
-      border-radius: 20px;
-      position: relative;
-      font-size: 14px;
-      line-height: 1.5;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-    }
-    
-    .msg-me {
-      background: linear-gradient(135deg, #00418E, #0065D1);
-      color: white;
-      border-bottom-right-radius: 4px;
-      margin-left: auto;
-    }
-    
-    .msg-you {
-      background: white;
-      color: #1E293B;
-      border-bottom-left-radius: 4px;
-      margin-right: auto;
-      border: 1px solid #E2E8F0;
-    }
-
-    .system-msg {
-      font-size: 11px;
-      font-weight: 600;
-      color: #64748B;
-      background: #F1F5F9;
-      padding: 4px 12px;
-      border-radius: 12px;
-      margin: 16px auto;
-      text-align: center;
-      width: fit-content;
-      border: 1px solid #E2E8F0;
-    }
-
-    .custom-scrollbar::-webkit-scrollbar { width: 5px; }
-    .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
-    .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
   `}</style>
 );
 
 const QUICK_REPLIES = ["Sản phẩm còn mới không?", "Có bớt giá không bạn?", "Giao dịch ở H6 nhé?", "Cho mình xem thêm ảnh thật"];
 
 const ChatPage: React.FC = () => {
-  const { user } = useAuth(); 
+  const { user, isRestricted } = useAuth(); 
   const { addToast } = useToast();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   
+  // Lấy ID từ URL (được truyền từ Profile hoặc ProductDetail)
   const partnerIdParam = searchParams.get('partnerId');
   const productIdParam = searchParams.get('productId'); 
   
-  // Data State
+  // State
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [partnerProfile, setPartnerProfile] = useState<any>(null);
-  const [targetProduct, setTargetProduct] = useState<any>(null);
   
-  // UI State
+  // --- STATE QUAN TRỌNG CHO GIAO DỊCH ---
+  const [targetProduct, setTargetProduct] = useState<any>(null); // Sản phẩm đang giao dịch
+  
   const [newMessage, setNewMessage] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // --- INITIALIZATION ---
+  // 1. Init Data
   useEffect(() => { if(user) fetchConversations(); }, [user]);
 
+  // 2. Xử lý Logic vào từ URL (QUAN TRỌNG: Phân biệt vào từ Profile hay Product)
   useEffect(() => {
     const initChat = async () => {
         if (!user || !partnerIdParam) return;
         
-        // Load Product info if entering from product page
+        // A. Nếu có productId (từ trang chi tiết sản phẩm) -> Fetch và ghim sản phẩm
         if (productIdParam) {
             const { data } = await supabase.from('products').select('*').eq('id', productIdParam).single();
             setTargetProduct(data);
+        } else {
+            // B. Nếu KHÔNG có productId (từ trang profile) -> Reset ghim để tránh hiện sản phẩm cũ
+            setTargetProduct(null);
         }
 
         await checkAndCreateConversation(partnerIdParam);
@@ -115,19 +80,22 @@ const ChatPage: React.FC = () => {
     initChat();
   }, [partnerIdParam, productIdParam, user]);
 
-  // --- REALTIME SUBSCRIPTION ---
+  // 3. Realtime Messages & Product Status Updates
   useEffect(() => {
     if (!activeConversation) return;
     fetchMessages(activeConversation);
 
-    const channel = supabase.channel(`chat:${activeConversation}`)
+    const channel = supabase.channel(`chat_room:${activeConversation}`)
+        // Lắng nghe tin nhắn mới
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversation}` }, (payload) => {
             setMessages(prev => {
-                if (prev.some(m => m.id === payload.new.id)) return prev;
+                const exists = prev.some(m => m.id === payload.new.id);
+                if (exists) return prev;
                 return [...prev, payload.new];
             });
             if (user && payload.new.sender_id !== user.id) playMessageSound();
         })
+        // Lắng nghe thay đổi trạng thái sản phẩm (Realtime Status Update)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products', filter: `id=eq.${productIdParam}` }, (payload) => {
             if (targetProduct && payload.new.id === targetProduct.id) {
                 setTargetProduct({ ...targetProduct, ...payload.new });
@@ -140,15 +108,10 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => { scrollRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
 
-  // --- API FUNCTIONS ---
+  // --- API CALLS ---
   const fetchConversations = async () => {
       if (!user) return;
-      const { data } = await supabase
-        .from('conversations')
-        .select(`*, p1:profiles!participant1(name, avatar_url), p2:profiles!participant2(name, avatar_url)`)
-        .or(`participant1.eq.${user.id},participant2.eq.${user.id}`)
-        .order('updated_at', { ascending: false });
-        
+      const { data } = await supabase.from('conversations').select(`*, p1:profiles!participant1(name, avatar_url), p2:profiles!participant2(name, avatar_url)`).or(`participant1.eq.${user.id},participant2.eq.${user.id}`).order('updated_at', { ascending: false });
       if(data) {
           const formatted = data.map((c: any) => ({
               ...c, 
@@ -169,6 +132,8 @@ const ChatPage: React.FC = () => {
           const { data: newConv } = await supabase.from('conversations').insert({ participant1: user.id, participant2: pId }).select().single();
           if (newConv) setActiveConversation(newConv.id);
       }
+      
+      // Fetch luôn info khi tạo/check conversation
       fetchPartnerInfoInternal(pId);
   };
 
@@ -179,68 +144,114 @@ const ChatPage: React.FC = () => {
 
   const fetchPartnerInfoInternal = async (pId: string) => {
       if (!pId) return;
-      const { data } = await supabase.from('profiles').select('*').eq('id', pId).single();
-      if (data) setPartnerProfile(data);
+      const { data, error } = await supabase
+          .from('profiles')
+          .select('*')
+          .eq('id', pId)
+          .single();
+      
+      if (data) {
+          setPartnerProfile(data);
+      } else {
+          console.error("Lỗi fetch profile đối phương:", error);
+      }
   };
 
-  // --- TRANSACTION HANDLERS ---
-  const isSeller = user && targetProduct && user.id === targetProduct.seller_id;
-  const isBuyer = user && targetProduct && user.id !== targetProduct.seller_id;
+  // ========================================================================
+  // CORE TRANSACTION LOGIC (XỬ LÝ TRẠNG THÁI MUA BÁN)
+  // ========================================================================
 
-  const handleTransactionAction = async (action: 'request' | 'accept' | 'finish' | 'cancel') => {
-      if (!activeConversation || !user || !targetProduct) return;
+  const isSeller = user && targetProduct && user.id === targetProduct.sellerId;
+  const isBuyer = user && targetProduct && user.id !== targetProduct.sellerId;
+
+  // 1. NGƯỜI MUA: Gửi yêu cầu giao dịch
+  const handleRequestDeal = async () => {
+      if (!activeConversation || !user) return;
       setIsProcessing(true);
-      
       try {
-          let sysMsg = "";
-          let newStatus = targetProduct.status;
-          let buyerId = targetProduct.buyer_id;
-
-          if (action === 'request') {
-              sysMsg = `👋 TÔI MUỐN MUA!\nBạn xác nhận giao dịch nhé?`;
-          } else if (action === 'accept') {
-              if (!window.confirm("Xác nhận bán cho người này?")) return;
-              newStatus = 'pending';
-              buyerId = partnerProfile.id;
-              sysMsg = `✅ ĐÃ XÁC NHẬN!\nSản phẩm đang được giữ. Hãy hẹn gặp để trao đổi.`;
-          } else if (action === 'finish') {
-              if (!window.confirm("Đã giao hàng và nhận tiền?")) return;
-              newStatus = 'sold';
-              sysMsg = `🎉 GIAO DỊCH THÀNH CÔNG!\nCảm ơn bạn đã ủng hộ.`;
-          } else if (action === 'cancel') {
-              if (!window.confirm("Hủy giao dịch này?")) return;
-              newStatus = 'available';
-              buyerId = null;
-              sysMsg = `⚠️ ĐÃ HỦY GIAO DỊCH.`;
-          }
-
-          if (action !== 'request') {
-              await supabase.from('products').update({ status: newStatus, buyer_id: buyerId }).eq('id', targetProduct.id);
-              setTargetProduct({ ...targetProduct, status: newStatus, buyer_id: buyerId });
-          }
-
           await supabase.from('messages').insert({
-              conversation_id: activeConversation, sender_id: user.id, type: 'text', content: sysMsg
+              conversation_id: activeConversation, sender_id: user.id, type: 'text',
+              content: `👋 TÔI MUỐN MUA MÓN NÀY!\nBạn xác nhận giao dịch nhé?`
           });
-          
           fetchMessages(activeConversation);
-          addToast("Thao tác thành công", "success");
-      } catch (e) { console.error(e); }
+          addToast("Đã gửi yêu cầu mua!", "success");
+      } catch (error) { console.error(error); } 
       finally { setIsProcessing(false); }
   };
 
-  // --- SEND MESSAGE ---
+  // 2. NGƯỜI BÁN: Chấp nhận giao dịch (Chuyển Available -> Pending)
+  const handleAcceptDeal = async () => {
+      if (!targetProduct || !activeConversation) return;
+      if (!window.confirm("Xác nhận bán cho người này? Sản phẩm sẽ chuyển sang trạng thái 'Đang giao dịch'.")) return;
+      
+      setIsProcessing(true);
+      try {
+          await supabase.from('products')
+              .update({ status: 'pending', buyer_id: partnerProfile.id })
+              .eq('id', targetProduct.id);
+          
+          await supabase.from('messages').insert({
+              conversation_id: activeConversation, sender_id: user?.id, type: 'text',
+              content: `✅ ĐÃ XÁC NHẬN!\nSản phẩm đang được giữ cho bạn. Hãy hẹn gặp để trao đổi.`
+          });
+          
+          fetchMessages(activeConversation);
+          setTargetProduct({ ...targetProduct, status: 'pending', buyer_id: partnerProfile.id });
+          addToast("Đã chấp nhận giao dịch!", "success");
+      } catch (error) { console.error(error); }
+      finally { setIsProcessing(false); }
+  };
+
+  // 3. NGƯỜI BÁN: Hoàn tất (Chuyển Pending -> Sold)
+  const handleFinishDeal = async () => {
+      if (!targetProduct || !activeConversation) return;
+      if (!window.confirm("Bạn đã nhận tiền và giao hàng xong?")) return;
+
+      setIsProcessing(true);
+      try {
+          await supabase.from('products').update({ status: 'sold' }).eq('id', targetProduct.id);
+
+          await supabase.from('messages').insert({
+              conversation_id: activeConversation, sender_id: user?.id, type: 'text',
+              content: `🎉 GIAO DỊCH THÀNH CÔNG!\nCảm ơn bạn đã ủng hộ.`
+          });
+
+          fetchMessages(activeConversation);
+          setTargetProduct({ ...targetProduct, status: 'sold' });
+          addToast("Giao dịch hoàn tất!", "success");
+      } catch (error) { console.error(error); }
+      finally { setIsProcessing(false); }
+  };
+
+  // 4. HỦY GIAO DỊCH (Nếu cần) - Reset về Available
+  const handleCancelDeal = async () => {
+      if (!targetProduct || !activeConversation) return;
+      if (!window.confirm("Hủy giao dịch này và đăng bán lại?")) return;
+
+      setIsProcessing(true);
+      try {
+          await supabase.from('products').update({ status: 'available', buyer_id: null }).eq('id', targetProduct.id);
+          await supabase.from('messages').insert({
+              conversation_id: activeConversation, sender_id: user?.id, type: 'text',
+              content: `⚠️ ĐÃ HỦY GIAO DỊCH.`
+          });
+          fetchMessages(activeConversation);
+          setTargetProduct({ ...targetProduct, status: 'available', buyer_id: null });
+      } catch (error) { console.error(error); }
+      finally { setIsProcessing(false); }
+  };
+
   const handleSendMessage = async (e?: React.FormEvent) => {
       e?.preventDefault();
       if (!newMessage.trim() || !activeConversation || !user) return;
 
-      const content = newMessage;
+      const messageContent = newMessage;
       setNewMessage(''); 
 
       const { data, error } = await supabase.from('messages').insert({ 
           conversation_id: activeConversation, 
           sender_id: user.id, 
-          content: content, 
+          content: messageContent, 
           type: 'text' 
       }).select().single();
 
@@ -248,114 +259,113 @@ const ChatPage: React.FC = () => {
           await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeConversation);
           setMessages(prev => [...prev, data]);
       } else {
-          setNewMessage(content);
+          setNewMessage(messageContent);
+          console.error("Lỗi gửi tin nhắn:", error);
       }
   };
 
   const filteredConversations = conversations.filter(c => c.partnerName?.toLowerCase().includes(searchTerm.toLowerCase()));
 
   return (
-    <div className="max-w-7xl mx-auto chat-container flex overflow-hidden shadow-2xl m-0 md:my-4 md:rounded-2xl border border-white/50">
-      <VisualEngine />
+    <div className="max-w-7xl mx-auto h-[calc(100vh-64px)] flex bg-white font-sans overflow-hidden">
+      <ChatStyles />
       
-      {/* === LEFT SIDEBAR === */}
-      <div className={`w-full md:w-80 lg:w-96 glass-sidebar flex flex-col ${activeConversation ? 'hidden md:flex' : 'flex'}`}>
-         {/* Sidebar Header */}
-         <div className="p-5 border-b border-slate-100">
-            <h2 className="font-black text-2xl text-slate-800 mb-4">Tin nhắn</h2>
-            <div className="relative group">
-               <input 
-                 value={searchTerm} 
-                 onChange={e => setSearchTerm(e.target.value)} 
-                 placeholder="Tìm kiếm..." 
-                 className="w-full bg-slate-100 rounded-xl px-4 py-2.5 pl-10 text-sm outline-none focus:bg-white focus:ring-2 focus:ring-[#00418E]/20 transition-all"
-               />
-               <Search className="absolute left-3 top-2.5 text-slate-400 group-focus-within:text-[#00418E]" size={18}/>
+      {/* --- SIDEBAR --- */}
+      <div className={`w-full md:w-1/3 border-r border-gray-200 flex flex-col ${activeConversation ? 'hidden md:flex' : 'flex'}`}>
+         <div className="p-4 border-b">
+            <h2 className="font-bold text-2xl mb-4">Chat</h2>
+            <div className="relative">
+               <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Tìm kiếm..." className="w-full bg-gray-100 rounded-full px-4 py-2 pl-10 text-sm outline-none"/>
+               <Search className="absolute left-3 top-2.5 text-gray-400" size={16}/>
             </div>
          </div>
-
-         {/* Conversation List */}
-         <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-1">
+         <div className="flex-1 overflow-y-auto chat-scrollbar">
             {filteredConversations.map(conv => (
-               <div 
-                 key={conv.id} 
-                 onClick={() => { setActiveConversation(conv.id); fetchPartnerInfoInternal(conv.partnerId); setTargetProduct(null); }} 
-                 className={`p-3 flex gap-3 cursor-pointer rounded-xl transition-all ${activeConversation === conv.id ? 'bg-[#00418E]/5 border border-[#00418E]/10' : 'hover:bg-white hover:shadow-sm'}`}
-               >
-                  <div className="relative">
-                    <img src={conv.partnerAvatar || 'https://via.placeholder.com/50'} className="w-12 h-12 rounded-full object-cover border-2 border-white shadow-sm"/>
-                    <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 rounded-full border-2 border-white"></div>
-                  </div>
-                  <div className="flex-1 min-w-0 flex flex-col justify-center">
-                     <p className={`font-bold text-sm truncate ${activeConversation === conv.id ? 'text-[#00418E]' : 'text-slate-700'}`}>{conv.partnerName}</p>
-                     <p className="text-xs text-slate-400 truncate">Nhấn để xem tin nhắn</p>
+               <div key={conv.id} onClick={() => { setActiveConversation(conv.id); fetchPartnerInfoInternal(conv.partnerId); setTargetProduct(null); }} className={`p-3 flex gap-3 cursor-pointer hover:bg-gray-50 ${activeConversation === conv.id ? 'bg-blue-50' : ''}`}>
+                  <img src={conv.partnerAvatar || 'https://via.placeholder.com/50'} className="w-12 h-12 rounded-full object-cover border"/>
+                  <div className="flex-1 min-w-0">
+                     <p className="font-bold truncate">{conv.partnerName}</p>
+                     <p className="text-xs text-gray-500 truncate">Nhấn để xem tin nhắn</p>
                   </div>
                </div>
             ))}
          </div>
       </div>
 
-      {/* === RIGHT CHAT AREA === */}
-      <div className={`flex-1 flex flex-col relative chat-window ${!activeConversation ? 'hidden md:flex' : 'flex'}`}>
+      {/* --- CHAT AREA --- */}
+      <div className={`flex-1 flex flex-col relative ${!activeConversation ? 'hidden md:flex' : 'flex'}`}>
          {activeConversation ? (
             <>
-               {/* 1. HEADER */}
-               <div className="h-16 px-6 flex items-center justify-between bg-white/90 backdrop-blur border-b border-slate-100 shadow-sm z-20">
+               {/* HEADER */}
+               <div className="h-16 border-b flex items-center px-4 justify-between bg-white shadow-sm z-10">
                   <div className="flex items-center gap-3">
-                     <button onClick={() => setActiveConversation(null)} className="md:hidden p-2 -ml-2 text-slate-500"><ArrowLeft/></button>
+                     <button onClick={() => setActiveConversation(null)} className="md:hidden"><ArrowLeft/></button>
                      {partnerProfile && (
-                        <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate(`/profile/${partnerProfile.id}`)}>
-                           <img src={partnerProfile.avatar_url} className="w-10 h-10 rounded-full border border-slate-200 shadow-sm"/>
+                        <div className="flex items-center gap-2 cursor-pointer" onClick={() => navigate(`/profile/${partnerProfile.id}`)}>
+                           <img src={partnerProfile.avatar_url || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full border"/>
                            <div>
-                              <h3 className="font-bold text-slate-800 text-sm flex items-center gap-1">
-                                {partnerProfile.name}
-                                {partnerProfile.verified_status === 'verified' && <ShieldCheck size={14} className="text-blue-500"/>}
-                              </h3>
-                              <span className="text-xs text-green-600 font-bold flex items-center gap-1"><span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span> Online</span>
+                              <h3 className="font-bold text-sm">{partnerProfile.name}</h3>
+                              <span className="text-xs text-green-500 font-bold">Đang hoạt động</span>
                            </div>
                         </div>
                      )}
                   </div>
-                  <div className="flex gap-2">
-                    <button className="p-2 text-slate-400 hover:text-[#00418E] hover:bg-blue-50 rounded-full transition-colors"><Phone size={20}/></button>
-                    <button className="p-2 text-slate-400 hover:text-[#00418E] hover:bg-blue-50 rounded-full transition-colors"><MoreVertical size={20}/></button>
-                  </div>
+                  <Phone className="text-blue-500 cursor-pointer"/>
                </div>
 
-               {/* 2. TRANSACTION CARD (PINNED) */}
+               {/* === TRANSACTION DASHBOARD (CHỈ HIỆN KHI CÓ SẢN PHẨM) === */}
                {targetProduct && (
-                  <div className="p-4 mx-6 mt-4 bg-white rounded-2xl shadow-sm border border-slate-100 flex flex-col md:flex-row gap-4 items-center animate-in slide-in-from-top-2">
-                     <img src={targetProduct.images?.[0]} className="w-16 h-16 rounded-xl object-cover bg-slate-100 border border-slate-200"/>
-                     <div className="flex-1 text-center md:text-left">
-                        <div className="flex items-center justify-center md:justify-start gap-2 mb-1">
-                           <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider text-white ${targetProduct.status === 'sold' ? 'bg-slate-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}>
-                              {targetProduct.status === 'available' ? 'Đang bán' : targetProduct.status === 'pending' ? 'Đang giao dịch' : 'Đã bán'}
-                           </span>
+                  <div className="transaction-card p-4 bg-blue-50 border-b border-blue-100 flex flex-col gap-3 sticky top-0 animate-in slide-in-from-top-2">
+                     <div className="flex gap-4 items-center">
+                        <img src={targetProduct.images?.[0] || 'https://via.placeholder.com/80'} className="w-16 h-16 rounded-lg object-cover border bg-white"/>
+                        <div className="flex-1">
+                           <div className="flex items-center gap-2 mb-1">
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded text-white uppercase ${targetProduct.status === 'sold' ? 'bg-red-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}>
+                                 {targetProduct.status === 'available' ? 'CÒN HÀNG' : targetProduct.status === 'pending' ? 'ĐANG GD' : 'ĐÃ BÁN'}
+                              </span>
+                           </div>
+                           <h4 className="font-bold text-slate-800 text-sm line-clamp-1">{targetProduct.title}</h4>
+                           <p className="text-red-600 font-black">{targetProduct.price === 0 ? 'Miễn phí' : `${targetProduct.price.toLocaleString()}đ`}</p>
                         </div>
-                        <h4 className="font-bold text-slate-800 text-sm line-clamp-1">{targetProduct.title}</h4>
-                        <p className="text-[#00418E] font-black">{targetProduct.price === 0 ? 'Miễn phí' : `${targetProduct.price.toLocaleString()}đ`}</p>
                      </div>
 
-                     {/* Action Buttons */}
-                     <div className="flex gap-2 w-full md:w-auto">
+                     {/* LOGIC NÚT BẤM */}
+                     <div className="flex gap-2 pt-2 border-t border-blue-200/50">
                         {isBuyer && targetProduct.status === 'available' && (
-                           <button onClick={() => handleTransactionAction('request')} disabled={isProcessing} className="flex-1 bg-[#00418E] hover:bg-[#00306b] text-white py-2 px-4 rounded-xl font-bold text-xs shadow-lg shadow-blue-900/20 transition-all flex items-center justify-center gap-2">
-                              <ShoppingBag size={16}/> Mua ngay
+                           <button onClick={handleRequestDeal} disabled={isProcessing} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold text-sm shadow-sm transition-all flex justify-center items-center gap-2">
+                              {isProcessing ? <Loader size={16} className="animate-spin"/> : <ShoppingBag size={16}/>} Yêu cầu mua
                            </button>
                         )}
+
+                        {isSeller && targetProduct.status === 'available' && (
+                           <div className="flex-1 text-center text-xs text-gray-500 italic py-2">Đang đợi người mua yêu cầu...</div>
+                        )}
+
                         {isSeller && targetProduct.status === 'available' && messages.length > 0 && (
-                           <button onClick={() => handleTransactionAction('accept')} disabled={isProcessing} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 px-4 rounded-xl font-bold text-xs shadow-lg shadow-green-600/20 transition-all flex items-center justify-center gap-2">
-                              <CheckCircle size={16}/> Chốt đơn
+                           <button onClick={handleAcceptDeal} disabled={isProcessing} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-2 rounded-lg font-bold text-sm shadow-sm transition-all">
+                              Chấp nhận giao dịch
                            </button>
                         )}
+
                         {isSeller && targetProduct.status === 'pending' && (
                            <>
-                              <button onClick={() => handleTransactionAction('finish')} className="flex-1 bg-green-600 text-white py-2 px-3 rounded-xl font-bold text-xs shadow-md">Hoàn tất</button>
-                              <button onClick={() => handleTransactionAction('cancel')} className="bg-slate-100 text-slate-600 py-2 px-3 rounded-xl font-bold text-xs hover:bg-slate-200">Hủy</button>
+                              <button onClick={handleFinishDeal} disabled={isProcessing} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-2 rounded-lg font-bold text-sm shadow-sm flex justify-center gap-2">
+                                 <CheckCircle size={16}/> Hoàn tất
+                              </button>
+                              <button onClick={handleCancelDeal} disabled={isProcessing} className="px-3 bg-gray-200 hover:bg-gray-300 text-gray-600 rounded-lg font-bold text-sm">
+                                 Hủy
+                              </button>
                            </>
                         )}
+
+                        {isBuyer && targetProduct.status === 'pending' && (
+                           <div className="flex-1 bg-orange-100 text-orange-700 py-2 rounded-lg font-bold text-xs text-center border border-orange-200">
+                              Đang chờ người bán xác nhận hoàn tất...
+                           </div>
+                        )}
+
                         {targetProduct.status === 'sold' && (
-                           <div className="px-4 py-2 bg-slate-100 text-slate-500 rounded-xl font-bold text-xs flex items-center gap-2">
+                           <div className="flex-1 bg-gray-100 text-gray-500 py-2 rounded-lg font-bold text-xs text-center flex justify-center items-center gap-2">
                               <CheckCircle size={14}/> Giao dịch thành công
                            </div>
                         )}
@@ -363,30 +373,32 @@ const ChatPage: React.FC = () => {
                   </div>
                )}
 
-               {/* 3. MESSAGES LIST */}
-               <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-3">
+               {/* MESSAGES */}
+               <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-white chat-scrollbar">
                   {messages.map((msg, idx) => {
                      const senderId = msg.sender_id || msg.senderId; 
                      const content = msg.content || msg.text;
                      const isMe = senderId === user?.id;
                      
-                     // System Message Style
-                     if (content && (content.includes("YÊU CẦU") || content.includes("ĐÃ XÁC NHẬN") || content.includes("GIAO DỊCH THÀNH CÔNG") || content.includes("HỦY GIAO DỊCH"))) {
-                        return <div key={idx} className="system-msg">{content}</div>
+                     if (content && (content.includes("YÊU CẦU") || content.includes("ĐÃ XÁC NHẬN") || content.includes("GIAO DỊCH THÀNH CÔNG") || content.includes("ĐÃ HỦY"))) {
+                        return (
+                           <div key={idx} className="flex justify-center my-4">
+                              <span className="text-[11px] font-bold text-gray-500 bg-gray-100 px-3 py-1 rounded-full border border-gray-200 text-center whitespace-pre-wrap">
+                                 {content}
+                              </span>
+                           </div>
+                        )
                      }
 
                      return (
-                        <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-in fade-in zoom-in-95 duration-200`}>
-                           {!isMe && <img src={partnerProfile?.avatar_url} className="w-8 h-8 rounded-full mr-2 self-end mb-1 border border-white shadow-sm"/>}
+                        <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-msg`}>
+                           {!isMe && <img src={partnerProfile?.avatar_url} className="w-8 h-8 rounded-full mr-2 self-end mb-1 border"/>}
                            <div className={`msg-bubble ${isMe ? 'msg-me' : 'msg-you'}`}>
                               {msg.type === 'image' ? (
-                                <img src={msg.image_url} className="rounded-lg max-w-[240px] cursor-pointer hover:opacity-90 transition-opacity" onClick={() => window.open(msg.image_url)}/>
+                                <img src={msg.image_url} className="rounded-lg max-w-[200px]" onClick={() => window.open(msg.image_url)}/>
                               ) : (
                                 <p>{content}</p>
                               )}
-                              <span className={`text-[10px] absolute bottom-1 ${isMe ? 'right-3 text-blue-200' : 'left-3 text-slate-400'} opacity-0 group-hover:opacity-100 transition-opacity`}>
-                                {new Date(msg.created_at).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                              </span>
                            </div>
                         </div>
                      );
@@ -394,44 +406,26 @@ const ChatPage: React.FC = () => {
                   <div ref={scrollRef} />
                </div>
 
-               {/* 4. INPUT AREA */}
-               <div className="p-4 bg-white border-t border-slate-100">
-                  {/* Quick Replies */}
-                  <div className="flex gap-2 overflow-x-auto pb-3 custom-scrollbar">
+               {/* INPUT */}
+               <div className="p-3 bg-white border-t">
+                  <div className="flex gap-2 overflow-x-auto pb-2 chat-scrollbar">
                      {QUICK_REPLIES.map((t, i) => (
-                        <button key={i} onClick={() => setNewMessage(t)} className="whitespace-nowrap px-4 py-1.5 bg-slate-50 border border-slate-200 text-xs rounded-full hover:bg-blue-50 hover:text-[#00418E] hover:border-blue-100 text-slate-600 font-medium transition-colors">
-                           {t}
-                        </button>
+                        <button key={i} onClick={() => setNewMessage(t)} className="whitespace-nowrap px-3 py-1 bg-gray-100 text-xs rounded-full hover:bg-gray-200 text-gray-700 font-medium transition">{t}</button>
                      ))}
                   </div>
-                  
-                  <form onSubmit={handleSendMessage} className="flex items-end gap-3 mt-1">
-                     <button type="button" className="p-3 text-slate-400 hover:text-[#00418E] hover:bg-blue-50 rounded-full transition-colors"><ImageIcon size={24}/></button>
-                     <div className="flex-1 bg-slate-100 rounded-2xl px-5 py-3 focus-within:bg-white focus-within:ring-2 focus-within:ring-[#00418E]/20 focus-within:shadow-sm transition-all border border-transparent focus-within:border-blue-100">
-                        <input 
-                          value={newMessage} 
-                          onChange={e => setNewMessage(e.target.value)} 
-                          placeholder="Nhập tin nhắn..." 
-                          className="w-full bg-transparent outline-none text-sm text-slate-800 font-medium placeholder:text-slate-400"
-                        />
+                  <form onSubmit={handleSendMessage} className="flex items-end gap-2 mt-1">
+                     <button type="button" className="p-2 text-blue-500 hover:bg-blue-50 rounded-full"><ImageIcon size={24}/></button>
+                     <div className="flex-1 bg-gray-100 rounded-2xl px-4 py-2">
+                        <input value={newMessage} onChange={e => setNewMessage(e.target.value)} placeholder="Nhập tin nhắn..." className="w-full bg-transparent outline-none text-sm text-black"/>
                      </div>
-                     <button 
-                       type="submit" 
-                       disabled={!newMessage.trim()} 
-                       className="p-3 bg-[#00418E] text-white rounded-full hover:bg-[#00306b] disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-900/20 transition-all active:scale-95"
-                     >
-                        <Send size={20}/>
-                     </button>
+                     <button type="submit" disabled={!newMessage.trim()} className="p-2 text-blue-600 hover:bg-blue-50 rounded-full disabled:opacity-50"><Send size={24}/></button>
                   </form>
                </div>
             </>
          ) : (
-            <div className="flex-1 flex flex-col items-center justify-center text-slate-300 bg-slate-50/50">
-               <div className="w-24 h-24 bg-white rounded-full flex items-center justify-center shadow-sm mb-6">
-                  <CornerDownRight size={40} className="text-slate-200"/>
-               </div>
-               <p className="font-bold text-lg text-slate-400">Chọn một hội thoại để bắt đầu</p>
-               <p className="text-sm">Kết nối với cộng đồng sinh viên Bách Khoa</p>
+            <div className="flex-1 flex flex-col items-center justify-center text-gray-300">
+               <MessageCircle size={64} className="mb-4"/>
+               <p className="font-bold">Chọn hội thoại để bắt đầu</p>
             </div>
          )}
       </div>
