@@ -4,7 +4,8 @@ import { supabase } from "../services/supabase";
 import { useNavigate } from "react-router-dom";
 import {
   Trash2, ShieldCheck, Users, Package, Flag, Search, Ban, Unlock,
-  Loader2, ShieldAlert, CheckCircle2, Eye, BarChart3, GraduationCap
+  Loader2, ShieldAlert, CheckCircle2, Eye, BarChart3, GraduationCap,
+  X, AlertTriangle, Clock, Save
 } from "lucide-react";
 import { Product, DBProfile, Report, VerificationRequest } from "../types";
 import { useToast } from "../contexts/ToastContext";
@@ -26,21 +27,28 @@ interface AdminReport extends Report {
 const VisualEngine = () => (
   <style>{`
     :root { --primary: #00418E; }
-    body { background-color: #F8FAFC; color: #0F172A; }
-    .glass-panel { background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(24px); border: 1px solid rgba(255, 255, 255, 0.5); box-shadow: 0 16px 40px -10px rgba(0, 65, 142, 0.1); }
-    .animate-enter { animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
+    body { background-color: #F8FAFC; color: #0F172A; font-family: 'Inter', sans-serif; }
+    
+    .glass-panel { 
+      background: rgba(255, 255, 255, 0.8); 
+      backdrop-filter: blur(20px); 
+      border: 1px solid rgba(255, 255, 255, 0.6); 
+      box-shadow: 0 20px 40px -10px rgba(0, 65, 142, 0.1); 
+    }
+    
+    .animate-enter { animation: slideUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
     @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
-    .table-container::-webkit-scrollbar { height: 8px; width: 8px; }
+    
+    /* Custom Scrollbar */
+    .table-container::-webkit-scrollbar { height: 6px; width: 6px; }
     .table-container::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+    
+    /* Modal Animation */
+    .modal-overlay { animation: fadeIn 0.2s forwards; }
+    .modal-content { animation: scaleUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes scaleUp { from { opacity: 0; transform: scale(0.95); } to { opacity: 1; transform: scale(1); } }
   `}</style>
-);
-
-const AnimatedBackground = () => (
-  <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
-    <div className="absolute top-0 left-0 w-full h-full bg-gradient-to-br from-slate-50 to-blue-50/50"></div>
-    <div className="absolute top-0 left-1/4 w-96 h-96 bg-blue-400/20 rounded-full mix-blend-multiply filter blur-[120px]"></div>
-    <div className="absolute bottom-0 right-1/4 w-96 h-96 bg-cyan-400/20 rounded-full mix-blend-multiply filter blur-[120px]"></div>
-  </div>
 );
 
 const AdminPage: React.FC = () => {
@@ -54,10 +62,18 @@ const AdminPage: React.FC = () => {
   const [reports, setReports] = useState<AdminReport[]>([]);
   const [verifications, setVerifications] = useState<VerificationRequest[]>([]);
   
-  // UI
+  // UI & Filter
   const [activeTab, setActiveTab] = useState<'overview' | 'users' | 'verifications' | 'reports' | 'products'>('overview');
   const [isLoadingData, setIsLoadingData] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
+
+  // --- BAN MODAL STATE ---
+  const [isBanModalOpen, setIsBanModalOpen] = useState(false);
+  const [selectedUser, setSelectedUser] = useState<AdminUser | null>(null);
+  const [banType, setBanType] = useState<'temporary' | 'permanent' | 'unban'>('temporary');
+  const [banDuration, setBanDuration] = useState<number>(3); // Số ngày mặc định
+  const [banReason, setBanReason] = useState("");
+  const [isProcessing, setIsProcessing] = useState(false);
 
   useEffect(() => {
     if (!loading) {
@@ -92,60 +108,76 @@ const AdminPage: React.FC = () => {
         }));
         setReports(mappedReports);
       }
-    } catch (err) { console.error(err); addToast("Lỗi tải dữ liệu", "error"); } 
+    } catch (err) { console.error(err); } 
     finally { setIsLoadingData(false); }
   };
 
-  // --- LOGIC BAN ĐÃ ĐƯỢC FIX ---
-  const handleBanUser = async (userId: string, duration: number | null) => {
-    // duration: null = mở khóa
-    // duration: 9999 = vĩnh viễn (set 100 năm)
-    
-    let isBanned = false;
-    let banUntil = null;
-    let banReason = null;
-
-    if (duration) {
-      isBanned = true;
-      // Nếu là vĩnh viễn (9999), set thời gian +100 năm để ProfilePage luôn hiển thị bị cấm
-      const daysToAdd = duration === 9999 ? 36500 : duration; 
-      banUntil = new Date(Date.now() + daysToAdd * 24 * 60 * 60 * 1000).toISOString();
-      
-      banReason = duration === 9999 
-        ? "Vi phạm nghiêm trọng (Khóa vĩnh viễn)" 
-        : `Vi phạm quy định (Tạm khóa ${duration} ngày)`;
+  // --- OPEN MODAL ---
+  const openBanModal = (targetUser: AdminUser) => {
+    setSelectedUser(targetUser);
+    // Set default state based on current user status
+    if (targetUser.is_banned) {
+        setBanType('unban');
+        setBanReason("");
+    } else {
+        setBanType('temporary');
+        setBanDuration(3);
+        setBanReason("");
     }
+    setIsBanModalOpen(true);
+  };
 
-    const confirmMsg = duration 
-      ? `Xác nhận CẤM người dùng này ${duration === 9999 ? "vĩnh viễn" : `${duration} ngày`}?` 
-      : "Xác nhận MỞ KHÓA cho người dùng này?";
-      
-    if (!window.confirm(confirmMsg)) return;
+  // --- SUBMIT BAN ---
+  const handleSubmitBan = async () => {
+    if (!selectedUser) return;
+    setIsProcessing(true);
 
     try {
+      let isBanned = false;
+      let banUntil = null;
+      let finalReason = null;
+
+      if (banType !== 'unban') {
+        isBanned = true;
+        finalReason = banReason.trim() || (banType === 'permanent' ? "Vi phạm nghiêm trọng" : "Vi phạm quy định");
+        
+        if (banType === 'temporary') {
+          banUntil = new Date(Date.now() + banDuration * 24 * 60 * 60 * 1000).toISOString();
+        } else {
+          // Vĩnh viễn = 100 năm
+          banUntil = new Date(Date.now() + 36500 * 24 * 60 * 60 * 1000).toISOString();
+        }
+      }
+
       const { error } = await supabase
         .from("profiles")
         .update({ 
           is_banned: isBanned, 
           ban_until: banUntil,
-          ban_reason: banReason // Cập nhật lý do
+          ban_reason: finalReason
         })
-        .eq("id", userId);
+        .eq("id", selectedUser.id);
 
       if (error) throw error;
 
-      // Cập nhật UI ngay lập tức
-      setUsers(prev => prev.map(u => u.id === userId ? { 
+      // Update UI
+      setUsers(prev => prev.map(u => u.id === selectedUser.id ? { 
         ...u, 
         is_banned: isBanned, 
         ban_until: banUntil,
-        ban_reason: banReason 
+        ban_reason: finalReason 
       } : u));
-      
-      addToast("Đã cập nhật trạng thái người dùng", "success");
-    } catch (err: any) { addToast(err.message, "error"); }
+
+      addToast("Cập nhật thành công!", "success");
+      setIsBanModalOpen(false);
+    } catch (err: any) {
+      addToast(err.message, "error");
+    } finally {
+      setIsProcessing(false);
+    }
   };
 
+  // --- OTHER ACTIONS ---
   const handleVerify = async (reqId: string, userId: string, status: 'approved' | 'rejected', studentCode?: string) => {
     try {
       await supabase.from("verification_requests").update({ status }).eq("id", reqId);
@@ -185,28 +217,30 @@ const AdminPage: React.FC = () => {
   return (
     <div className="min-h-screen pt-24 pb-12 font-sans text-slate-800">
       <VisualEngine />
-      <AnimatedBackground />
+      <div className="fixed inset-0 -z-10 bg-slate-50"></div>
 
       <div className="max-w-7xl mx-auto px-4">
         {/* HEADER */}
         <div className="flex flex-col md:flex-row justify-between items-end mb-10 animate-enter gap-6">
           <div>
-            <h1 className="text-4xl font-black text-[#00418E] mb-2 flex items-center gap-3"><ShieldCheck size={40} className="text-[#00B0F0]" /> Admin Dashboard</h1>
-            <p className="text-slate-500 font-medium">Xin chào, <span className="font-bold text-slate-800">{user?.name}</span>.</p>
+            <h1 className="text-4xl font-black text-[#00418E] mb-2 flex items-center gap-3">
+              <ShieldCheck size={40} className="text-[#00B0F0]" /> Quản trị
+            </h1>
+            <p className="text-slate-500 font-medium">Xin chào, {user?.name}</p>
           </div>
-          <div className="flex gap-4">
-            <div className="glass-panel px-6 py-3 rounded-2xl flex flex-col items-center min-w-[100px]">
-              <span className="text-xs font-bold text-slate-400 uppercase">Thành viên</span>
-              <span className="text-2xl font-black text-[#00418E]">{users.length}</span>
-            </div>
-            <div className="glass-panel px-6 py-3 rounded-2xl flex flex-col items-center min-w-[100px]">
-              <span className="text-xs font-bold text-slate-400 uppercase">Chờ duyệt</span>
-              <span className="text-2xl font-black text-orange-500">{verifications.length}</span>
-            </div>
+          <div className="flex gap-3">
+             <div className="bg-white px-4 py-2 rounded-xl shadow-sm border border-slate-200 text-center">
+                <span className="block text-[10px] font-bold text-slate-400 uppercase">Thành viên</span>
+                <span className="text-xl font-black text-[#00418E]">{users.length}</span>
+             </div>
+             <div className="bg-white px-4 py-2 rounded-xl shadow-sm border border-slate-200 text-center">
+                <span className="block text-[10px] font-bold text-slate-400 uppercase">Chờ duyệt</span>
+                <span className="text-xl font-black text-orange-500">{verifications.length}</span>
+             </div>
           </div>
         </div>
 
-        {/* TABS */}
+        {/* NAV TABS */}
         <div className="flex gap-2 overflow-x-auto pb-4 mb-6 hide-scrollbar animate-enter">
           {[
             { id: 'overview', icon: BarChart3, label: 'Tổng quan' },
@@ -215,15 +249,14 @@ const AdminPage: React.FC = () => {
             { id: 'reports', icon: Flag, label: 'Báo cáo', badge: reports.filter(r => r.status === 'pending').length },
             { id: 'products', icon: Package, label: 'Sản phẩm' }
           ].map(tab => (
-            <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-[#00418E] text-white shadow-lg' : 'bg-white/60 text-slate-500 hover:bg-white'}`}>
+            <button key={tab.id} onClick={() => setActiveTab(tab.id as any)} className={`flex items-center gap-2 px-6 py-3 rounded-xl font-bold transition-all whitespace-nowrap ${activeTab === tab.id ? 'bg-[#00418E] text-white shadow-lg' : 'bg-white text-slate-500 hover:bg-slate-50'}`}>
               <tab.icon size={18} /> {tab.label} {tab.badge ? <span className="ml-1 px-1.5 py-0.5 rounded-full bg-red-500 text-white text-[10px]">{tab.badge}</span> : null}
             </button>
           ))}
         </div>
 
-        {/* CONTENT */}
+        {/* MAIN CONTENT */}
         <div className="animate-enter">
-          {/* ... (Các phần Overview, Verifications, Reports, Products giữ nguyên) ... */}
           {activeTab === 'overview' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="glass-panel p-8 rounded-[2rem]">
@@ -247,42 +280,43 @@ const AdminPage: React.FC = () => {
 
           {activeTab === 'users' && (
             <div className="glass-panel rounded-[2rem] overflow-hidden">
-              <div className="p-6 border-b border-white/50 flex justify-between items-center">
+              <div className="p-6 border-b border-white/50 flex justify-between items-center bg-white/40">
                 <h3 className="text-xl font-bold">Danh sách thành viên</h3>
-                <div className="relative w-96"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Tìm kiếm..." className="w-full pl-10 pr-4 py-2.5 rounded-xl border-none bg-white/50 focus:bg-white transition-all text-sm font-medium"/></div>
+                <div className="relative w-72"><Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} /><input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Tìm kiếm..." className="w-full pl-10 pr-4 py-2.5 rounded-xl border-none bg-white focus:ring-2 focus:ring-blue-100 outline-none transition-all text-sm font-medium"/></div>
               </div>
-              <div className="overflow-x-auto table-container">
+              <div className="overflow-x-auto table-container max-h-[600px]">
                 <table className="w-full text-left border-collapse">
-                  <thead className="bg-slate-50/80 text-xs font-bold text-slate-500 uppercase">
-                    <tr><th className="p-6">Thành viên</th><th className="p-6">Trạng thái</th><th className="p-6">Xác thực</th><th className="p-6 text-right">Thao tác</th></tr>
+                  <thead className="bg-slate-50/90 text-xs font-bold text-slate-500 uppercase sticky top-0 z-10 backdrop-blur-sm">
+                    <tr><th className="p-5">Thành viên</th><th className="p-5">Trạng thái</th><th className="p-5">Xác thực</th><th className="p-5 text-right">Thao tác</th></tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredUsers.map(u => {
                       const isBanned = u.is_banned; 
                       return (
-                        <tr key={u.id} className={`hover:bg-white/40 transition-colors ${isBanned ? 'bg-red-50/50' : ''}`}>
-                          <td className="p-6">
+                        <tr key={u.id} className={`hover:bg-blue-50/30 transition-colors ${isBanned ? 'bg-red-50/30' : ''}`}>
+                          <td className="p-5">
                             <div className="flex items-center gap-3">
                               <img src={u.avatar_url || `https://ui-avatars.com/api/?name=${u.name}`} className="w-10 h-10 rounded-full bg-white shadow-sm object-cover" />
-                              <div><p className="font-bold text-slate-800 text-sm">{u.name}</p><p className="text-xs text-slate-500">{u.email}</p><p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">{u.role} • MSSV: {u.student_code || '---'}</p></div>
+                              <div>
+                                <p className="font-bold text-slate-800 text-sm">{u.name}</p>
+                                <p className="text-xs text-slate-500">{u.email}</p>
+                                <p className="text-[10px] font-bold text-slate-400 uppercase mt-0.5">{u.role} • MSSV: {u.student_code || '---'}</p>
+                              </div>
                             </div>
                           </td>
-                          <td className="p-6">
-                            {isBanned ? <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-100 text-red-700 text-xs font-bold"><ShieldAlert size={12}/> Bị cấm</span> : <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-green-100 text-green-700 text-xs font-bold"><CheckCircle2 size={12}/> Hoạt động</span>}
+                          <td className="p-5">
+                            {isBanned ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-100 text-red-700 text-xs font-bold"><ShieldAlert size={12}/> Bị cấm</span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-green-100 text-green-700 text-xs font-bold"><CheckCircle2 size={12}/> Hoạt động</span>
+                            )}
                           </td>
-                          <td className="p-6">{u.verified_status === 'verified' ? <span className="text-blue-600 font-bold text-xs">Đã xác thực</span> : <span className="text-slate-400 text-xs">Chưa xác thực</span>}</td>
-                          <td className="p-6 text-right">
+                          <td className="p-5">{u.verified_status === 'verified' ? <span className="text-blue-600 font-bold text-xs">Đã xác thực</span> : <span className="text-slate-400 text-xs">Chưa xác thực</span>}</td>
+                          <td className="p-5 text-right">
                             {u.role !== 'admin' && (
-                              <div className="flex justify-end gap-2">
-                                {isBanned ? (
-                                  <button onClick={() => handleBanUser(u.id, null)} className="p-2 rounded-lg bg-green-100 text-green-600 hover:bg-green-200 transition-colors" title="Mở khóa"><Unlock size={16} /></button>
-                                ) : (
-                                  <>
-                                    <button onClick={() => handleBanUser(u.id, 3)} className="px-3 py-1.5 rounded-lg bg-orange-100 text-orange-700 text-xs font-bold hover:bg-orange-200 transition-colors">3 ngày</button>
-                                    <button onClick={() => handleBanUser(u.id, 9999)} className="p-2 rounded-lg bg-red-100 text-red-600 hover:bg-red-200 transition-colors" title="Cấm vĩnh viễn"><Ban size={16} /></button>
-                                  </>
-                                )}
-                              </div>
+                              <button onClick={() => openBanModal(u)} className={`px-4 py-2 rounded-lg font-bold text-xs transition-colors ${isBanned ? 'bg-green-100 text-green-700 hover:bg-green-200' : 'bg-red-100 text-red-700 hover:bg-red-200'}`}>
+                                {isBanned ? <><Unlock size={14} className="inline mr-1"/> Mở khóa</> : <><Ban size={14} className="inline mr-1"/> Xử lý</>}
+                              </button>
                             )}
                           </td>
                         </tr>
@@ -294,6 +328,7 @@ const AdminPage: React.FC = () => {
             </div>
           )}
 
+          {/* ... (Các tab Reports, Verifications, Products giữ nguyên) ... */}
           {activeTab === 'verifications' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {verifications.map(req => (
@@ -357,6 +392,96 @@ const AdminPage: React.FC = () => {
           )}
         </div>
       </div>
+
+      {/* --- BAN MODAL (NEW UI) --- */}
+      {isBanModalOpen && selectedUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 modal-overlay bg-black/40 backdrop-blur-sm">
+          <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden modal-content">
+            {/* Modal Header */}
+            <div className="bg-[#00418E] px-6 py-4 flex justify-between items-center">
+              <h3 className="text-white font-bold text-lg flex items-center gap-2">
+                <AlertTriangle size={20} className="text-yellow-400"/> Xử lý vi phạm
+              </h3>
+              <button onClick={() => setIsBanModalOpen(false)} className="bg-white/20 p-1.5 rounded-full text-white hover:bg-white/30"><X size={16}/></button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6">
+              <div className="flex items-center gap-3 mb-6 p-3 bg-slate-50 rounded-xl border border-slate-100">
+                <img src={selectedUser.avatar_url || `https://ui-avatars.com/api/?name=${selectedUser.name}`} className="w-12 h-12 rounded-full border-2 border-white shadow-sm"/>
+                <div>
+                  <p className="font-bold text-slate-800">{selectedUser.name}</p>
+                  <p className="text-xs text-slate-500">{selectedUser.email}</p>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                {/* Actions */}
+                <div className="grid grid-cols-3 gap-2 bg-slate-100 p-1 rounded-xl">
+                  {[
+                    { id: 'unban', label: 'Mở khóa' },
+                    { id: 'temporary', label: 'Tạm khóa' },
+                    { id: 'permanent', label: 'Vĩnh viễn' }
+                  ].map((opt) => (
+                    <button
+                      key={opt.id}
+                      onClick={() => setBanType(opt.id as any)}
+                      className={`py-2 rounded-lg text-xs font-bold transition-all ${banType === opt.id ? 'bg-white shadow text-[#00418E]' : 'text-slate-500 hover:text-slate-700'}`}
+                    >
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Duration Input */}
+                {banType === 'temporary' && (
+                  <div className="animate-enter">
+                    <label className="text-xs font-bold text-slate-500 mb-1.5 block">Thời gian (ngày)</label>
+                    <div className="relative">
+                      <input 
+                        type="number" 
+                        min="1" 
+                        value={banDuration} 
+                        onChange={e => setBanDuration(parseInt(e.target.value) || 1)}
+                        className="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl font-bold text-slate-800 focus:border-[#00418E] outline-none"
+                      />
+                      <Clock size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400"/>
+                    </div>
+                  </div>
+                )}
+
+                {/* Reason Input */}
+                {banType !== 'unban' && (
+                  <div className="animate-enter">
+                    <label className="text-xs font-bold text-slate-500 mb-1.5 block">Lý do xử phạt <span className="text-red-500">*</span></label>
+                    <textarea 
+                      rows={3}
+                      value={banReason}
+                      onChange={e => setBanReason(e.target.value)}
+                      placeholder="VD: Spam tin nhắn, bom hàng..."
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm font-medium focus:border-[#00418E] outline-none resize-none"
+                    />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
+              <button onClick={() => setIsBanModalOpen(false)} className="px-5 py-2.5 rounded-xl font-bold text-slate-500 hover:bg-slate-200 transition-colors text-sm">Hủy bỏ</button>
+              <button 
+                onClick={handleSubmitBan} 
+                disabled={isProcessing || (banType !== 'unban' && !banReason.trim())}
+                className="px-6 py-2.5 rounded-xl font-bold text-white bg-[#00418E] hover:bg-[#00306b] shadow-lg shadow-blue-900/20 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 text-sm transition-all"
+              >
+                {isProcessing ? <Loader2 size={16} className="animate-spin"/> : <Save size={16}/>}
+                Lưu thay đổi
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 };
