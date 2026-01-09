@@ -96,23 +96,24 @@ const AdminPage: React.FC = () => {
     finally { setIsLoadingData(false); }
   };
 
-  // --- ACTIONS (FIXED BAN LOGIC) ---
-
+  // --- LOGIC BAN ĐÃ ĐƯỢC FIX ---
   const handleBanUser = async (userId: string, duration: number | null) => {
-    // duration: null = mở khóa, 9999 = vĩnh viễn, số khác = số ngày
+    // duration: null = mở khóa
+    // duration: 9999 = vĩnh viễn (set 100 năm)
     
     let isBanned = false;
     let banUntil = null;
     let banReason = null;
 
     if (duration) {
-      isBanned = true; // Luôn set true để chặn đăng nhập ngay
-      if (duration !== 9999) {
-        banUntil = new Date(Date.now() + duration * 24 * 60 * 60 * 1000).toISOString();
-        banReason = `Vi phạm quy định (Tạm khóa ${duration} ngày)`;
-      } else {
-        banReason = "Vi phạm nghiêm trọng (Khóa vĩnh viễn)";
-      }
+      isBanned = true;
+      // Nếu là vĩnh viễn (9999), set thời gian +100 năm để ProfilePage luôn hiển thị bị cấm
+      const daysToAdd = duration === 9999 ? 36500 : duration; 
+      banUntil = new Date(Date.now() + daysToAdd * 24 * 60 * 60 * 1000).toISOString();
+      
+      banReason = duration === 9999 
+        ? "Vi phạm nghiêm trọng (Khóa vĩnh viễn)" 
+        : `Vi phạm quy định (Tạm khóa ${duration} ngày)`;
     }
 
     const confirmMsg = duration 
@@ -127,13 +128,20 @@ const AdminPage: React.FC = () => {
         .update({ 
           is_banned: isBanned, 
           ban_until: banUntil,
-          ban_reason: banReason
+          ban_reason: banReason // Cập nhật lý do
         })
         .eq("id", userId);
 
       if (error) throw error;
 
-      setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_banned: isBanned, ban_until: banUntil } : u));
+      // Cập nhật UI ngay lập tức
+      setUsers(prev => prev.map(u => u.id === userId ? { 
+        ...u, 
+        is_banned: isBanned, 
+        ban_until: banUntil,
+        ban_reason: banReason 
+      } : u));
+      
       addToast("Đã cập nhật trạng thái người dùng", "success");
     } catch (err: any) { addToast(err.message, "error"); }
   };
@@ -215,6 +223,7 @@ const AdminPage: React.FC = () => {
 
         {/* CONTENT */}
         <div className="animate-enter">
+          {/* ... (Các phần Overview, Verifications, Reports, Products giữ nguyên) ... */}
           {activeTab === 'overview' && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="glass-panel p-8 rounded-[2rem]">
@@ -249,7 +258,6 @@ const AdminPage: React.FC = () => {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredUsers.map(u => {
-                      // Logic hiển thị Ban: Chỉ cần is_banned là true là coi như Ban (bất kể thời gian)
                       const isBanned = u.is_banned; 
                       return (
                         <tr key={u.id} className={`hover:bg-white/40 transition-colors ${isBanned ? 'bg-red-50/50' : ''}`}>
