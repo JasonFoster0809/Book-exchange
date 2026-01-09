@@ -1,20 +1,47 @@
 import React, { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Heart, MessageCircle, Share2, ArrowLeft, Eye, MapPin, Clock, Star, Box, CheckCircle2, ShieldCheck, Calendar,Loader2,ArrowRight } from "lucide-react";
+import {
+  Heart, MessageCircle, Share2, ArrowLeft, Eye, MapPin,
+  Clock, Star, Box, ShieldCheck, Calendar, ArrowRight,
+  Loader2, AlertTriangle, User, CheckCircle2
+} from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { Product } from "../types";
 
-// --- STYLES ---
+// --- STYLES & VISUALS ---
 const VisualEngine = () => (
   <style>{`
     :root { --primary: #00418E; }
     body { background-color: #F8FAFC; }
-    .glass-panel { background: rgba(255,255,255,0.8); backdrop-filter: blur(20px); border: 1px solid rgba(255,255,255,0.6); box-shadow: 0 20px 40px -10px rgba(0,65,142,0.1); }
-    .animate-enter { animation: slideUp 0.6s ease-out forwards; }
+    
+    .glass-bar { 
+      background: rgba(255, 255, 255, 0.85); 
+      backdrop-filter: blur(16px); 
+      border-bottom: 1px solid rgba(255, 255, 255, 0.5); 
+    }
+
+    .glass-panel { 
+      background: rgba(255, 255, 255, 0.75); 
+      backdrop-filter: blur(24px); 
+      border: 1px solid rgba(255, 255, 255, 0.6); 
+      box-shadow: 0 20px 40px -10px rgba(0, 65, 142, 0.1); 
+    }
+
+    .animate-enter { animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
     @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
   `}</style>
+);
+
+const AuroraBackground = () => (
+  <div className="fixed inset-0 -z-10 overflow-hidden pointer-events-none">
+    <div className="absolute top-0 left-0 w-full h-[600px] bg-gradient-to-b from-blue-50/80 to-transparent"></div>
+    <div className="absolute top-[-10%] right-[-10%] w-[600px] h-[600px] bg-blue-400/10 rounded-full mix-blend-multiply filter blur-[100px]"></div>
+    <div className="absolute top-[30%] left-[-10%] w-[500px] h-[500px] bg-cyan-400/10 rounded-full mix-blend-multiply filter blur-[100px]"></div>
+  </div>
 );
 
 const ProductDetailPage: React.FC = () => {
@@ -27,13 +54,14 @@ const ProductDetailPage: React.FC = () => {
   const [seller, setSeller] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [activeImg, setActiveImg] = useState(0);
+  const [isLiked, setIsLiked] = useState(false);
 
   useEffect(() => {
     const fetchData = async () => {
       if (!id) return;
       setLoading(true);
       try {
-        // FETCH PRODUCT + SELLER (JOIN)
+        // 1. Fetch Product + Seller Info
         const { data: pData, error } = await supabase
           .from("products")
           .select(`*, profiles:seller_id (*)`)
@@ -42,7 +70,7 @@ const ProductDetailPage: React.FC = () => {
 
         if (error || !pData) throw new Error("Sản phẩm không tồn tại");
 
-        // MAP DATA
+        // 2. Map Data (Snake -> Camel)
         const mappedProduct: Product = {
           ...pData,
           sellerId: pData.seller_id,
@@ -55,8 +83,19 @@ const ProductDetailPage: React.FC = () => {
         setProduct(mappedProduct);
         setSeller(pData.profiles);
         
-        // Count view
+        // 3. Increment View
         supabase.rpc("increment_view_count", { product_id: id });
+
+        // 4. Check Saved Status
+        if (currentUser) {
+          const { data: sData } = await supabase
+            .from("saved_products")
+            .select("id")
+            .eq("user_id", currentUser.id)
+            .eq("product_id", id)
+            .maybeSingle();
+          if (sData) setIsLiked(true);
+        }
 
       } catch (err) {
         addToast("Không tìm thấy sản phẩm", "error");
@@ -66,86 +105,234 @@ const ProductDetailPage: React.FC = () => {
       }
     };
     fetchData();
-  }, [id]);
+  }, [id, currentUser]);
+
+  const handleLike = async () => {
+    if (!currentUser) return navigate("/auth");
+    if (!product) return;
+    
+    // Optimistic UI update
+    const oldState = isLiked;
+    setIsLiked(!isLiked);
+
+    try {
+      if (oldState) {
+        await supabase.from("saved_products").delete().eq("user_id", currentUser.id).eq("product_id", product.id);
+      } else {
+        await supabase.from("saved_products").insert({ user_id: currentUser.id, product_id: product.id });
+      }
+    } catch {
+      setIsLiked(oldState); // Revert on error
+    }
+  };
 
   const startChat = () => {
     if (!currentUser) return navigate("/auth");
+    if (currentUser.id === seller?.id) return addToast("Đây là sản phẩm của bạn!", "info");
     navigate(`/chat?partnerId=${product?.sellerId}&productId=${product?.id}`);
   };
 
-  if (loading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-[#00418E]"/></div>;
+  if (loading) return (
+    <div className="h-screen flex flex-col items-center justify-center bg-slate-50">
+      <Loader2 className="animate-spin text-[#00418E] mb-4" size={40} />
+      <p className="text-slate-500 font-medium">Đang tải thông tin...</p>
+    </div>
+  );
+  
   if (!product) return null;
 
   return (
     <div className="min-h-screen pb-32 font-sans text-slate-800">
       <VisualEngine />
+      <AuroraBackground />
       
-      {/* HEADER */}
-      <div className="sticky top-0 z-50 border-b border-white/20 bg-white/80 backdrop-blur-md">
+      {/* --- STICKY HEADER --- */}
+      <div className="sticky top-0 z-50 glass-bar transition-all">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
-          <button onClick={() => navigate(-1)} className="rounded-full p-2 hover:bg-slate-100"><ArrowLeft size={20}/></button>
-          <span className="font-bold line-clamp-1">{product.title}</span>
-          <div className="flex gap-2"><button className="p-2 hover:bg-slate-100 rounded-full"><Share2 size={20}/></button></div>
+          <button onClick={() => navigate(-1)} className="group flex items-center gap-2 rounded-full py-2 pr-4 pl-2 hover:bg-slate-100/50 transition-colors">
+            <div className="bg-white p-1.5 rounded-full shadow-sm group-hover:scale-110 transition-transform">
+              <ArrowLeft size={18} className="text-slate-700"/>
+            </div>
+            <span className="font-bold text-sm text-slate-700 hidden sm:block">Quay lại</span>
+          </button>
+          
+          <span className="font-bold text-slate-800 line-clamp-1 max-w-[200px] sm:max-w-md opacity-0 sm:opacity-100 transition-opacity">
+            {product.title}
+          </span>
+
+          <div className="flex gap-2">
+            <button 
+              onClick={handleLike}
+              className={`p-2.5 rounded-full border transition-all ${isLiked ? 'bg-red-50 border-red-200 text-red-500' : 'bg-white border-slate-200 text-slate-400 hover:text-red-500'}`}
+            >
+              <Heart size={20} className={isLiked ? "fill-current" : ""} />
+            </button>
+            <button className="p-2.5 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-[#00418E] hover:border-blue-200 transition-colors">
+              <Share2 size={20}/>
+            </button>
+          </div>
         </div>
       </div>
 
-      <main className="mx-auto max-w-7xl px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-10">
+      {/* --- MAIN CONTENT --- */}
+      <main className="mx-auto max-w-7xl px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
         
-        {/* LEFT: IMAGES */}
-        <div className="lg:col-span-7 space-y-6 animate-enter">
-          <div className="aspect-4/3 rounded-[2rem] overflow-hidden bg-white shadow-lg border border-white/60">
-            <img src={product.images[activeImg]} className="w-full h-full object-contain p-4"/>
-          </div>
-          {product.images.length > 1 && (
-            <div className="flex gap-3 overflow-x-auto pb-2">
-              {product.images.map((img, i) => (
-                <button key={i} onClick={() => setActiveImg(i)} className={`w-20 h-20 rounded-xl border-2 overflow-hidden ${activeImg === i ? 'border-[#00418E]' : 'border-transparent opacity-60'}`}>
-                  <img src={img} className="w-full h-full object-cover"/>
-                </button>
-              ))}
-            </div>
-          )}
+        {/* LEFT COLUMN: IMAGES & DESC (Chiếm 7 phần) */}
+        <div className="lg:col-span-7 space-y-8 animate-enter">
           
+          {/* Image Gallery */}
+          <div className="space-y-4">
+            <div className="aspect-[4/3] w-full rounded-[2rem] overflow-hidden bg-white shadow-xl border border-white/60 relative group">
+              <img 
+                src={product.images[activeImg]} 
+                className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-105"
+                alt="Product Main"
+              />
+              {product.images.length > 1 && (
+                <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/50 backdrop-blur-md px-3 py-1 rounded-full text-white text-xs font-bold">
+                  {activeImg + 1} / {product.images.length}
+                </div>
+              )}
+            </div>
+            
+            {/* Thumbnails */}
+            {product.images.length > 1 && (
+              <div className="flex gap-3 overflow-x-auto pb-2 hide-scrollbar snap-x">
+                {product.images.map((img, i) => (
+                  <button 
+                    key={i} 
+                    onClick={() => setActiveImg(i)} 
+                    className={`relative w-20 h-20 flex-shrink-0 rounded-2xl overflow-hidden border-2 transition-all snap-start ${activeImg === i ? 'border-[#00418E] shadow-md scale-105' : 'border-transparent opacity-60 hover:opacity-100'}`}
+                  >
+                    <img src={img} className="w-full h-full object-cover"/>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Description Panel */}
           <div className="glass-panel p-8 rounded-[2rem]">
-            <h3 className="font-bold text-lg mb-4 flex gap-2"><ShieldCheck className="text-blue-600"/> Mô tả chi tiết</h3>
-            <p className="text-slate-600 leading-relaxed whitespace-pre-wrap">{product.description || "Chưa có mô tả."}</p>
+            <h3 className="font-bold text-lg mb-6 flex items-center gap-2 text-slate-800">
+              <ShieldCheck className="text-[#00418E]" size={20}/> 
+              Mô tả chi tiết
+            </h3>
+            <div className="prose prose-sm max-w-none text-slate-600 leading-relaxed whitespace-pre-wrap font-medium">
+              {product.description || "Người bán chưa nhập mô tả cho sản phẩm này."}
+            </div>
+          </div>
+
+          {/* Safety Tips (New) */}
+          <div className="bg-orange-50/80 border border-orange-100 p-6 rounded-[2rem] flex gap-4 items-start">
+            <div className="bg-orange-100 p-2 rounded-full text-orange-600 shrink-0">
+              <AlertTriangle size={20}/>
+            </div>
+            <div>
+              <h4 className="font-bold text-orange-800 text-sm mb-1">Lưu ý an toàn</h4>
+              <p className="text-xs text-orange-700 leading-relaxed">
+                Nên giao dịch trực tiếp tại các khu vực đông người trong trường (Sảnh H6, Thư viện). 
+                Kiểm tra kỹ sản phẩm trước khi thanh toán. Không chuyển khoản trước khi nhận hàng.
+              </p>
+            </div>
           </div>
         </div>
 
-        {/* RIGHT: INFO */}
+        {/* RIGHT COLUMN: INFO & ACTIONS (Chiếm 5 phần) */}
         <div className="lg:col-span-5 space-y-6 animate-enter" style={{animationDelay: '100ms'}}>
-          <div className="glass-panel p-8 rounded-[2rem] sticky top-24">
-            <div className="flex justify-between items-start mb-4">
-              <span className="bg-blue-50 text-[#00418E] px-3 py-1 rounded-lg text-xs font-black uppercase tracking-wider">{product.category}</span>
-              <span className="flex items-center gap-1 text-xs font-bold text-slate-400"><Eye size={14}/> {product.view_count}</span>
+          
+          <div className="glass-panel p-8 rounded-[2.5rem] lg:sticky lg:top-24 border-t-4 border-t-[#00418E]">
+            {/* Meta Info */}
+            <div className="flex justify-between items-start mb-6">
+              <span className="bg-blue-50 text-[#00418E] px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider border border-blue-100">
+                {product.category}
+              </span>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 bg-white/50 px-2 py-1 rounded-lg">
+                <Eye size={14}/> {product.view_count}
+              </div>
             </div>
             
-            <h1 className="text-3xl font-black text-slate-900 mb-4 leading-tight">{product.title}</h1>
-            <p className="text-4xl font-black text-[#00418E] mb-8">{product.price === 0 ? "Miễn phí" : new Intl.NumberFormat('vi-VN').format(product.price) + 'đ'}</p>
+            {/* Title & Price */}
+            <h1 className="text-3xl font-black text-slate-900 mb-4 leading-tight">
+              {product.title}
+            </h1>
+            <p className="text-4xl font-black text-[#00418E] mb-8 tracking-tight">
+              {product.price === 0 ? "Miễn phí" : new Intl.NumberFormat('vi-VN').format(product.price) + 'đ'}
+            </p>
 
+            {/* Attribute Grid */}
             <div className="grid grid-cols-2 gap-3 mb-8">
-              <div className="p-3 bg-white/50 rounded-xl border border-white"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Tình trạng</p><p className="font-bold text-sm flex gap-2 items-center"><Star size={14} className="text-yellow-500"/> {product.condition}</p></div>
-              <div className="p-3 bg-white/50 rounded-xl border border-white"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Giao dịch</p><p className="font-bold text-sm flex gap-2 items-center"><Box size={14} className="text-blue-500"/> {product.tradeMethod === 'direct' ? 'Trực tiếp' : 'Ship COD'}</p></div>
-              <div className="p-3 bg-white/50 rounded-xl border border-white"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Khu vực</p><p className="font-bold text-sm flex gap-2 items-center"><MapPin size={14} className="text-red-500"/> {product.location}</p></div>
-              <div className="p-3 bg-white/50 rounded-xl border border-white"><p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Ngày đăng</p><p className="font-bold text-sm flex gap-2 items-center"><Calendar size={14} className="text-slate-500"/> {new Date(product.postedAt).toLocaleDateString()}</p></div>
+              <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm hover:scale-[1.02] transition-transform">
+                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Tình trạng</p>
+                <p className="font-bold text-sm text-slate-700 flex gap-2 items-center">
+                  <Star size={14} className="text-yellow-500 fill-yellow-500"/> {product.condition}
+                </p>
+              </div>
+              <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm hover:scale-[1.02] transition-transform">
+                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Giao dịch</p>
+                <p className="font-bold text-sm text-slate-700 flex gap-2 items-center">
+                  <Box size={14} className="text-blue-500"/> {product.tradeMethod === 'direct' ? 'Trực tiếp' : 'Ship COD'}
+                </p>
+              </div>
+              <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm hover:scale-[1.02] transition-transform">
+                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Khu vực</p>
+                <p className="font-bold text-sm text-slate-700 flex gap-2 items-center">
+                  <MapPin size={14} className="text-red-500"/> {product.location}
+                </p>
+              </div>
+              <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm hover:scale-[1.02] transition-transform">
+                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Ngày đăng</p>
+                <p className="font-bold text-sm text-slate-700 flex gap-2 items-center">
+                  <Calendar size={14} className="text-slate-500"/> {new Date(product.postedAt).toLocaleDateString('vi-VN')}
+                </p>
+              </div>
             </div>
 
             {/* Seller Card */}
-            <div className="flex items-center gap-4 p-4 bg-white/60 rounded-2xl mb-8 cursor-pointer hover:bg-white transition-colors" onClick={() => navigate(`/profile/${seller?.id}`)}>
-              <img src={seller?.avatar_url || `https://ui-avatars.com/api/?name=${seller?.name}`} className="w-12 h-12 rounded-full border bg-slate-200 object-cover"/>
-              <div className="flex-1">
-                <h4 className="font-bold text-slate-900">{seller?.name || "Người bán"}</h4>
-                <p className="text-xs text-slate-500">Hoạt động sôi nổi • Phản hồi nhanh</p>
+            <div 
+              className="group flex items-center gap-4 p-4 bg-white/50 border border-white rounded-2xl mb-8 cursor-pointer hover:bg-white hover:shadow-md transition-all" 
+              onClick={() => navigate(`/profile/${seller?.id}`)}
+            >
+              <div className="relative">
+                <img 
+                  src={seller?.avatar_url || `https://ui-avatars.com/api/?name=${seller?.name || 'User'}&background=random`} 
+                  className="w-14 h-14 rounded-full border-2 border-white shadow-sm object-cover"
+                />
+                {seller?.verified_status === 'verified' && (
+                  <div className="absolute -bottom-1 -right-1 bg-blue-500 text-white p-0.5 rounded-full border-2 border-white" title="Đã xác thực SV">
+                    <CheckCircle2 size={12}/>
+                  </div>
+                )}
               </div>
-              <div className="p-2 bg-slate-100 rounded-full text-slate-400"><ArrowRight size={16}/></div>
+              
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 mb-0.5">
+                  <h4 className="font-bold text-slate-900 truncate">{seller?.name || "Người dùng ẩn danh"}</h4>
+                  <span className="px-1.5 py-0.5 bg-slate-100 rounded text-[10px] font-bold text-slate-500">
+                    {seller?.student_code ? 'SV BK' : 'Member'}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 text-xs text-slate-500">
+                  <span className="flex items-center gap-1 text-yellow-500 font-bold"><Star size={10} fill="currentColor"/> 5.0</span>
+                  <span className="w-1 h-1 rounded-full bg-slate-300"></span>
+                  <span>Phản hồi nhanh</span>
+                </div>
+              </div>
+              <div className="p-2 bg-slate-100 rounded-full text-slate-400 group-hover:text-[#00418E] group-hover:bg-blue-50 transition-colors">
+                <ArrowRight size={18}/>
+              </div>
             </div>
 
-            <div className="flex gap-3">
-              <button onClick={startChat} className="flex-1 bg-[#00418E] text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-900/20 hover:scale-[1.02] transition-transform flex items-center justify-center gap-2">
-                <MessageCircle/> Nhắn tin ngay
+            {/* Action Buttons */}
+            <div className="flex flex-col gap-3">
+              <button 
+                onClick={startChat} 
+                className="w-full bg-gradient-to-r from-[#00418E] to-[#0065D1] text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-900/20 hover:shadow-blue-900/30 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-lg"
+              >
+                <MessageCircle size={24}/> Liên hệ người bán
               </button>
-              <button className="p-4 border-2 border-slate-200 rounded-2xl text-slate-400 hover:border-red-200 hover:text-red-500 hover:bg-red-50 transition-colors">
-                <Heart/>
+              
+              <button className="w-full bg-white text-slate-600 border border-slate-200 py-3 rounded-2xl font-bold hover:bg-slate-50 transition-colors text-sm">
+                Báo cáo tin này
               </button>
             </div>
           </div>
