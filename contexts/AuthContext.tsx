@@ -1,6 +1,20 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase } from '../services/supabase';
-import { User, DBProfile } from '../types';
+import { User } from '../types';
+
+// Định nghĩa kiểu dữ liệu khớp với DB mới (Snake Case)
+interface DBProfile {
+  id: string;
+  name: string | null;
+  email?: string;
+  avatar_url: string | null;
+  role: string;
+  is_banned: boolean;
+  verified_status: string;
+  student_code: string | null;
+  ban_reason?: string;
+  ban_until?: string | null;
+}
 
 interface AuthContextType {
   user: User | null;
@@ -30,20 +44,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         .from('profiles')
         .select('*')
         .eq('id', sessionUser.id)
-        .maybeSingle(); 
+        .maybeSingle();
 
-      // 2. NẾU CHƯA CÓ PROFILE (data null) -> TỰ TẠO MỚI NGAY LẬP TỨC
+      // 2. NẾU CHƯA CÓ PROFILE -> TỰ ĐỘNG TẠO MỚI (Logic Fail-safe)
       if (!data) {
-        console.log("User chưa có profile, đang khởi tạo...");
+        console.warn("Profile chưa tồn tại. Đang khởi tạo...");
         
-        // Lấy thông tin từ lúc đăng ký (Metadata)
         const meta = sessionUser.user_metadata || {};
         const displayName = meta.full_name || meta.name || sessionUser.email?.split('@')[0] || 'User';
         
         const newProfile = {
-          id: sessionUser.id, // Quan trọng: ID phải khớp Auth
-          email: sessionUser.email,
+          id: sessionUser.id,
           name: displayName,
+          email: sessionUser.email,
           student_code: meta.student_code || null,
           avatar_url: meta.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`,
           role: 'user',
@@ -51,47 +64,45 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           is_banned: false
         };
 
-        // Thực hiện tạo mới
-        const { data: createdProfile, error: createError } = await supabase
+        const { data: created, error: createErr } = await supabase
           .from('profiles')
           .insert(newProfile)
           .select()
           .single();
 
-        if (createError) {
-          console.error("Lỗi khởi tạo profile:", createError);
-          // Nếu tạo thất bại, logout để tránh lỗi app
+        if (createErr) {
+          console.error("Lỗi tạo profile:", createErr);
+          // Nếu tạo thất bại, logout để tránh lỗi data
           await supabase.auth.signOut();
           setUser(null);
           setLoading(false);
           return;
         }
-
-        // Gán data vừa tạo để dùng luôn
-        data = createdProfile;
+        data = created;
       }
 
-      // 3. Xử lý dữ liệu Profile (đã có hoặc vừa tạo)
+      // 3. Xử lý data (đã có hoặc vừa tạo)
       if (data && mounted.current) {
-        const profile = data as DBProfile; // Ép kiểu để typescript hiểu
+        const profile = data as unknown as DBProfile;
 
-        // Kiểm tra bị cấm
+        // Kiểm tra Ban
         if (profile.is_banned) {
           await supabase.auth.signOut();
           setUser(null);
+          setIsAdmin(false);
+          setLoading(false);
           alert(`Tài khoản bị khóa: ${profile.ban_reason || 'Vi phạm chính sách'}`);
           return;
         }
 
-        // Map dữ liệu vào State
-        const finalName = profile.name || 'User';
         const userRole = profile.role === 'admin' ? 'admin' : 'user';
+        const finalName = profile.name || 'User';
         
         setUser({
           id: profile.id,
           email: sessionUser.email,
           name: finalName,
-          studentId: profile.student_code || '',
+          studentId: profile.student_code || '', 
           avatar: profile.avatar_url || '',
           isVerified: profile.verified_status === 'verified',
           role: userRole,
@@ -100,10 +111,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         });
         
         setIsAdmin(userRole === 'admin');
-        setIsRestricted(false);
+        setIsRestricted(false); 
       }
-    } catch (err) {
-      console.error("Lỗi AuthContext:", err);
+    } catch (error: any) {
+      console.error("Lỗi AuthContext:", error);
+      // Xử lý lỗi Refresh Token (Clear cache nếu cần)
+      if (error?.message?.includes("Refresh Token")) {
+         await supabase.auth.signOut();
+         setUser(null);
+      }
       if (mounted.current) setUser(null);
     } finally {
       if (mounted.current) setLoading(false);
@@ -113,23 +129,24 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     mounted.current = true;
 
-    // Kiểm tra session khi mới vào
+    // Kiểm tra session hiện tại
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         fetchProfile(session.user);
       } else {
-        setLoading(false);
+        if (mounted.current) setLoading(false);
       }
     });
 
-    // Lắng nghe sự kiện đăng nhập/đăng xuất
+    // Lắng nghe thay đổi Auth
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (mounted.current) {
-        if ((event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') && session?.user) {
+        if ((event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') && session?.user) {
           fetchProfile(session.user);
         } else if (event === 'SIGNED_OUT') {
           setUser(null);
           setIsAdmin(false);
+          setIsRestricted(false);
           setLoading(false);
         }
       }
@@ -141,15 +158,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     };
   }, []);
 
-  // --- CÁC HÀM AUTH ---
+  // --- ACTIONS ---
 
   const signIn = async (email: string, password: string) => {
     return await supabase.auth.signInWithPassword({ email, password });
   };
 
   const signUp = async (email: string, password: string, name: string, studentId: string) => {
-    // Vẫn gửi metadata để lưu tạm, phòng trường hợp cần dùng
-    const { error } = await supabase.auth.signUp({
+    const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { 
@@ -159,7 +175,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         } 
       },
     });
-    return { error };
+    return { error: error || null };
   };
 
   const signOut = async () => {
