@@ -1,18 +1,6 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase } from '../services/supabase';
-import { User } from '../types';
-
-// Định nghĩa kiểu dữ liệu khớp với DB mới
-interface DBProfile {
-  id: string;
-  name: string; // hoặc full_name tùy bạn sửa trong SQL
-  avatar_url: string | null;
-  role: string;
-  is_banned: boolean; // DB mới dùng is_banned
-  verified_status: string; // DB mới dùng verified_status (enum)
-  student_code: string | null; // DB mới dùng student_code
-  ban_reason?: string;
-}
+import { User, DBProfile } from '../types';
 
 interface AuthContextType {
   user: User | null;
@@ -37,20 +25,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const fetchProfile = async (sessionUser: any) => {
     try {
-      // Fetch profile từ bảng mới
+      // Fetch profile từ bảng 'profiles' (SQL mới)
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', sessionUser.id)
         .single();
 
-      if (error) throw error;
+      if (error) {
+        console.warn("Chưa tìm thấy profile, chờ trigger...", error);
+        // Có thể retry hoặc fallback nếu cần, nhưng thường trigger chạy rất nhanh
+      }
 
       if (data && mounted.current) {
-        // Ép kiểu sang DBProfile để mapping
-        const profile = data as unknown as DBProfile; 
+        // Ép kiểu về DBProfile (snake_case)
+        const profile = data as DBProfile; 
 
-        // 1. KIỂM TRA BAN (Cột is_banned)
+        // 1. KIỂM TRA BAN
         if (profile.is_banned) {
           await supabase.auth.signOut();
           setUser(null);
@@ -63,30 +54,31 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         // 2. PHÂN QUYỀN
         const userRole = profile.role === 'admin' ? 'admin' : 'user';
         
-        // 3. MAPPING DỮ LIỆU TỪ DB MỚI -> CONTEXT USER
-        // Lưu ý: user_metadata thường chứa tên lúc đăng ký, dùng làm fallback
-        const displayName = profile.name || sessionUser.user_metadata?.full_name || sessionUser.user_metadata?.name || 'User';
+        // 3. MAPPING DỮ LIỆU (DB snake_case -> App camelCase)
+        // Đây là bước quan trọng để "đồng nhất" dữ liệu
+        const displayName = profile.name || sessionUser.user_metadata?.full_name || 'User';
         
         const userData: User = {
           id: profile.id,
           email: sessionUser.email,
           name: displayName,
-          // DB dùng student_code, User type dùng studentId
+          // Map đúng cột student_code từ DB
           studentId: profile.student_code || '', 
           avatar: profile.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(displayName)}&background=random`,
-          // Kiểm tra verified_status thay vì is_verified
+          // Map trạng thái xác thực
           isVerified: profile.verified_status === 'verified',
           role: userRole,
+          // Map thông tin cấm (nếu cần dùng ở UI)
+          banned: profile.is_banned,
+          banUntil: profile.ban_until
         };
         
         setUser(userData);
         setIsAdmin(userRole === 'admin');
-        // Logic restricted có thể mở rộng sau nếu cần
         setIsRestricted(false); 
       }
     } catch (error) {
       console.error("Lỗi lấy thông tin profile:", error);
-      // Nếu lỗi fetch profile nhưng auth vẫn ok, có thể logout để an toàn
       if (mounted.current) setUser(null);
     } finally {
       if (mounted.current) setLoading(false);
@@ -96,7 +88,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     mounted.current = true;
 
-    // Kiểm tra session
+    // Kiểm tra session hiện tại
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         fetchProfile(session.user);
@@ -105,7 +97,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     });
 
-    // Lắng nghe thay đổi Auth
+    // Lắng nghe thay đổi Auth (Đăng nhập/Đăng xuất)
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (mounted.current) {
         if ((event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') && session?.user) {
@@ -132,25 +124,19 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signUp = async (email: string, password: string, name: string, studentId: string) => {
-    // 1. Đăng ký Auth (Gửi metadata để Trigger DB tự tạo profile)
+    // Gửi thông tin vào metadata để Trigger SQL bắt được và tạo Profile
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
       options: { 
         data: { 
-          full_name: name, // Gửi full_name để khớp với logic trigger handle_new_user
-          name: name,      // Gửi cả name cho chắc
-          student_code: studentId // Gửi student_code vào metadata nếu muốn lưu ngay (tùy trigger)
+          full_name: name,      // Trigger sẽ lấy cái này vào cột `name`
+          student_code: studentId // Trigger sẽ lấy cái này vào cột `student_code`
         } 
       },
     });
 
     if (error) return { error };
-
-    // 2. KHÔNG CẦN INSERT THỦ CÔNG VÀO PROFILES NỮA!
-    // Vì script SQL mới đã có Trigger "on_auth_user_created" tự động làm việc này.
-    // Nếu insert ở đây sẽ bị lỗi "Duplicate Key".
-
     return { error: null };
   };
 
@@ -159,7 +145,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const resetPassword = async (email: string) => {
-    // Lưu ý: Cần cấu hình Redirect URL trong Supabase Dashboard -> Auth -> URL Configuration
     const resetUrl = `${window.location.origin}/#/reset-password`;
     return await supabase.auth.resetPasswordForEmail(email, { redirectTo: resetUrl });
   };
