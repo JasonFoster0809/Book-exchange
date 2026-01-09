@@ -26,17 +26,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const fetchProfile = async (sessionUser: any) => {
     try {
       // 1. Thử lấy profile từ bảng 'profiles'
+      // Sử dụng maybeSingle() thay vì single() để tránh lỗi 406 nếu không tìm thấy
       let { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', sessionUser.id)
-        .single();
+        .maybeSingle();
 
       // 2. LOGIC MỚI: TỰ ĐỘNG TẠO PROFILE NẾU KHÔNG TÌM THẤY
-      if (error || !data) {
-        console.warn("Profile chưa tồn tại (Trigger có thể bị chậm), đang tự động tạo mới...");
+      if (!data) {
+        console.warn("Profile chưa tồn tại, đang tự động tạo mới...");
         
-        // Lấy thông tin từ Metadata của Auth (lúc đăng ký)
+        // Lấy thông tin từ Metadata của Auth
         const meta = sessionUser.user_metadata || {};
         const displayName = meta.full_name || meta.name || sessionUser.email?.split('@')[0] || 'User';
         
@@ -51,7 +52,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           is_banned: false
         };
 
-        // Thực hiện Insert thủ công (Dự phòng cho Trigger)
+        // Insert thủ công
         const { data: createdData, error: createError } = await supabase
           .from('profiles')
           .insert(newProfile)
@@ -60,11 +61,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
         if (createError) {
           console.error("Lỗi tự tạo profile:", createError);
-          // Nếu tạo cũng không được thì thôi, logout để tránh lỗi app
-          throw createError;
+          // Nếu tạo lỗi (ví dụ do RLS), ta vẫn cho đăng nhập nhưng với user tạm
+          setUser({
+            id: sessionUser.id,
+            email: sessionUser.email,
+            name: displayName,
+            studentId: '',
+            avatar: newProfile.avatar_url,
+            isVerified: false,
+            role: 'user'
+          });
+          if (mounted.current) setLoading(false);
+          return;
         }
 
-        // Gán data vừa tạo để chạy tiếp logic bên dưới
         data = createdData; 
       }
 
@@ -82,7 +92,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           return;
         }
 
-        // 4. MAPPING DỮ LIỆU (DB -> APP)
+        // 4. MAPPING DỮ LIỆU
         const userRole = profile.role === 'admin' ? 'admin' : 'user';
         const finalName = profile.name || 'User';
         
@@ -103,7 +113,8 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         setIsRestricted(false); 
       }
     } catch (error) {
-      console.error("Lỗi AuthContext:", error);
+      console.error("Lỗi AuthContext (Final Catch):", error);
+      // Fallback cuối cùng để không crash app
       if (mounted.current) setUser(null);
     } finally {
       if (mounted.current) setLoading(false);
@@ -113,7 +124,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     mounted.current = true;
 
-    // Kiểm tra session hiện tại
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) {
         fetchProfile(session.user);
@@ -122,7 +132,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     });
 
-    // Lắng nghe thay đổi Auth
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (mounted.current) {
         if ((event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') && session?.user) {
@@ -149,7 +158,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signUp = async (email: string, password: string, name: string, studentId: string) => {
-    // Vẫn gửi metadata để Trigger SQL (nếu có) hoạt động
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
