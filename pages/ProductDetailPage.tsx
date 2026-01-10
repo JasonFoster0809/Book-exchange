@@ -11,8 +11,6 @@ import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { useTranslation } from 'react-i18next';
 import { Product } from "../types";
-import { formatDistanceToNow } from 'date-fns'; // Hoặc dùng hàm custom timeAgo nếu chưa cài date-fns
-import { vi, enUS } from 'date-fns/locale';
 
 // --- STYLES & VISUALS ---
 const VisualEngine = () => (
@@ -22,7 +20,7 @@ const VisualEngine = () => (
     
     .glass-bar { 
       background: rgba(255, 255, 255, 0.85); 
-      backdrop-filter: blur(20px); 
+      backdrop-filter: blur(16px); 
       border-bottom: 1px solid rgba(255, 255, 255, 0.5); 
       z-index: 50;
     }
@@ -77,7 +75,7 @@ interface Comment {
   };
 }
 
-// --- UTILS (Time Ago đơn giản nếu ko dùng date-fns) ---
+// --- UTILS (Custom Time Ago - Không cần date-fns) ---
 const timeAgo = (dateString: string) => {
   const seconds = Math.floor((new Date().getTime() - new Date(dateString).getTime()) / 1000);
   if (seconds < 60) return 'Vừa xong';
@@ -94,7 +92,7 @@ const ProductDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const { addToast } = useToast();
-  const { t, i18n } = useTranslation();
+  const { t } = useTranslation();
 
   const [product, setProduct] = useState<ProductDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -171,7 +169,7 @@ const ProductDetailPage: React.FC = () => {
     // Realtime Comments
     const channel = supabase.channel(`comments-${id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments', filter: `product_id=eq.${id}` }, () => {
-        fetchComments(); // Reload comments when new one added
+        fetchComments(); 
       })
       .subscribe();
 
