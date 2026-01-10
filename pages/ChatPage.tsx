@@ -6,13 +6,11 @@ import { useToast } from '../contexts/ToastContext';
 import { 
   Send, Image as ImageIcon, Phone, ArrowLeft, Loader2, ShoppingBag, 
   CheckCircle2, Search, MessageCircle, MoreVertical, X, AlertCircle,
-  Truck, DollarSign, XCircle
+  Truck, DollarSign, XCircle, Package
 } from 'lucide-react'; 
 import { playMessageSound } from '../utils/audio';
 
-// ============================================================================
-// STYLES & VISUAL ENGINE
-// ============================================================================
+// --- STYLES ---
 const VisualEngine = () => (
   <style>{`
     .chat-scrollbar::-webkit-scrollbar { width: 5px; }
@@ -34,10 +32,10 @@ const VisualEngine = () => (
     }
     
     .transaction-card {
-      background: rgba(255, 255, 255, 0.9); border-bottom: 1px solid #E2E8F0; 
+      background: rgba(255, 255, 255, 0.95); border-bottom: 1px solid #E2E8F0; 
       z-index: 20; backdrop-filter: blur(12px);
     }
-
+    
     .animate-slide-in { animation: slideIn 0.3s ease-out forwards; }
     @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
   `}</style>
@@ -55,49 +53,47 @@ const ChatPage: React.FC = () => {
   const partnerIdParam = searchParams.get('partnerId');
   const productIdParam = searchParams.get('productId'); 
   
-  // State Data
+  // Data State
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [partnerProfile, setPartnerProfile] = useState<any>(null);
   
-  // State Giao dịch
+  // Transaction State
   const [targetProduct, setTargetProduct] = useState<any>(null); 
   
-  // State UI
+  // UI State
   const [newMessage, setNewMessage] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [loadingConv, setLoadingConv] = useState(true);
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // 1. Fetch Conversations
-  useEffect(() => { 
-    if(user) fetchConversations(); 
-  }, [user]);
+  // 1. Init
+  useEffect(() => { if(user) fetchConversations(); }, [user]);
 
-  // 2. Logic "Nhảy" vào chat từ trang khác
+  // 2. Handle Deep Link (From Product Page)
   useEffect(() => {
     const initChat = async () => {
         if (!user || !partnerIdParam) return;
-        
-        // Ghim sản phẩm
-        if (productIdParam) {
-            const { data } = await supabase.from('products').select('*').eq('id', productIdParam).single();
-            if (data) setTargetProduct(data);
-        }
-
-        // Tạo/Tìm hội thoại
-        await checkAndCreateConversation(partnerIdParam);
+        await checkAndCreateConversation(partnerIdParam, productIdParam);
     };
     initChat();
   }, [partnerIdParam, productIdParam, user]);
 
-  // 3. Realtime Listener
+  // 3. Realtime & Load Context
   useEffect(() => {
     if (!activeConversation) return;
+    
+    // Load tin nhắn
     fetchMessages(activeConversation);
+    
+    // Load sản phẩm đang ghim (QUAN TRỌNG: Lấy từ DB nếu không có sẵn)
+    if (!targetProduct) {
+        fetchPinnedProduct(activeConversation);
+    }
 
+    // Subscribe Realtime
     const channel = supabase.channel(`chat_room:${activeConversation}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversation}` }, (payload) => {
             setMessages(prev => {
@@ -107,25 +103,31 @@ const ChatPage: React.FC = () => {
             if (user && payload.new.sender_id !== user.id) playMessageSound();
             setTimeout(scrollToBottom, 100);
         })
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products', filter: `id=eq.${targetProduct?.id}` }, (payload) => {
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, (payload) => {
+            // Cập nhật trạng thái sản phẩm realtime (cho cả 2 bên)
             if (targetProduct && payload.new.id === targetProduct.id) {
                 setTargetProduct({ ...targetProduct, ...payload.new });
+            }
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `id=eq.${activeConversation}` }, (payload) => {
+            // Nếu có ai đó đổi sản phẩm ghim -> reload lại
+            if (payload.new.current_product_id !== payload.old.current_product_id) {
+                fetchPinnedProduct(activeConversation);
             }
         })
         .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [activeConversation, user, targetProduct?.id]);
+  }, [activeConversation]); // Bỏ targetProduct ra để tránh loop
 
   useEffect(() => { scrollToBottom(); }, [messages]);
-
   const scrollToBottom = () => scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
 
-  // --- API ---
+  // --- API HELPER ---
+
   const fetchConversations = async () => {
       setLoadingConv(true);
       if (!user) return;
-      
       const { data } = await supabase
           .from('conversations')
           .select(`*, p1:profiles!participant1(id, name, avatar_url), p2:profiles!participant2(id, name, avatar_url)`)
@@ -134,40 +136,58 @@ const ChatPage: React.FC = () => {
       
       if(data) {
           const formatted = data.map((c: any) => {
-              const isP1 = c.participant1 === user.id;
-              const partner = isP1 ? c.p2 : c.p1;
-              return {
-                  ...c, 
-                  partnerName: partner?.name || "Người dùng",
-                  partnerAvatar: partner?.avatar_url,
-                  partnerId: partner?.id
-              };
+              const partner = c.participant1 === user.id ? c.p2 : c.p1;
+              return { ...c, partnerName: partner?.name || "Người dùng", partnerAvatar: partner?.avatar_url, partnerId: partner?.id };
           });
           setConversations(formatted);
       }
       setLoadingConv(false);
   };
 
-  const checkAndCreateConversation = async (pId: string) => {
+  const checkAndCreateConversation = async (pId: string, prodId: string | null) => {
       if (!user) return;
+      
+      let convId = null;
       const { data: existing } = await supabase.from('conversations')
           .select('id')
           .or(`and(participant1.eq.${user.id},participant2.eq.${pId}),and(participant1.eq.${pId},participant2.eq.${user.id})`)
           .maybeSingle();
 
       if (existing) {
-          setActiveConversation(existing.id);
+          convId = existing.id;
       } else {
           const { data: newConv } = await supabase.from('conversations')
               .insert({ participant1: user.id, participant2: pId })
-              .select()
-              .single();
+              .select().single();
           if (newConv) {
-              setActiveConversation(newConv.id);
+              convId = newConv.id;
               await fetchConversations();
           }
       }
+
+      if (convId) {
+          setActiveConversation(convId);
+          // Nếu có Product ID mới -> Cập nhật vào Conversation để "Ghim"
+          if (prodId) {
+              await supabase.from('conversations').update({ current_product_id: prodId }).eq('id', convId);
+              // Fetch ngay để hiển thị
+              const { data: pData } = await supabase.from('products').select('*').eq('id', prodId).single();
+              if (pData) setTargetProduct(pData);
+          }
+      }
       fetchPartnerInfoInternal(pId);
+  };
+
+  const fetchPinnedProduct = async (convId: string) => {
+      // 1. Lấy current_product_id từ conversation
+      const { data: conv } = await supabase.from('conversations').select('current_product_id').eq('id', convId).single();
+      if (conv?.current_product_id) {
+          // 2. Lấy thông tin product
+          const { data: prod } = await supabase.from('products').select('*').eq('id', conv.current_product_id).single();
+          if (prod) setTargetProduct(prod);
+      } else {
+          setTargetProduct(null);
+      }
   };
 
   const fetchMessages = async (convId: string) => {
@@ -181,11 +201,20 @@ const ChatPage: React.FC = () => {
       if (data) setPartnerProfile(data);
   };
 
-  // --- TRANSACTION ACTIONS ---
+  const handleUnpinProduct = async () => {
+      if (!activeConversation) return;
+      // Xóa ghim trong DB
+      await supabase.from('conversations').update({ current_product_id: null }).eq('id', activeConversation);
+      setTargetProduct(null);
+  };
+
+  // --- ACTIONS ---
+
   const handleSendMessage = async (e?: React.FormEvent, content: string = newMessage) => {
       e?.preventDefault();
       if (!content.trim() || !activeConversation || !user) return;
       setNewMessage('');
+      
       const { error } = await supabase.from('messages').insert({ 
           conversation_id: activeConversation, sender_id: user.id, content: content, type: 'text' 
       });
@@ -203,55 +232,52 @@ const ChatPage: React.FC = () => {
       addToast("Đã gửi yêu cầu mua", "success");
   };
 
-  // 2. SELLER: Xác nhận bán (Available -> Pending)
+  // 2. SELLER: Xác nhận bán
   const handleConfirmSell = async () => {
       if (!targetProduct || !activeConversation || !partnerProfile) return;
-      if (!confirm(`Xác nhận bán sản phẩm này cho ${partnerProfile.name}? Sản phẩm sẽ chuyển sang trạng thái "Đang giao dịch".`)) return;
+      if (!confirm(`Xác nhận bán cho ${partnerProfile.name}?`)) return;
       
       setIsProcessing(true);
       try {
           await supabase.from('products').update({ status: 'pending', buyer_id: partnerProfile.id }).eq('id', targetProduct.id);
-          await handleSendMessage(undefined, `✅ ĐÃ XÁC NHẬN BÁN!\nSản phẩm đang được giữ cho bạn. Vui lòng liên hệ để nhận hàng.`);
+          await handleSendMessage(undefined, `✅ ĐÃ XÁC NHẬN BÁN!\nSản phẩm đang được giữ cho bạn.`);
           setTargetProduct({ ...targetProduct, status: 'pending' });
-          addToast("Đã xác nhận giao dịch", "success");
+          addToast("Đã xác nhận", "success");
       } catch(e) { console.error(e); }
       finally { setIsProcessing(false); }
   };
 
-  // 3. SELLER: Hoàn tất (Pending -> Sold)
+  // 3. SELLER: Hoàn tất
   const handleFinishDeal = async () => {
-      if (!targetProduct || !activeConversation) return;
-      if (!confirm("Xác nhận đã giao hàng và nhận tiền thành công?")) return;
-
+      if (!targetProduct) return;
+      if (!confirm("Đã giao hàng và nhận tiền thành công?")) return;
       setIsProcessing(true);
       try {
           await supabase.from('products').update({ status: 'sold' }).eq('id', targetProduct.id);
           await handleSendMessage(undefined, `🎉 GIAO DỊCH THÀNH CÔNG!\nCảm ơn bạn đã ủng hộ.`);
           setTargetProduct({ ...targetProduct, status: 'sold' });
-          addToast("Giao dịch thành công!", "success");
+          addToast("Hoàn tất giao dịch", "success");
       } catch(e) { console.error(e); }
       finally { setIsProcessing(false); }
   };
 
-  // 4. SELLER: Hủy (Pending -> Available)
+  // 4. SELLER: Hủy
   const handleCancelDeal = async () => {
-      if (!targetProduct || !activeConversation) return;
+      if (!targetProduct) return;
       if (!confirm("Hủy giao dịch này và đăng bán lại?")) return;
-
       setIsProcessing(true);
       try {
           await supabase.from('products').update({ status: 'available', buyer_id: null }).eq('id', targetProduct.id);
           await handleSendMessage(undefined, `⚠️ ĐÃ HỦY GIAO DỊCH.`);
           setTargetProduct({ ...targetProduct, status: 'available', buyer_id: null });
-          addToast("Đã hủy giao dịch", "info");
+          addToast("Đã hủy", "info");
       } catch(e) { console.error(e); }
       finally { setIsProcessing(false); }
   };
 
-  // Roles Check
+  // Roles
   const isSeller = user && targetProduct && user.id === targetProduct.seller_id;
   const isBuyer = user && targetProduct && user.id !== targetProduct.seller_id;
-
   const filteredConversations = conversations.filter(c => c.partnerName?.toLowerCase().includes(searchTerm.toLowerCase()));
 
   return (
@@ -268,8 +294,8 @@ const ChatPage: React.FC = () => {
             </div>
          </div>
          <div className="flex-1 overflow-y-auto chat-scrollbar">
-            {loadingConv ? <div className="flex justify-center pt-10"><Loader2 className="animate-spin text-slate-400"/></div> : filteredConversations.length === 0 ? <div className="text-center pt-10 px-6"><MessageCircle className="mx-auto text-slate-200 mb-2" size={48}/><p className="text-slate-400 text-sm">Chưa có tin nhắn nào.</p></div> : filteredConversations.map(conv => (
-               <div key={conv.id} onClick={() => { setActiveConversation(conv.id); fetchPartnerInfoInternal(conv.partnerId); setTargetProduct(null); }} className={`p-4 flex gap-3 cursor-pointer hover:bg-slate-50 transition-colors border-b border-slate-50 ${activeConversation === conv.id ? 'bg-blue-50/50 border-l-4 border-l-[#00418E]' : 'border-l-4 border-l-transparent'}`}>
+            {loadingConv ? <div className="flex justify-center pt-10"><Loader2 className="animate-spin text-slate-400"/></div> : filteredConversations.map(conv => (
+               <div key={conv.id} onClick={() => { setActiveConversation(conv.id); fetchPartnerInfoInternal(conv.partnerId); }} className={`p-4 flex gap-3 cursor-pointer hover:bg-slate-50 transition-colors border-b border-slate-50 ${activeConversation === conv.id ? 'bg-blue-50/50 border-l-4 border-l-[#00418E]' : 'border-l-4 border-l-transparent'}`}>
                   <div className="relative"><img src={conv.partnerAvatar || 'https://via.placeholder.com/50'} className="w-12 h-12 rounded-full object-cover border border-slate-200 bg-white"/></div>
                   <div className="flex-1 min-w-0 flex flex-col justify-center"><p className={`font-bold text-sm truncate ${activeConversation === conv.id ? 'text-[#00418E]' : 'text-slate-800'}`}>{conv.partnerName}</p><p className="text-xs text-slate-500 truncate mt-0.5">Nhấn để xem tin nhắn</p></div>
                </div>
@@ -281,16 +307,13 @@ const ChatPage: React.FC = () => {
       <div className={`flex-1 flex flex-col relative bg-[#F8FAFC] ${!activeConversation ? 'hidden md:flex' : 'flex'}`}>
          {activeConversation ? (
             <>
-               {/* Header */}
+               {/* HEADER */}
                <div className="h-16 border-b border-slate-200 bg-white/80 backdrop-blur-md flex items-center px-4 justify-between shadow-sm z-30 sticky top-0">
                   <div className="flex items-center gap-3">
                      <button onClick={() => setActiveConversation(null)} className="md:hidden p-2 hover:bg-slate-100 rounded-full text-slate-600"><ArrowLeft size={20}/></button>
                      {partnerProfile && (
                         <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate(`/profile/${partnerProfile.id}`)}>
-                           <div className="relative">
-                               <img src={partnerProfile.avatar_url || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full border border-slate-200 object-cover"/>
-                               <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
-                           </div>
+                           <img src={partnerProfile.avatar_url || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full border border-slate-200 object-cover"/>
                            <div><h3 className="font-bold text-sm text-slate-800">{partnerProfile.name}</h3><span className="text-xs text-green-600 font-medium flex items-center gap-1">Đang hoạt động</span></div>
                         </div>
                      )}
@@ -301,76 +324,64 @@ const ChatPage: React.FC = () => {
                   </div>
                </div>
 
-               {/* TRANSACTION DASHBOARD (Ghim Sản Phẩm) */}
+               {/* TRANSACTION DASHBOARD (PINNED PRODUCT) */}
                {targetProduct && (
                   <div className="transaction-card p-4 animate-slide-in">
                      <div className="flex gap-4 items-start bg-white p-3 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
-                        {/* Status Strip */}
                         <div className={`absolute top-0 left-0 bottom-0 w-1.5 ${targetProduct.status === 'sold' ? 'bg-slate-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}></div>
-                        
                         <img src={targetProduct.images?.[0] || 'https://via.placeholder.com/80'} className="w-16 h-16 rounded-lg object-cover border border-slate-100 bg-slate-50 ml-2"/>
                         <div className="flex-1 min-w-0">
                            <div className="flex items-center gap-2 mb-1">
-                              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded text-white uppercase tracking-wider ${targetProduct.status === 'sold' ? 'bg-slate-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}>
+                              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md text-white uppercase tracking-wider ${targetProduct.status === 'sold' ? 'bg-slate-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}>
                                  {targetProduct.status === 'available' ? 'ĐANG BÁN' : targetProduct.status === 'pending' ? 'ĐANG GIAO DỊCH' : 'ĐÃ BÁN'}
                               </span>
                               <h4 className="font-bold text-slate-800 text-sm truncate">{targetProduct.title}</h4>
                            </div>
                            <p className="text-[#00418E] font-black text-lg">{targetProduct.price === 0 ? 'Miễn phí' : `${targetProduct.price.toLocaleString()}đ`}</p>
                         </div>
-                        <button onClick={() => setTargetProduct(null)} className="text-slate-400 hover:text-slate-600"><X size={16}/></button>
+                        {/* Nút gỡ ghim (X) */}
+                        <button onClick={handleUnpinProduct} className="text-slate-400 hover:text-red-600 p-1 rounded-full hover:bg-red-50 transition-colors" title="Gỡ ghim sản phẩm"><X size={18}/></button>
                      </div>
 
-                     {/* Action Buttons Area */}
+                     {/* --- ACTION BUTTONS --- */}
                      <div className="flex gap-2 mt-3">
-                        {/* BUYER VIEW */}
+                        {/* 1. NGƯỜI MUA: Thấy nút Yêu cầu */}
                         {isBuyer && targetProduct.status === 'available' && (
                            <button onClick={handleRequestDeal} disabled={isProcessing} className="flex-1 bg-[#00418E] hover:bg-[#00306b] text-white py-3 rounded-xl font-bold text-sm shadow-sm transition-all flex justify-center items-center gap-2 active:scale-95">
                               {isProcessing ? <Loader2 size={16} className="animate-spin"/> : <ShoppingBag size={16}/>} Yêu cầu mua
                            </button>
                         )}
-                        {isBuyer && targetProduct.status === 'pending' && (
-                           <div className="flex-1 bg-orange-50 text-orange-700 py-3 rounded-xl font-bold text-xs text-center border border-orange-200 flex items-center justify-center gap-2">
-                              <Loader2 size={14} className="animate-spin"/> Đang chờ người bán xác nhận hoàn tất...
-                           </div>
-                        )}
-
-                        {/* SELLER VIEW */}
+                        {/* 2. NGƯỜI BÁN: Thấy nút Xác nhận */}
                         {isSeller && targetProduct.status === 'available' && (
                            <button onClick={handleConfirmSell} disabled={isProcessing} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-bold text-sm shadow-sm transition-all flex justify-center items-center gap-2 active:scale-95">
                               <CheckCircle2 size={18}/> Xác nhận bán cho người này
                            </button>
                         )}
-                        {isSeller && targetProduct.status === 'pending' && (
-                           <>
-                              <button onClick={handleFinishDeal} disabled={isProcessing} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-sm shadow-sm flex justify-center items-center gap-2">
-                                 <DollarSign size={16}/> Đã giao xong
-                              </button>
-                              <button onClick={handleCancelDeal} disabled={isProcessing} className="px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-sm flex items-center gap-1">
-                                 <XCircle size={16}/> Hủy
-                              </button>
-                           </>
+                        {/* 3. ĐANG GIAO DỊCH */}
+                        {targetProduct.status === 'pending' && (
+                           isSeller ? (
+                               <>
+                                  <button onClick={handleFinishDeal} disabled={isProcessing} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-sm shadow-sm flex justify-center items-center gap-2"><DollarSign size={16}/> Đã giao xong</button>
+                                  <button onClick={handleCancelDeal} disabled={isProcessing} className="px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-sm flex items-center gap-1"><XCircle size={16}/> Hủy</button>
+                               </>
+                           ) : (
+                               <div className="flex-1 bg-orange-50 text-orange-700 py-3 rounded-xl font-bold text-xs text-center border border-orange-200 flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin"/> Đang chờ người bán xác nhận hoàn tất...</div>
+                           )
                         )}
-
-                        {/* DONE STATE */}
+                        {/* 4. ĐÃ BÁN */}
                         {targetProduct.status === 'sold' && (
-                           <div className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-xl font-bold text-xs text-center border border-slate-200 flex justify-center items-center gap-2">
-                              <Truck size={16}/> Giao dịch đã hoàn tất
-                           </div>
+                           <div className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-xl font-bold text-xs text-center border border-slate-200 flex justify-center items-center gap-2"><Truck size={16}/> Giao dịch đã hoàn tất</div>
                         )}
                      </div>
                   </div>
                )}
 
-               {/* Messages */}
+               {/* MESSAGES */}
                <div className="flex-1 overflow-y-auto p-4 space-y-3 chat-scrollbar bg-[#F8FAFC]">
-                  {messages.length === 0 && <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-60"><ShoppingBag size={48} className="mb-2"/><p className="font-medium text-sm">Bắt đầu trò chuyện để mua bán ngay!</p></div>}
                   {messages.map((msg, idx) => {
                      const isMe = msg.sender_id === user?.id;
-                     const isSystem = msg.content?.includes("TÔI MUỐN MUA") || msg.content?.includes("ĐÃ XÁC NHẬN") || msg.content?.includes("GIAO DỊCH");
-                     if (isSystem) return (
-                         <div key={idx} className="flex justify-center my-6"><div className="bg-slate-100 border border-slate-200 text-slate-600 px-4 py-2 rounded-full text-xs font-bold shadow-sm flex items-center gap-2"><AlertCircle size={12} className="text-[#00418E]"/><span className="whitespace-pre-wrap text-center">{msg.content}</span></div></div>
-                     );
+                     const isSystem = msg.content?.includes("TÔI MUỐN MUA") || msg.content?.includes("ĐÃ XÁC NHẬN") || msg.content?.includes("GIAO DỊCH") || msg.content?.includes("ĐÃ HỦY");
+                     if (isSystem) return (<div key={idx} className="flex justify-center my-6"><div className="bg-slate-100 border border-slate-200 text-slate-600 px-4 py-2 rounded-full text-xs font-bold shadow-sm flex items-center gap-2"><AlertCircle size={12} className="text-[#00418E]"/><span className="whitespace-pre-wrap text-center">{msg.content}</span></div></div>);
                      return (
                         <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-slide-in`}>
                            {!isMe && <img src={partnerProfile?.avatar_url} className="w-8 h-8 rounded-full mr-2 self-end border border-slate-200 bg-white"/>}
@@ -383,19 +394,19 @@ const ChatPage: React.FC = () => {
                   <div ref={scrollRef} className="h-2"/>
                </div>
 
-               {/* Input */}
+               {/* INPUT */}
                <div className="p-3 bg-white border-t border-slate-200">
                   <div className="flex gap-2 overflow-x-auto pb-3 chat-scrollbar">
                      {QUICK_REPLIES.map((t, i) => (
                         <button key={i} onClick={() => handleSendMessage(undefined, t)} className="whitespace-nowrap px-3 py-1.5 bg-slate-50 border border-slate-200 text-xs rounded-full hover:bg-[#00418E] hover:text-white hover:border-[#00418E] text-slate-600 font-bold transition-all">{t}</button>
                      ))}
                   </div>
-                  <form onSubmit={(e) => handleSendMessage(e)} className="flex items-center gap-2">
+                  <form onSubmit={handleSendMessage} className="flex items-center gap-2">
                      <button type="button" className="p-2.5 text-slate-400 hover:text-[#00418E] hover:bg-blue-50 rounded-full transition-colors"><ImageIcon size={22}/></button>
                      <div className="flex-1 bg-slate-100 rounded-full px-5 py-3 focus-within:ring-2 focus-within:ring-[#00418E]/20 transition-all">
                         <input value={newMessage} onChange={e => setNewMessage(e.target.value)} placeholder="Nhập tin nhắn..." className="w-full bg-transparent outline-none text-sm text-slate-800 placeholder:text-slate-400"/>
                      </div>
-                     <button type="submit" disabled={!newMessage.trim()} className="p-3 bg-[#00418E] hover:bg-[#00306b] text-white rounded-full disabled:opacity-50 disabled:cursor-not-allowed shadow-md transition-all active:scale-95"><Send size={20}/></button>
+                     <button type="submit" disabled={!newMessage.trim()} className="p-3 bg-[#00418E] hover:bg-[#00306b] text-white rounded-full disabled:opacity-50 shadow-md transition-all active:scale-95"><Send size={20}/></button>
                   </form>
                </div>
             </>
