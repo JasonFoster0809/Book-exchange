@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, Link } from "react-router-dom";
 import {
   Heart, MessageCircle, Share2, ArrowLeft, Eye, MapPin,
   Clock, Star, Box, ShieldCheck, Calendar, ArrowRight,
@@ -8,6 +8,7 @@ import {
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
+import { useTranslation } from 'react-i18next'; // Import i18n
 import { Product } from "../types";
 
 // --- STYLES & VISUALS ---
@@ -60,6 +61,7 @@ const ProductDetailPage: React.FC = () => {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const { addToast } = useToast();
+  const { t } = useTranslation(); // Hook i18n
 
   const [product, setProduct] = useState<ProductDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -71,7 +73,6 @@ const ProductDetailPage: React.FC = () => {
       if (!id) return;
       setLoading(true);
       try {
-        // 1. Fetch Product + Seller Profile (Relation)
         const { data: pData, error } = await supabase
           .from("products")
           .select(`*, profiles:seller_id(id, name, avatar_url, verified_status, student_code)`)
@@ -80,23 +81,19 @@ const ProductDetailPage: React.FC = () => {
 
         if (error || !pData) throw new Error("Sản phẩm không tồn tại");
 
-        // 2. Map Data (DB Snake_case -> App CamelCase)
         const mappedProduct: ProductDetail = {
           ...pData,
           sellerId: pData.seller_id,
-          seller: pData.profiles, // Thông tin người bán
+          seller: pData.profiles,
           images: pData.images || [],
-          postedAt: pData.created_at, // Map created_at -> postedAt
+          postedAt: pData.created_at,
           tradeMethod: pData.trade_method,
           location: pData.location_name || "TP.HCM"
         };
 
         setProduct(mappedProduct);
-        
-        // 3. Tăng View (RPC)
         supabase.rpc("increment_view_count", { product_id: id });
 
-        // 4. Kiểm tra trạng thái Lưu tin (Saved)
         if (currentUser) {
           const { data: sData } = await supabase
             .from("saved_products")
@@ -109,7 +106,7 @@ const ProductDetailPage: React.FC = () => {
 
       } catch (err) {
         console.error(err);
-        addToast("Không tìm thấy sản phẩm", "error");
+        addToast(t('market.no_product'), "error");
         navigate("/market");
       } finally {
         setLoading(false);
@@ -123,7 +120,7 @@ const ProductDetailPage: React.FC = () => {
     if (!product) return;
     
     const oldState = isLiked;
-    setIsLiked(!isLiked); // Optimistic Update
+    setIsLiked(!isLiked);
 
     try {
       if (oldState) {
@@ -132,20 +129,20 @@ const ProductDetailPage: React.FC = () => {
         await supabase.from("saved_products").insert({ user_id: currentUser.id, product_id: product.id });
       }
     } catch {
-      setIsLiked(oldState); // Rollback nếu lỗi
-      addToast("Có lỗi xảy ra", "error");
+      setIsLiked(oldState);
+      addToast(t('market.error'), "error");
     }
   };
 
   const startChat = () => {
     if (!currentUser) return navigate("/auth");
-    if (currentUser.id === product?.sellerId) return addToast("Đây là sản phẩm của bạn!", "info");
+    if (currentUser.id === product?.sellerId) return addToast(t('product.own_item_msg') || "Đây là sản phẩm của bạn!", "info");
     navigate(`/chat?partnerId=${product?.sellerId}&productId=${product?.id}`);
   };
 
   const handleReport = () => {
     if (!currentUser) return navigate("/auth");
-    const reason = prompt("Lý do báo cáo vi phạm:");
+    const reason = prompt(t('product.report_reason') || "Lý do báo cáo vi phạm:");
     if (reason) {
         supabase.from("reports").insert({
             reporter_id: currentUser.id,
@@ -153,26 +150,25 @@ const ProductDetailPage: React.FC = () => {
             reason: reason,
             status: 'pending'
         }).then(({ error }) => {
-            if (!error) addToast("Đã gửi báo cáo. Cảm ơn bạn!", "success");
-            else addToast("Lỗi gửi báo cáo", "error");
+            if (!error) addToast(t('product.report_success') || "Đã gửi báo cáo", "success");
+            else addToast(t('market.error'), "error");
         });
     }
   };
 
-  // Helper hiển thị trạng thái sản phẩm
   const getStatusBadge = () => {
     if (!product) return null;
     switch (product.status) {
-      case 'sold': return { label: 'ĐÃ BÁN', bg: 'bg-slate-100', text: 'text-slate-500', border: 'border-slate-200' };
-      case 'pending': return { label: 'ĐANG GIAO DỊCH', bg: 'bg-orange-50', text: 'text-orange-600', border: 'border-orange-200' };
-      default: return { label: 'CÒN HÀNG', bg: 'bg-green-50', text: 'text-green-600', border: 'border-green-200' };
+      case 'sold': return { label: t('product.status.sold'), bg: 'bg-slate-100', text: 'text-slate-500', border: 'border-slate-200' };
+      case 'pending': return { label: t('product.status.pending'), bg: 'bg-orange-50', text: 'text-orange-600', border: 'border-orange-200' };
+      default: return { label: t('product.status.available'), bg: 'bg-green-50', text: 'text-green-600', border: 'border-green-200' };
     }
   };
 
   if (loading) return (
     <div className="h-screen flex flex-col items-center justify-center bg-slate-50">
       <Loader2 className="animate-spin text-[#00418E] mb-4" size={40} />
-      <p className="text-slate-500 font-medium">Đang tải thông tin...</p>
+      <p className="text-slate-500 font-medium">{t('market.loading')}</p>
     </div>
   );
   
@@ -186,14 +182,13 @@ const ProductDetailPage: React.FC = () => {
       <VisualEngine />
       <div className="aurora-bg"></div>
       
-      {/* --- STICKY HEADER --- */}
       <div className="sticky top-0 glass-bar transition-all">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
           <button onClick={() => navigate(-1)} className="group flex items-center gap-2 rounded-full py-2 pr-4 pl-2 hover:bg-slate-100/50 transition-colors">
             <div className="bg-white p-1.5 rounded-full shadow-sm group-hover:scale-110 transition-transform">
               <ArrowLeft size={18} className="text-slate-700"/>
             </div>
-            <span className="font-bold text-sm text-slate-700 hidden sm:block">Quay lại</span>
+            <span className="font-bold text-sm text-slate-700 hidden sm:block">{t('product.back')}</span>
           </button>
           
           <span className="font-bold text-slate-800 line-clamp-1 max-w-[200px] sm:max-w-md opacity-0 sm:opacity-100 transition-opacity">
@@ -201,10 +196,7 @@ const ProductDetailPage: React.FC = () => {
           </span>
 
           <div className="flex gap-2">
-            <button 
-              onClick={handleLike}
-              className={`p-2.5 rounded-full border transition-all ${isLiked ? 'bg-red-50 border-red-200 text-red-500' : 'bg-white border-slate-200 text-slate-400 hover:text-red-500'}`}
-            >
+            <button onClick={handleLike} className={`p-2.5 rounded-full border transition-all ${isLiked ? 'bg-red-50 border-red-200 text-red-500' : 'bg-white border-slate-200 text-slate-400 hover:text-red-500'}`}>
               <Heart size={20} className={isLiked ? "fill-current" : ""} />
             </button>
             <button className="p-2.5 rounded-full bg-white border border-slate-200 text-slate-400 hover:text-[#00418E] hover:border-blue-200 transition-colors">
@@ -214,26 +206,18 @@ const ProductDetailPage: React.FC = () => {
         </div>
       </div>
 
-      {/* --- MAIN CONTENT --- */}
       <main className="mx-auto max-w-7xl px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
         
-        {/* LEFT COLUMN: IMAGES & DESC (Chiếm 7 phần) */}
+        {/* LEFT COLUMN */}
         <div className="lg:col-span-7 space-y-8 animate-enter">
-          
-          {/* Image Gallery */}
           <div className="space-y-4">
             <div className="aspect-[4/3] w-full rounded-[2rem] overflow-hidden bg-white shadow-xl border border-white/60 relative group">
               {product.images.length > 0 ? (
-                <img 
-                  src={product.images[activeImg]} 
-                  className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-105"
-                  alt="Product Main"
-                />
+                <img src={product.images[activeImg]} className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-105" alt="Product Main" />
               ) : (
-                <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400">Không có ảnh</div>
+                <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400">No Image</div>
               )}
               
-              {/* TAG TRẠNG THÁI SẢN PHẨM */}
               {statusBadge && (
                 <div className={`absolute top-4 right-4 px-3 py-1.5 rounded-lg border font-black text-xs uppercase tracking-wider shadow-sm backdrop-blur-md ${statusBadge.bg} ${statusBadge.text} ${statusBadge.border}`}>
                   {statusBadge.label}
@@ -247,15 +231,10 @@ const ProductDetailPage: React.FC = () => {
               )}
             </div>
             
-            {/* Thumbnails */}
             {product.images.length > 1 && (
               <div className="flex gap-3 overflow-x-auto pb-2 hide-scrollbar snap-x">
                 {product.images.map((img, i) => (
-                  <button 
-                    key={i} 
-                    onClick={() => setActiveImg(i)} 
-                    className={`relative w-20 h-20 flex-shrink-0 rounded-2xl overflow-hidden border-2 transition-all snap-start cursor-pointer ${activeImg === i ? 'border-[#00418E] shadow-md scale-105' : 'border-transparent opacity-60 hover:opacity-100'}`}
-                  >
+                  <button key={i} onClick={() => setActiveImg(i)} className={`relative w-20 h-20 flex-shrink-0 rounded-2xl overflow-hidden border-2 transition-all snap-start cursor-pointer ${activeImg === i ? 'border-[#00418E] shadow-md scale-105' : 'border-transparent opacity-60 hover:opacity-100'}`}>
                     <img src={img} className="w-full h-full object-cover"/>
                   </button>
                 ))}
@@ -263,87 +242,57 @@ const ProductDetailPage: React.FC = () => {
             )}
           </div>
 
-          {/* Description Panel */}
           <div className="glass-panel p-8 rounded-[2rem]">
             <h3 className="font-bold text-lg mb-6 flex items-center gap-2 text-slate-800">
-              <ShieldCheck className="text-[#00418E]" size={20}/> 
-              Mô tả chi tiết
+              <ShieldCheck className="text-[#00418E]" size={20}/> {t('product.description_title')}
             </h3>
             <div className="prose prose-sm max-w-none text-slate-600 leading-relaxed whitespace-pre-wrap font-medium">
-              {product.description || "Người bán chưa nhập mô tả cho sản phẩm này."}
+              {product.description || t('product.no_description')}
             </div>
           </div>
 
-          {/* Safety Tips */}
           <div className="bg-orange-50/80 border border-orange-100 p-6 rounded-[2rem] flex gap-4 items-start">
-            <div className="bg-orange-100 p-2 rounded-full text-orange-600 shrink-0">
-              <AlertTriangle size={20}/>
-            </div>
+            <div className="bg-orange-100 p-2 rounded-full text-orange-600 shrink-0"><AlertTriangle size={20}/></div>
             <div>
-              <h4 className="font-bold text-orange-800 text-sm mb-1">Lưu ý an toàn</h4>
-              <p className="text-xs text-orange-700 leading-relaxed">
-                Nên giao dịch trực tiếp tại các khu vực đông người trong trường (Sảnh H6, Thư viện). 
-                Kiểm tra kỹ sản phẩm trước khi thanh toán. Không chuyển khoản trước khi nhận hàng.
-              </p>
+              <h4 className="font-bold text-orange-800 text-sm mb-1">{t('product.safety_title')}</h4>
+              <p className="text-xs text-orange-700 leading-relaxed">{t('product.safety_content')}</p>
             </div>
           </div>
         </div>
 
-        {/* RIGHT COLUMN: INFO & ACTIONS (Chiếm 5 phần) */}
+        {/* RIGHT COLUMN */}
         <div className="lg:col-span-5 space-y-6 animate-enter" style={{animationDelay: '100ms'}}>
-          
           <div className="glass-panel p-8 rounded-[2.5rem] lg:sticky lg:top-24 border-t-4 border-t-[#00418E]">
-            {/* Meta Info */}
             <div className="flex justify-between items-start mb-6">
-              <span className="bg-blue-50 text-[#00418E] px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider border border-blue-100">
-                {product.category}
-              </span>
-              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 bg-white/50 px-2 py-1 rounded-lg">
-                <Eye size={14}/> {product.view_count}
-              </div>
+              <span className="bg-blue-50 text-[#00418E] px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider border border-blue-100">{product.category}</span>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 bg-white/50 px-2 py-1 rounded-lg"><Eye size={14}/> {product.view_count}</div>
             </div>
             
-            {/* Title & Price */}
-            <h1 className="text-3xl font-black text-slate-900 mb-4 leading-tight">
-              {product.title}
-            </h1>
+            <h1 className="text-3xl font-black text-slate-900 mb-4 leading-tight">{product.title}</h1>
             <p className="text-4xl font-black text-[#00418E] mb-8 tracking-tight">
-              {product.price === 0 ? "Miễn phí" : new Intl.NumberFormat('vi-VN').format(product.price) + 'đ'}
+              {product.price === 0 ? t('common.price_free') : new Intl.NumberFormat('vi-VN').format(product.price) + 'đ'}
             </p>
 
-            {/* Attribute Grid */}
             <div className="grid grid-cols-2 gap-3 mb-8">
               <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm hover:scale-[1.02] transition-transform">
-                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Tình trạng</p>
-                <p className="font-bold text-sm text-slate-700 flex gap-2 items-center">
-                  <Star size={14} className="text-yellow-500 fill-yellow-500"/> {product.condition}
-                </p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.condition')}</p>
+                <p className="font-bold text-sm text-slate-700 flex gap-2 items-center"><Star size={14} className="text-yellow-500 fill-yellow-500"/> {product.condition}</p>
               </div>
               <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm hover:scale-[1.02] transition-transform">
-                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Giao dịch</p>
-                <p className="font-bold text-sm text-slate-700 flex gap-2 items-center">
-                  <Box size={14} className="text-blue-500"/> {product.tradeMethod === 'direct' ? 'Trực tiếp' : 'Ship COD'}
-                </p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.trade_method')}</p>
+                <p className="font-bold text-sm text-slate-700 flex gap-2 items-center"><Box size={14} className="text-blue-500"/> {product.tradeMethod === 'direct' ? t('product.method.direct') : t('product.method.shipping')}</p>
               </div>
               <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm hover:scale-[1.02] transition-transform">
-                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Khu vực</p>
-                <p className="font-bold text-sm text-slate-700 flex gap-2 items-center">
-                  <MapPin size={14} className="text-red-500"/> {product.location}
-                </p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.location')}</p>
+                <p className="font-bold text-sm text-slate-700 flex gap-2 items-center"><MapPin size={14} className="text-red-500"/> {product.location}</p>
               </div>
               <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm hover:scale-[1.02] transition-transform">
-                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">Ngày đăng</p>
-                <p className="font-bold text-sm text-slate-700 flex gap-2 items-center">
-                  <Calendar size={14} className="text-slate-500"/> {new Date(product.postedAt).toLocaleDateString('vi-VN')}
-                </p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.posted_date')}</p>
+                <p className="font-bold text-sm text-slate-700 flex gap-2 items-center"><Calendar size={14} className="text-slate-500"/> {new Date(product.postedAt).toLocaleDateString('vi-VN')}</p>
               </div>
             </div>
 
-            {/* SELLER CARD (PRO) */}
-            <div 
-              className="group flex items-center gap-4 p-4 bg-white/50 border border-white rounded-2xl mb-8 cursor-pointer hover:bg-white hover:shadow-md transition-all" 
-              onClick={() => navigate(`/profile/${product.seller?.id}`)}
-            >
+            <div className="group flex items-center gap-4 p-4 bg-white/50 border border-white rounded-2xl mb-8 cursor-pointer hover:bg-white hover:shadow-md transition-all" onClick={() => navigate(`/profile/${product.seller?.id}`)}>
               <div className="relative">
                 <img 
                   src={product.seller?.avatar_url || `https://ui-avatars.com/api/?name=${product.seller?.name || 'User'}&background=random`} 
@@ -351,7 +300,7 @@ const ProductDetailPage: React.FC = () => {
                   alt={product.seller?.name}
                 />
                 {product.seller?.verified_status === 'verified' && (
-                  <div className="absolute -bottom-1 -right-1 bg-blue-500 text-white p-0.5 rounded-full border-2 border-white" title="Đã xác thực SV">
+                  <div className="absolute -bottom-1 -right-1 bg-blue-500 text-white p-0.5 rounded-full border-2 border-white" title={t('product.verified_student')}>
                     <CheckCircle2 size={12}/>
                   </div>
                 )}
@@ -359,59 +308,47 @@ const ProductDetailPage: React.FC = () => {
               
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-0.5">
-                  <h4 className="font-bold text-slate-900 truncate">{product.seller?.name || "Người dùng ẩn danh"}</h4>
-                  {/* TAG PHÂN BIỆT CHỦ SỞ HỮU */}
+                  <h4 className="font-bold text-slate-900 truncate">{product.seller?.name || "User"}</h4>
                   {isOwner ? (
-                    <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-green-200">TIN CỦA BẠN</span>
+                    <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-green-200">{t('product.owner_role')}</span>
                   ) : (
-                    <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">NGƯỜI BÁN</span>
+                    <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">{t('product.seller_role')}</span>
                   )}
                 </div>
                 
                 <div className="flex items-center gap-2 text-xs text-slate-500">
                   {product.seller?.student_code && (
-                    <span className="font-mono bg-slate-100 px-1.5 rounded">{product.seller.student_code}</span>
+                    <span className="font-mono bg-slate-100 px-1.5 rounded">{t('product.student_id')}: {product.seller.student_code}</span>
                   )}
-                  <span className="flex items-center gap-1 text-yellow-500 font-bold"><Star size={10} fill="currentColor"/> 5.0</span>
+                  {product.seller?.verified_status === 'verified' ? (
+                     <span className="text-blue-600 font-bold">{t('product.verified_student')}</span>
+                  ) : (
+                     <span>{t('product.unverified')}</span>
+                  )}
                 </div>
               </div>
-              <div className="p-2 bg-slate-100 rounded-full text-slate-400 group-hover:text-[#00418E] group-hover:bg-blue-50 transition-colors">
-                <ArrowRight size={18}/>
-              </div>
+              <div className="p-2 bg-slate-100 rounded-full text-slate-400 group-hover:text-[#00418E] group-hover:bg-blue-50 transition-colors"><ArrowRight size={18}/></div>
             </div>
 
-            {/* ACTION BUTTONS (Logic mới) */}
             <div className="flex flex-col gap-3">
               {isOwner ? (
-                // Nếu là chủ sở hữu -> Nút Chỉnh Sửa
-                <button 
-                  onClick={() => navigate(`/edit-item/${product.id}`)}
-                  className="w-full bg-slate-800 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-slate-900 transition-all flex items-center justify-center gap-2 text-lg"
-                >
-                  <Edit3 size={20}/> Chỉnh sửa tin đăng
+                <button onClick={() => navigate(`/edit-item/${product.id}`)} className="w-full bg-slate-800 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-slate-900 transition-all flex items-center justify-center gap-2 text-lg">
+                  <Edit3 size={20}/> {t('product.edit_post')}
                 </button>
               ) : (
-                // Nếu là khách -> Nút Liên Hệ
-                <button 
-                  onClick={startChat} 
-                  className="w-full bg-gradient-to-r from-[#00418E] to-[#0065D1] text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-900/20 hover:shadow-blue-900/30 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-lg"
-                >
-                  <MessageCircle size={24}/> Liên hệ người bán
+                <button onClick={startChat} className="w-full bg-gradient-to-r from-[#00418E] to-[#0065D1] text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-900/20 hover:shadow-blue-900/30 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-lg">
+                  <MessageCircle size={24}/> {t('product.contact_seller')}
                 </button>
               )}
               
               {!isOwner && (
-                <button 
-                  onClick={handleReport}
-                  className="w-full bg-white text-slate-600 border border-slate-200 py-3 rounded-2xl font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-colors text-sm flex items-center justify-center gap-2"
-                >
-                  <Flag size={16}/> Báo cáo tin này
+                <button onClick={handleReport} className="w-full bg-white text-slate-600 border border-slate-200 py-3 rounded-2xl font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-colors text-sm flex items-center justify-center gap-2">
+                  <Flag size={16}/> {t('product.report_post')}
                 </button>
               )}
             </div>
           </div>
         </div>
-
       </main>
     </div>
   );
