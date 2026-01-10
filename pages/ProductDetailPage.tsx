@@ -1,15 +1,18 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import {
   Heart, MessageCircle, Share2, ArrowLeft, Eye, MapPin,
   Clock, Star, Box, ShieldCheck, Calendar, ArrowRight,
-  Loader2, AlertTriangle, User, CheckCircle2, Flag, Edit3
+  Loader2, AlertTriangle, User, CheckCircle2, Flag, Edit3,
+  MessageSquare, Send, Trash2
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
-import { useTranslation } from 'react-i18next'; // Import i18n
+import { useTranslation } from 'react-i18next';
 import { Product } from "../types";
+import { formatDistanceToNow } from 'date-fns'; // Hoặc dùng hàm custom timeAgo nếu chưa cài date-fns
+import { vi, enUS } from 'date-fns/locale';
 
 // --- STYLES & VISUALS ---
 const VisualEngine = () => (
@@ -19,21 +22,28 @@ const VisualEngine = () => (
     
     .glass-bar { 
       background: rgba(255, 255, 255, 0.85); 
-      backdrop-filter: blur(16px); 
+      backdrop-filter: blur(20px); 
       border-bottom: 1px solid rgba(255, 255, 255, 0.5); 
       z-index: 50;
     }
 
     .glass-panel { 
-      background: rgba(255, 255, 255, 0.8); 
-      backdrop-filter: blur(24px); 
-      border: 1px solid rgba(255, 255, 255, 0.7); 
+      background: rgba(255, 255, 255, 0.6); 
+      backdrop-filter: blur(30px); 
+      border: 1px solid rgba(255, 255, 255, 0.8); 
       box-shadow: 0 20px 40px -10px rgba(0, 65, 142, 0.1); 
+    }
+
+    .comment-bubble {
+      background: white;
+      border-radius: 16px;
+      border-top-left-radius: 4px;
+      box-shadow: 0 2px 5px rgba(0,0,0,0.02);
     }
 
     .aurora-bg {
       position: fixed; top: 0; left: 0; right: 0; height: 100vh; z-index: -1;
-      background: radial-gradient(at 0% 0%, rgba(0, 71, 171, 0.15) 0px, transparent 50%),
+      background: radial-gradient(at 0% 0%, rgba(0, 71, 171, 0.1) 0px, transparent 50%),
                   radial-gradient(at 100% 0%, rgba(0, 229, 255, 0.1) 0px, transparent 50%);
       filter: blur(80px);
     }
@@ -45,7 +55,7 @@ const VisualEngine = () => (
   `}</style>
 );
 
-// Mở rộng interface Product để chứa thông tin người bán
+// --- INTERFACES ---
 interface ProductDetail extends Product {
   seller?: {
     id: string;
@@ -56,18 +66,47 @@ interface ProductDetail extends Product {
   };
 }
 
+interface Comment {
+  id: string;
+  content: string;
+  created_at: string;
+  user_id: string;
+  user: {
+    name: string;
+    avatar_url: string;
+  };
+}
+
+// --- UTILS (Time Ago đơn giản nếu ko dùng date-fns) ---
+const timeAgo = (dateString: string) => {
+  const seconds = Math.floor((new Date().getTime() - new Date(dateString).getTime()) / 1000);
+  if (seconds < 60) return 'Vừa xong';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes} phút trước`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} giờ trước`;
+  const days = Math.floor(hours / 24);
+  return `${days} ngày trước`;
+};
+
 const ProductDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
   const { addToast } = useToast();
-  const { t } = useTranslation(); // Hook i18n
+  const { t, i18n } = useTranslation();
 
   const [product, setProduct] = useState<ProductDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeImg, setActiveImg] = useState(0);
   const [isLiked, setIsLiked] = useState(false);
+  
+  // Comment States
+  const [comments, setComments] = useState<Comment[]>([]);
+  const [newComment, setNewComment] = useState("");
+  const [isPostingComment, setIsPostingComment] = useState(false);
 
+  // --- FETCH PRODUCT ---
   useEffect(() => {
     const fetchData = async () => {
       if (!id) return;
@@ -103,9 +142,7 @@ const ProductDetailPage: React.FC = () => {
             .maybeSingle();
           if (sData) setIsLiked(true);
         }
-
       } catch (err) {
-        console.error(err);
         addToast(t('market.no_product'), "error");
         navigate("/market");
       } finally {
@@ -115,6 +152,54 @@ const ProductDetailPage: React.FC = () => {
     fetchData();
   }, [id, currentUser]);
 
+  // --- FETCH COMMENTS ---
+  useEffect(() => {
+    if (!id) return;
+    
+    const fetchComments = async () => {
+      const { data } = await supabase
+        .from('comments')
+        .select(`*, user:profiles(name, avatar_url)`)
+        .eq('product_id', id)
+        .order('created_at', { ascending: false });
+      
+      if (data) setComments(data as any);
+    };
+    
+    fetchComments();
+
+    // Realtime Comments
+    const channel = supabase.channel(`comments-${id}`)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments', filter: `product_id=eq.${id}` }, () => {
+        fetchComments(); // Reload comments when new one added
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [id]);
+
+  // --- HANDLERS ---
+  const handlePostComment = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!currentUser) return navigate("/auth");
+    if (!newComment.trim()) return;
+
+    setIsPostingComment(true);
+    try {
+      await supabase.from('comments').insert({
+        product_id: id,
+        user_id: currentUser.id,
+        content: newComment.trim()
+      });
+      setNewComment("");
+      addToast("Đã gửi bình luận", "success");
+    } catch (err) {
+      addToast("Lỗi gửi bình luận", "error");
+    } finally {
+      setIsPostingComment(false);
+    }
+  };
+
   const handleLike = async () => {
     if (!currentUser) return navigate("/auth");
     if (!product) return;
@@ -123,26 +208,22 @@ const ProductDetailPage: React.FC = () => {
     setIsLiked(!isLiked);
 
     try {
-      if (oldState) {
-        await supabase.from("saved_products").delete().eq("user_id", currentUser.id).eq("product_id", product.id);
-      } else {
-        await supabase.from("saved_products").insert({ user_id: currentUser.id, product_id: product.id });
-      }
+      if (oldState) await supabase.from("saved_products").delete().eq("user_id", currentUser.id).eq("product_id", product.id);
+      else await supabase.from("saved_products").insert({ user_id: currentUser.id, product_id: product.id });
     } catch {
       setIsLiked(oldState);
-      addToast(t('market.error'), "error");
     }
   };
 
   const startChat = () => {
     if (!currentUser) return navigate("/auth");
-    if (currentUser.id === product?.sellerId) return addToast(t('product.own_item_msg') || "Đây là sản phẩm của bạn!", "info");
+    if (currentUser.id === product?.sellerId) return addToast("Đây là sản phẩm của bạn!", "info");
     navigate(`/chat?partnerId=${product?.sellerId}&productId=${product?.id}`);
   };
 
   const handleReport = () => {
     if (!currentUser) return navigate("/auth");
-    const reason = prompt(t('product.report_reason') || "Lý do báo cáo vi phạm:");
+    const reason = prompt("Lý do báo cáo:");
     if (reason) {
         supabase.from("reports").insert({
             reporter_id: currentUser.id,
@@ -150,8 +231,7 @@ const ProductDetailPage: React.FC = () => {
             reason: reason,
             status: 'pending'
         }).then(({ error }) => {
-            if (!error) addToast(t('product.report_success') || "Đã gửi báo cáo", "success");
-            else addToast(t('market.error'), "error");
+            if (!error) addToast("Đã gửi báo cáo", "success");
         });
     }
   };
@@ -182,6 +262,7 @@ const ProductDetailPage: React.FC = () => {
       <VisualEngine />
       <div className="aurora-bg"></div>
       
+      {/* HEADER */}
       <div className="sticky top-0 glass-bar transition-all">
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
           <button onClick={() => navigate(-1)} className="group flex items-center gap-2 rounded-full py-2 pr-4 pl-2 hover:bg-slate-100/50 transition-colors">
@@ -208,12 +289,13 @@ const ProductDetailPage: React.FC = () => {
 
       <main className="mx-auto max-w-7xl px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
         
-        {/* LEFT COLUMN */}
+        {/* --- LEFT COLUMN: IMAGES & DESCRIPTION --- */}
         <div className="lg:col-span-7 space-y-8 animate-enter">
+          {/* Gallery */}
           <div className="space-y-4">
             <div className="aspect-[4/3] w-full rounded-[2rem] overflow-hidden bg-white shadow-xl border border-white/60 relative group">
               {product.images.length > 0 ? (
-                <img src={product.images[activeImg]} className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-105" alt="Product Main" />
+                <img src={product.images[activeImg]} className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-105" alt="Product" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400">No Image</div>
               )}
@@ -230,7 +312,6 @@ const ProductDetailPage: React.FC = () => {
                 </div>
               )}
             </div>
-            
             {product.images.length > 1 && (
               <div className="flex gap-3 overflow-x-auto pb-2 hide-scrollbar snap-x">
                 {product.images.map((img, i) => (
@@ -242,6 +323,7 @@ const ProductDetailPage: React.FC = () => {
             )}
           </div>
 
+          {/* Description */}
           <div className="glass-panel p-8 rounded-[2rem]">
             <h3 className="font-bold text-lg mb-6 flex items-center gap-2 text-slate-800">
               <ShieldCheck className="text-[#00418E]" size={20}/> {t('product.description_title')}
@@ -251,61 +333,105 @@ const ProductDetailPage: React.FC = () => {
             </div>
           </div>
 
-          <div className="bg-orange-50/80 border border-orange-100 p-6 rounded-[2rem] flex gap-4 items-start">
-            <div className="bg-orange-100 p-2 rounded-full text-orange-600 shrink-0"><AlertTriangle size={20}/></div>
-            <div>
-              <h4 className="font-bold text-orange-800 text-sm mb-1">{t('product.safety_title')}</h4>
-              <p className="text-xs text-orange-700 leading-relaxed">{t('product.safety_content')}</p>
+          {/* COMMENTS SECTION (NEW) */}
+          <div className="glass-panel p-8 rounded-[2rem]">
+            <h3 className="font-bold text-lg mb-6 flex items-center gap-2 text-slate-800">
+              <MessageSquare className="text-[#00418E]" size={20}/> Bình luận ({comments.length})
+            </h3>
+            
+            {/* Input */}
+            <form onSubmit={handlePostComment} className="flex gap-3 mb-8">
+              <div className="flex-shrink-0">
+                <img src={currentUser?.avatar || `https://ui-avatars.com/api/?name=${currentUser?.name || 'Me'}`} className="w-10 h-10 rounded-full bg-slate-200 border border-white shadow-sm"/>
+              </div>
+              <div className="flex-1 relative">
+                <input 
+                  value={newComment}
+                  onChange={e => setNewComment(e.target.value)}
+                  placeholder="Viết bình luận..."
+                  className="w-full bg-white/80 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-100 focus:border-[#00418E] outline-none transition-all pr-12"
+                />
+                <button 
+                  type="submit" 
+                  disabled={!newComment.trim() || isPostingComment}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-[#00418E] text-white rounded-xl hover:bg-[#00306b] disabled:opacity-50 transition-colors"
+                >
+                  {isPostingComment ? <Loader2 size={16} className="animate-spin"/> : <Send size={16}/>}
+                </button>
+              </div>
+            </form>
+
+            {/* List */}
+            <div className="space-y-4">
+              {comments.length === 0 ? (
+                <p className="text-center text-slate-400 text-sm py-4">Chưa có bình luận nào. Hãy là người đầu tiên!</p>
+              ) : (
+                comments.map(comment => (
+                  <div key={comment.id} className="flex gap-3 group">
+                    <div className="flex-shrink-0">
+                      <img src={comment.user?.avatar_url || `https://ui-avatars.com/api/?name=${comment.user?.name}`} className="w-9 h-9 rounded-full bg-slate-200 border border-white shadow-sm"/>
+                    </div>
+                    <div>
+                      <div className="comment-bubble px-4 py-2.5">
+                        <div className="flex items-center gap-2 mb-0.5">
+                          <span className="font-bold text-xs text-slate-900">{comment.user?.name}</span>
+                          <span className="text-[10px] text-slate-400 font-medium">{timeAgo(comment.created_at)}</span>
+                        </div>
+                        <p className="text-sm text-slate-700 leading-relaxed">{comment.content}</p>
+                      </div>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         </div>
 
-        {/* RIGHT COLUMN */}
+        {/* --- RIGHT COLUMN: INFO & ACTIONS --- */}
         <div className="lg:col-span-5 space-y-6 animate-enter" style={{animationDelay: '100ms'}}>
           <div className="glass-panel p-8 rounded-[2.5rem] lg:sticky lg:top-24 border-t-4 border-t-[#00418E]">
+            {/* Meta */}
             <div className="flex justify-between items-start mb-6">
               <span className="bg-blue-50 text-[#00418E] px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider border border-blue-100">{product.category}</span>
               <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 bg-white/50 px-2 py-1 rounded-lg"><Eye size={14}/> {product.view_count}</div>
             </div>
             
+            {/* Title & Price */}
             <h1 className="text-3xl font-black text-slate-900 mb-4 leading-tight">{product.title}</h1>
             <p className="text-4xl font-black text-[#00418E] mb-8 tracking-tight">
               {product.price === 0 ? t('common.price_free') : new Intl.NumberFormat('vi-VN').format(product.price) + 'đ'}
             </p>
 
+            {/* Info Grid */}
             <div className="grid grid-cols-2 gap-3 mb-8">
-              <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm hover:scale-[1.02] transition-transform">
+              <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm">
                 <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.condition')}</p>
                 <p className="font-bold text-sm text-slate-700 flex gap-2 items-center"><Star size={14} className="text-yellow-500 fill-yellow-500"/> {product.condition}</p>
               </div>
-              <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm hover:scale-[1.02] transition-transform">
+              <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm">
                 <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.trade_method')}</p>
                 <p className="font-bold text-sm text-slate-700 flex gap-2 items-center"><Box size={14} className="text-blue-500"/> {product.tradeMethod === 'direct' ? t('product.method.direct') : t('product.method.shipping')}</p>
               </div>
-              <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm hover:scale-[1.02] transition-transform">
+              <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm">
                 <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.location')}</p>
                 <p className="font-bold text-sm text-slate-700 flex gap-2 items-center"><MapPin size={14} className="text-red-500"/> {product.location}</p>
               </div>
-              <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm hover:scale-[1.02] transition-transform">
+              <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm">
                 <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.posted_date')}</p>
                 <p className="font-bold text-sm text-slate-700 flex gap-2 items-center"><Calendar size={14} className="text-slate-500"/> {new Date(product.postedAt).toLocaleDateString('vi-VN')}</p>
               </div>
             </div>
 
+            {/* Seller Card */}
             <div className="group flex items-center gap-4 p-4 bg-white/50 border border-white rounded-2xl mb-8 cursor-pointer hover:bg-white hover:shadow-md transition-all" onClick={() => navigate(`/profile/${product.seller?.id}`)}>
               <div className="relative">
-                <img 
-                  src={product.seller?.avatar_url || `https://ui-avatars.com/api/?name=${product.seller?.name || 'User'}&background=random`} 
-                  className="w-14 h-14 rounded-full border-2 border-white shadow-sm object-cover"
-                  alt={product.seller?.name}
-                />
+                <img src={product.seller?.avatar_url || `https://ui-avatars.com/api/?name=${product.seller?.name || 'User'}&background=random`} className="w-14 h-14 rounded-full border-2 border-white shadow-sm object-cover" alt={product.seller?.name}/>
                 {product.seller?.verified_status === 'verified' && (
                   <div className="absolute -bottom-1 -right-1 bg-blue-500 text-white p-0.5 rounded-full border-2 border-white" title={t('product.verified_student')}>
                     <CheckCircle2 size={12}/>
                   </div>
                 )}
               </div>
-              
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-0.5">
                   <h4 className="font-bold text-slate-900 truncate">{product.seller?.name || "User"}</h4>
@@ -315,21 +441,15 @@ const ProductDetailPage: React.FC = () => {
                     <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">{t('product.seller_role')}</span>
                   )}
                 </div>
-                
                 <div className="flex items-center gap-2 text-xs text-slate-500">
-                  {product.seller?.student_code && (
-                    <span className="font-mono bg-slate-100 px-1.5 rounded">{t('product.student_id')}: {product.seller.student_code}</span>
-                  )}
-                  {product.seller?.verified_status === 'verified' ? (
-                     <span className="text-blue-600 font-bold">{t('product.verified_student')}</span>
-                  ) : (
-                     <span>{t('product.unverified')}</span>
-                  )}
+                  {product.seller?.student_code && <span className="font-mono bg-slate-100 px-1.5 rounded">{t('product.student_id')}: {product.seller.student_code}</span>}
+                  {product.seller?.verified_status === 'verified' && <span className="text-blue-600 font-bold">{t('product.verified_student')}</span>}
                 </div>
               </div>
               <div className="p-2 bg-slate-100 rounded-full text-slate-400 group-hover:text-[#00418E] group-hover:bg-blue-50 transition-colors"><ArrowRight size={18}/></div>
             </div>
 
+            {/* Actions */}
             <div className="flex flex-col gap-3">
               {isOwner ? (
                 <button onClick={() => navigate(`/edit-item/${product.id}`)} className="w-full bg-slate-800 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-slate-900 transition-all flex items-center justify-center gap-2 text-lg">
@@ -340,7 +460,6 @@ const ProductDetailPage: React.FC = () => {
                   <MessageCircle size={24}/> {t('product.contact_seller')}
                 </button>
               )}
-              
               {!isOwner && (
                 <button onClick={handleReport} className="w-full bg-white text-slate-600 border border-slate-200 py-3 rounded-2xl font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-colors text-sm flex items-center justify-center gap-2">
                   <Flag size={16}/> {t('product.report_post')}
