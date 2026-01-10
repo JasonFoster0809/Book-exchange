@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import {
   Heart, MessageCircle, Share2, ArrowLeft, Eye, MapPin,
   Clock, Star, Box, ShieldCheck, Calendar, ArrowRight,
-  Loader2, AlertTriangle, User, CheckCircle2, Flag
+  Loader2, AlertTriangle, User, CheckCircle2, Flag, Edit3
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -17,9 +17,9 @@ const VisualEngine = () => (
     body { background-color: #F8FAFC; font-family: 'Inter', sans-serif; }
     
     .glass-bar { 
-      background: rgba(255, 255, 255, 0.8); 
+      background: rgba(255, 255, 255, 0.85); 
       backdrop-filter: blur(16px); 
-      border-bottom: 1px solid rgba(255, 255, 255, 0.6); 
+      border-bottom: 1px solid rgba(255, 255, 255, 0.5); 
       z-index: 50;
     }
 
@@ -145,7 +145,6 @@ const ProductDetailPage: React.FC = () => {
 
   const handleReport = () => {
     if (!currentUser) return navigate("/auth");
-    // Logic báo cáo (có thể mở modal)
     const reason = prompt("Lý do báo cáo vi phạm:");
     if (reason) {
         supabase.from("reports").insert({
@@ -160,6 +159,16 @@ const ProductDetailPage: React.FC = () => {
     }
   };
 
+  // Helper hiển thị trạng thái sản phẩm
+  const getStatusBadge = () => {
+    if (!product) return null;
+    switch (product.status) {
+      case 'sold': return { label: 'ĐÃ BÁN', bg: 'bg-slate-100', text: 'text-slate-500', border: 'border-slate-200' };
+      case 'pending': return { label: 'ĐANG GIAO DỊCH', bg: 'bg-orange-50', text: 'text-orange-600', border: 'border-orange-200' };
+      default: return { label: 'CÒN HÀNG', bg: 'bg-green-50', text: 'text-green-600', border: 'border-green-200' };
+    }
+  };
+
   if (loading) return (
     <div className="h-screen flex flex-col items-center justify-center bg-slate-50">
       <Loader2 className="animate-spin text-[#00418E] mb-4" size={40} />
@@ -168,6 +177,9 @@ const ProductDetailPage: React.FC = () => {
   );
   
   if (!product) return null;
+
+  const isOwner = currentUser?.id === product.sellerId;
+  const statusBadge = getStatusBadge();
 
   return (
     <div className="min-h-screen pb-32 font-sans text-slate-800">
@@ -219,6 +231,13 @@ const ProductDetailPage: React.FC = () => {
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400">Không có ảnh</div>
+              )}
+              
+              {/* TAG TRẠNG THÁI SẢN PHẨM */}
+              {statusBadge && (
+                <div className={`absolute top-4 right-4 px-3 py-1.5 rounded-lg border font-black text-xs uppercase tracking-wider shadow-sm backdrop-blur-md ${statusBadge.bg} ${statusBadge.text} ${statusBadge.border}`}>
+                  {statusBadge.label}
+                </div>
               )}
               
               {product.images.length > 1 && (
@@ -320,7 +339,7 @@ const ProductDetailPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Seller Card (Đã cập nhật logic hiển thị từ Profiles) */}
+            {/* SELLER CARD (PRO) */}
             <div 
               className="group flex items-center gap-4 p-4 bg-white/50 border border-white rounded-2xl mb-8 cursor-pointer hover:bg-white hover:shadow-md transition-all" 
               onClick={() => navigate(`/profile/${product.seller?.id}`)}
@@ -341,14 +360,19 @@ const ProductDetailPage: React.FC = () => {
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-0.5">
                   <h4 className="font-bold text-slate-900 truncate">{product.seller?.name || "Người dùng ẩn danh"}</h4>
-                  <span className="px-1.5 py-0.5 bg-slate-100 rounded text-[10px] font-bold text-slate-500">
-                    {product.seller?.student_code ? 'SV BK' : 'Member'}
-                  </span>
+                  {/* TAG PHÂN BIỆT CHỦ SỞ HỮU */}
+                  {isOwner ? (
+                    <span className="bg-green-100 text-green-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-green-200">TIN CỦA BẠN</span>
+                  ) : (
+                    <span className="bg-blue-100 text-blue-700 text-[10px] font-bold px-2 py-0.5 rounded-full border border-blue-200">NGƯỜI BÁN</span>
+                  )}
                 </div>
+                
                 <div className="flex items-center gap-2 text-xs text-slate-500">
+                  {product.seller?.student_code && (
+                    <span className="font-mono bg-slate-100 px-1.5 rounded">{product.seller.student_code}</span>
+                  )}
                   <span className="flex items-center gap-1 text-yellow-500 font-bold"><Star size={10} fill="currentColor"/> 5.0</span>
-                  <span className="w-1 h-1 rounded-full bg-slate-300"></span>
-                  <span>Phản hồi nhanh</span>
                 </div>
               </div>
               <div className="p-2 bg-slate-100 rounded-full text-slate-400 group-hover:text-[#00418E] group-hover:bg-blue-50 transition-colors">
@@ -356,21 +380,34 @@ const ProductDetailPage: React.FC = () => {
               </div>
             </div>
 
-            {/* Action Buttons */}
+            {/* ACTION BUTTONS (Logic mới) */}
             <div className="flex flex-col gap-3">
-              <button 
-                onClick={startChat} 
-                className="w-full bg-gradient-to-r from-[#00418E] to-[#0065D1] text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-900/20 hover:shadow-blue-900/30 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-lg"
-              >
-                <MessageCircle size={24}/> Liên hệ người bán
-              </button>
+              {isOwner ? (
+                // Nếu là chủ sở hữu -> Nút Chỉnh Sửa
+                <button 
+                  onClick={() => navigate(`/edit-item/${product.id}`)}
+                  className="w-full bg-slate-800 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-slate-900 transition-all flex items-center justify-center gap-2 text-lg"
+                >
+                  <Edit3 size={20}/> Chỉnh sửa tin đăng
+                </button>
+              ) : (
+                // Nếu là khách -> Nút Liên Hệ
+                <button 
+                  onClick={startChat} 
+                  className="w-full bg-gradient-to-r from-[#00418E] to-[#0065D1] text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-900/20 hover:shadow-blue-900/30 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-lg"
+                >
+                  <MessageCircle size={24}/> Liên hệ người bán
+                </button>
+              )}
               
-              <button 
-                onClick={handleReport}
-                className="w-full bg-white text-slate-600 border border-slate-200 py-3 rounded-2xl font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-colors text-sm flex items-center justify-center gap-2"
-              >
-                <Flag size={16}/> Báo cáo tin này
-              </button>
+              {!isOwner && (
+                <button 
+                  onClick={handleReport}
+                  className="w-full bg-white text-slate-600 border border-slate-200 py-3 rounded-2xl font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-colors text-sm flex items-center justify-center gap-2"
+                >
+                  <Flag size={16}/> Báo cáo tin này
+                </button>
+              )}
             </div>
           </div>
         </div>
