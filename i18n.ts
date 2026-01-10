@@ -6,17 +6,111 @@ const resources = {
     translation: {
       nav: {
         home: "Home",
-        market: "The Exchange",
-        post: "Pass Item",
+        market: "Market",
+        post: "Post Item",
         chat: "Chats",
         login: "Login",
         profile: "Profile",
         admin: "Admin",
         logout: "Logout",
-        // Bổ sung các key mới
         login_as: "Logged in as",
         my_listings: "My Listings",
         saved: "Saved Items"
+      },
+      product: {
+        back: "Back",
+        description_title: "Description",
+        no_description: "Seller hasn't provided a description.",
+        safety_title: "Safety Tips",
+        safety_content: "Meet in public places (H6 Hall, Library). Check item carefully before paying. No advance transfer.",
+        condition: "Condition",
+        trade_method: "Trade Method",
+        location: "Location",
+        posted_date: "Posted",
+        seller_role: "SELLER",
+        owner_role: "YOUR ITEM",
+        verified_student: "Verified Student",
+        unverified: "Unverified",
+        student_id: "ID",
+        edit_post: "Edit Listing",
+        contact_seller: "Contact Seller",
+        report_post: "Report Item",
+        status: {
+          available: "AVAILABLE",
+          pending: "PENDING",
+          sold: "SOLD"
+        },
+        method: {
+          direct: "Direct",
+          shipping: "Shipping"
+        }
+      },
+      profile: {
+        edit_profile: "Edit Profile",
+        logout: "Logout",
+        message: "Message",
+        follow: "Follow",
+        following: "Following",
+        stats: {
+          posts: "Listings",
+          sold: "Sold",
+          reviews: "reviews"
+        },
+        tabs: {
+          inventory: "Inventory",
+          reviews: "Reviews"
+        },
+        empty_products: "No items listed yet.",
+        empty_reviews: "No reviews yet.",
+        post_now: "Post Now",
+        verified_badge: "Trusted Member",
+        verified_desc: "Student info verified.",
+        unverified_title: "Unverified Account",
+        verify_now: "Verify Now",
+        pending_verify: "Pending Approval...",
+        modal: {
+          title: "Edit Profile",
+          avatar_cover: "Avatar & Cover",
+          change_avatar: "Change Avatar",
+          change_cover: "Change Cover",
+          display_name: "Display Name",
+          major: "Major",
+          batch: "Cohort",
+          bio: "Bio",
+          cancel: "Cancel",
+          save: "Save Changes",
+          saving: "Saving..."
+        }
+      },
+      chat: {
+        title: "Messages",
+        search_placeholder: "Search...",
+        empty_list: "No messages.",
+        empty_chat: "Select a conversation to start chatting",
+        status: {
+          online: "Active now",
+          selling: "SELLING",
+          trading: "TRADING",
+          sold: "SOLD"
+        },
+        roles: {
+          buyer: "Buyer",
+          seller: "Seller"
+        },
+        actions: {
+          request_buy: "Request to Buy",
+          confirm_sell: "Confirm Sell",
+          finish: "Finish",
+          cancel: "Cancel",
+          waiting_seller: "Waiting for seller confirmation...",
+          completed: "Transaction Completed",
+          delivered: "Delivered",
+          unpin: "Unpin Item",
+          view_profile: "View Profile",
+          report_user: "Report User",
+          delete_chat: "Delete Chat"
+        },
+        input_placeholder: "Type a message..."
       },
       market: {
         title: "Student Thrift Corner",
@@ -116,10 +210,104 @@ const resources = {
         profile: "Hồ sơ",
         admin: "Quản trị",
         logout: "Đăng xuất",
-        // Bổ sung các key mới
         login_as: "Đang đăng nhập là",
         my_listings: "Tin đăng của tôi",
         saved: "Tin đã lưu"
+      },
+      product: {
+        back: "Quay lại",
+        description_title: "Mô tả chi tiết",
+        no_description: "Người bán chưa nhập mô tả cho sản phẩm này.",
+        safety_title: "Lưu ý an toàn",
+        safety_content: "Nên giao dịch trực tiếp tại các khu vực đông người trong trường (Sảnh H6, Thư viện). Kiểm tra kỹ sản phẩm trước khi thanh toán. Không chuyển khoản trước khi nhận hàng.",
+        condition: "Tình trạng",
+        trade_method: "Giao dịch",
+        location: "Khu vực",
+        posted_date: "Ngày đăng",
+        seller_role: "NGƯỜI BÁN",
+        owner_role: "TIN CỦA BẠN",
+        verified_student: "SV Xác Thực",
+        unverified: "Chưa xác thực",
+        student_id: "MSSV",
+        edit_post: "Chỉnh sửa tin đăng",
+        contact_seller: "Liên hệ người bán",
+        report_post: "Báo cáo tin này",
+        status: {
+          available: "CÒN HÀNG",
+          pending: "ĐANG GIAO DỊCH",
+          sold: "ĐÃ BÁN"
+        },
+        method: {
+          direct: "Trực tiếp",
+          shipping: "Ship COD"
+        }
+      },
+      profile: {
+        edit_profile: "Sửa hồ sơ",
+        logout: "Đăng xuất",
+        message: "Nhắn tin",
+        follow: "Theo dõi",
+        following: "Đã theo dõi",
+        stats: {
+          posts: "Tin đăng",
+          sold: "Đã bán",
+          reviews: "đánh giá"
+        },
+        tabs: {
+          inventory: "Kho hàng",
+          reviews: "Đánh giá"
+        },
+        empty_products: "Chưa có sản phẩm nào được đăng bán.",
+        empty_reviews: "Chưa có đánh giá nào",
+        post_now: "Đăng tin ngay",
+        verified_badge: "Thành viên uy tín",
+        verified_desc: "Đã xác thực thông tin sinh viên.",
+        unverified_title: "Tài khoản chưa xác thực",
+        verify_now: "Xác thực ngay",
+        pending_verify: "Đang chờ duyệt...",
+        modal: {
+          title: "Chỉnh sửa hồ sơ",
+          avatar_cover: "Ảnh đại diện & Bìa",
+          change_avatar: "Đổi Avatar",
+          change_cover: "Đổi Bìa",
+          display_name: "Tên hiển thị",
+          major: "Ngành học",
+          batch: "Khóa",
+          bio: "Giới thiệu bản thân",
+          cancel: "Hủy",
+          save: "Lưu thay đổi",
+          saving: "Đang lưu..."
+        }
+      },
+      chat: {
+        title: "Tin nhắn",
+        search_placeholder: "Tìm kiếm...",
+        empty_list: "Chưa có tin nhắn nào.",
+        empty_chat: "Chọn một cuộc hội thoại để bắt đầu",
+        status: {
+          online: "Đang hoạt động",
+          selling: "ĐANG BÁN",
+          trading: "ĐANG GIAO DỊCH",
+          sold: "ĐÃ BÁN"
+        },
+        roles: {
+          buyer: "Người mua",
+          seller: "Người bán"
+        },
+        actions: {
+          request_buy: "Yêu cầu mua",
+          confirm_sell: "Xác nhận bán",
+          finish: "Hoàn tất",
+          cancel: "Hủy",
+          waiting_seller: "Đang chờ người bán xác nhận hoàn tất...",
+          completed: "Giao dịch đã hoàn tất",
+          delivered: "Đã giao xong",
+          unpin: "Gỡ ghim sản phẩm",
+          view_profile: "Xem trang cá nhân",
+          report_user: "Báo cáo người dùng",
+          delete_chat: "Xóa cuộc trò chuyện"
+        },
+        input_placeholder: "Nhập tin nhắn..."
       },
       market: {
         title: "Góc Pass Đồ Sinh Viên",
