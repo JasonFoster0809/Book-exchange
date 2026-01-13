@@ -10,7 +10,7 @@ import {
 import { useToast } from '../contexts/ToastContext';
 import { Product, ProductStatus } from '../types';
 
-// --- COMPONENT: CONFIRM MODAL (Thay thế window.alert) ---
+// --- COMPONENT: CONFIRM MODAL ---
 const ConfirmModal = ({ 
   isOpen, 
   onClose, 
@@ -67,7 +67,7 @@ const MyItemsPage: React.FC = () => {
   const [savedItems, setSavedItems] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   
-  // State cho Modal xác nhận
+  // State cho Modal
   const [confirmModal, setConfirmModal] = useState<{
     isOpen: boolean;
     title: string;
@@ -89,11 +89,8 @@ const MyItemsPage: React.FC = () => {
   });
 
   useEffect(() => {
-    if (user) {
-      fetchData();
-    } else {
-      navigate('/auth');
-    }
+    if (user) fetchData();
+    else navigate('/auth');
   }, [user]);
 
   const fetchData = async () => {
@@ -101,31 +98,49 @@ const MyItemsPage: React.FC = () => {
     try {
       if (!user) return;
 
+      // 1. LẤY TIN TÔI ĐĂNG (Fix lỗi posted_at -> created_at)
       const { data: myProducts, error: err1 } = await supabase
         .from('products')
-        .select('*')
+        // Join thêm profile để lấy thông tin seller chuẩn
+        .select('*, seller:profiles!seller_id(name, avatar_url, verified_status)') 
         .eq('seller_id', user.id)
-        .order('posted_at', { ascending: false });
+        .order('created_at', { ascending: false }); // <-- ĐÃ SỬA LỖI TẠI ĐÂY
 
       if (err1) throw err1;
 
+      // 2. LẤY TIN ĐÃ LƯU (Fix lỗi join relation)
       const { data: savedData, error: err2 } = await supabase
         .from('saved_products')
-        .select('product:products(*)')
+        .select(`
+          product:products (
+            *,
+            seller:profiles!seller_id(name, avatar_url, verified_status)
+          )
+        `)
         .eq('user_id', user.id);
 
       if (err2) throw err2;
 
+      // 3. Map dữ liệu Selling
       const myItemsMap = (myProducts || []).map((p: any) => ({
-        ...p, sellerId: p.seller_id, postedAt: p.posted_at, tradeMethod: p.trade_method
+        ...p,
+        sellerId: p.seller_id,
+        postedAt: p.created_at, // Map từ created_at
+        tradeMethod: p.trade_method,
+        seller: p.seller
       }));
 
+      // 4. Map dữ liệu Saved
       const savedItemsMap = (savedData || [])
         // @ts-ignore
         .map((item: any) => item.product)
         .filter((p: any) => p !== null)
         .map((p: any) => ({
-            ...p, sellerId: p.seller_id, postedAt: p.posted_at, tradeMethod: p.trade_method
+            ...p,
+            sellerId: p.seller_id,
+            postedAt: p.created_at, // Map từ created_at
+            tradeMethod: p.trade_method,
+            seller: p.seller
       }));
 
       setSellingItems(myItemsMap);
@@ -134,20 +149,16 @@ const MyItemsPage: React.FC = () => {
       const totalViews = myItemsMap.reduce((acc: number, cur: any) => acc + (cur.view_count || 0), 0);
       const soldCount = myItemsMap.filter((p: any) => p.status === ProductStatus.SOLD).length;
 
-      setStats({
-        totalViews,
-        totalProducts: myItemsMap.length,
-        soldCount
-      });
+      setStats({ totalViews, totalProducts: myItemsMap.length, soldCount });
 
     } catch (error) {
       console.error(error);
+      addToast("Lỗi tải dữ liệu", "error");
     } finally {
       setLoading(false);
     }
   };
 
-  // Hàm mở modal xác nhận xóa
   const requestDelete = (id: string, isSaved: boolean) => {
     setConfirmModal({
       isOpen: true,
@@ -162,7 +173,6 @@ const MyItemsPage: React.FC = () => {
 
   const handleDelete = async (id: string, isSaved: boolean) => {
     if (!user) return;
-    
     try {
         if (isSaved) {
             await supabase.from('saved_products').delete().eq('user_id', user.id).eq('product_id', id);
@@ -193,7 +203,6 @@ const MyItemsPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] pb-20 pt-6">
-      {/* Render Modal */}
       <ConfirmModal 
         isOpen={confirmModal.isOpen}
         onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
@@ -204,12 +213,10 @@ const MyItemsPage: React.FC = () => {
       />
 
       <div className="max-w-5xl mx-auto px-4">
-        
         <div className="mb-10">
             <h1 className="text-3xl font-black text-[#034EA2] mb-6 flex items-center">
                 <LayoutDashboard className="w-8 h-8 mr-3"/> Góc Của Tôi
             </h1>
-            
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                 <div className="bg-white p-6 rounded-2xl shadow-sm border border-blue-100 flex items-center justify-between">
                     <div>
