@@ -5,10 +5,57 @@ import { useAuth } from '../contexts/AuthContext';
 import { 
   Package, Heart, TrendingUp, Eye, Trash2, 
   CheckCircle2, XCircle, ChevronRight, ShoppingBag, LayoutDashboard,
-  Edit3 
+  Edit3, AlertTriangle, X
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Product, ProductStatus } from '../types';
+
+// --- COMPONENT: CONFIRM MODAL (Thay thế window.alert) ---
+const ConfirmModal = ({ 
+  isOpen, 
+  onClose, 
+  onConfirm, 
+  title, 
+  message, 
+  isDanger = false 
+}: { 
+  isOpen: boolean; 
+  onClose: () => void; 
+  onConfirm: () => void; 
+  title: string; 
+  message: string; 
+  isDanger?: boolean;
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl overflow-hidden scale-100 animate-in zoom-in-95 duration-200">
+        <div className="p-6 text-center">
+          <div className={`w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4 ${isDanger ? 'bg-red-50 text-red-500' : 'bg-blue-50 text-blue-500'}`}>
+            {isDanger ? <Trash2 size={32} /> : <AlertTriangle size={32} />}
+          </div>
+          <h3 className="text-xl font-bold text-gray-900 mb-2">{title}</h3>
+          <p className="text-gray-500 text-sm leading-relaxed">{message}</p>
+        </div>
+        <div className="flex border-t border-gray-100">
+          <button 
+            onClick={onClose}
+            className="flex-1 py-4 text-gray-600 font-bold hover:bg-gray-50 transition-colors border-r border-gray-100"
+          >
+            Hủy bỏ
+          </button>
+          <button 
+            onClick={() => { onConfirm(); onClose(); }}
+            className={`flex-1 py-4 font-bold text-white transition-colors ${isDanger ? 'bg-red-500 hover:bg-red-600' : 'bg-[#034EA2] hover:bg-blue-700'}`}
+          >
+            Xác nhận
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
 
 const MyItemsPage: React.FC = () => {
   const { user } = useAuth();
@@ -20,6 +67,21 @@ const MyItemsPage: React.FC = () => {
   const [savedItems, setSavedItems] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   
+  // State cho Modal xác nhận
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    action: () => void;
+    isDanger: boolean;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    action: () => {},
+    isDanger: false
+  });
+
   const [stats, setStats] = useState({
     totalViews: 0,
     totalProducts: 0,
@@ -39,58 +101,36 @@ const MyItemsPage: React.FC = () => {
     try {
       if (!user) return;
 
-      // 1. Lấy tin mình đăng (Selling)
       const { data: myProducts, error: err1 } = await supabase
         .from('products')
-        // FIX: Join thêm profile để có đủ data seller (chính mình)
-        .select('*, seller:profiles!seller_id (name, avatar_url, verified_status)')
+        .select('*')
         .eq('seller_id', user.id)
-        .order('created_at', { ascending: false }); // FIX: posted_at -> created_at
+        .order('posted_at', { ascending: false });
 
       if (err1) throw err1;
 
-      // 2. Lấy tin mình lưu (Saved)
       const { data: savedData, error: err2 } = await supabase
         .from('saved_products')
-        // FIX: Join lồng nhau để lấy Product + Seller của Product đó
-        .select(`
-          product:products (
-            *,
-            seller:profiles!seller_id (name, avatar_url, verified_status)
-          )
-        `)
+        .select('product:products(*)')
         .eq('user_id', user.id);
 
       if (err2) throw err2;
 
-      // 3. Map dữ liệu Selling
       const myItemsMap = (myProducts || []).map((p: any) => ({
-        ...p,
-        sellerId: p.seller_id,
-        postedAt: p.created_at, // FIX: Map created_at
-        tradeMethod: p.trade_method,
-        seller: p.seller, // Data từ relation
-        images: p.images || []
+        ...p, sellerId: p.seller_id, postedAt: p.posted_at, tradeMethod: p.trade_method
       }));
 
-      // 4. Map dữ liệu Saved
       const savedItemsMap = (savedData || [])
         // @ts-ignore
         .map((item: any) => item.product)
-        .filter((p: any) => p !== null) // Lọc tin đã bị xóa
+        .filter((p: any) => p !== null)
         .map((p: any) => ({
-            ...p,
-            sellerId: p.seller_id,
-            postedAt: p.created_at, // FIX: Map created_at
-            tradeMethod: p.trade_method,
-            seller: p.seller, // Data từ relation lồng nhau
-            images: p.images || []
+            ...p, sellerId: p.seller_id, postedAt: p.posted_at, tradeMethod: p.trade_method
       }));
 
       setSellingItems(myItemsMap);
       setSavedItems(savedItemsMap);
 
-      // 5. Tính Stats
       const totalViews = myItemsMap.reduce((acc: number, cur: any) => acc + (cur.view_count || 0), 0);
       const soldCount = myItemsMap.filter((p: any) => p.status === ProductStatus.SOLD).length;
 
@@ -102,30 +142,39 @@ const MyItemsPage: React.FC = () => {
 
     } catch (error) {
       console.error(error);
-      addToast("Lỗi tải dữ liệu", "error");
     } finally {
       setLoading(false);
     }
   };
 
+  // Hàm mở modal xác nhận xóa
+  const requestDelete = (id: string, isSaved: boolean) => {
+    setConfirmModal({
+      isOpen: true,
+      title: isSaved ? "Bỏ lưu tin này?" : "Xóa vĩnh viễn?",
+      message: isSaved 
+        ? "Tin này sẽ bị xóa khỏi danh sách đã lưu của bạn." 
+        : "Hành động này không thể hoàn tác. Bạn chắc chắn muốn xóa tin đăng này chứ?",
+      isDanger: true,
+      action: () => handleDelete(id, isSaved)
+    });
+  };
+
   const handleDelete = async (id: string, isSaved: boolean) => {
     if (!user) return;
-    if (!confirm(isSaved ? "Bỏ lưu tin này?" : "Xóa vĩnh viễn tin này?")) return;
-
+    
     try {
         if (isSaved) {
-            const { error } = await supabase.from('saved_products').delete().eq('user_id', user.id).eq('product_id', id);
-            if (error) throw error;
+            await supabase.from('saved_products').delete().eq('user_id', user.id).eq('product_id', id);
             setSavedItems(prev => prev.filter(p => p.id !== id));
             addToast("Đã bỏ lưu tin", "info");
         } else {
-            const { error } = await supabase.from('products').delete().eq('id', id);
-            if (error) throw error;
+            await supabase.from('products').delete().eq('id', id);
             setSellingItems(prev => prev.filter(p => p.id !== id));
             addToast("Đã xóa tin đăng", "success");
         }
     } catch (error) {
-        addToast("Có lỗi xảy ra khi xóa", "error");
+        addToast("Có lỗi xảy ra", "error");
     }
   };
 
@@ -137,8 +186,6 @@ const MyItemsPage: React.FC = () => {
       if (!error) {
           setSellingItems(prev => prev.map(p => p.id === product.id ? {...p, status: newStatus as ProductStatus} : p));
           addToast(newStatus === 'sold' ? "Đã đánh dấu Đã Bán" : "Đã đăng bán lại", "success");
-      } else {
-          addToast("Lỗi cập nhật trạng thái", "error");
       }
   };
 
@@ -146,6 +193,16 @@ const MyItemsPage: React.FC = () => {
 
   return (
     <div className="min-h-screen bg-[#F8FAFC] pb-20 pt-6">
+      {/* Render Modal */}
+      <ConfirmModal 
+        isOpen={confirmModal.isOpen}
+        onClose={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+        onConfirm={confirmModal.action}
+        title={confirmModal.title}
+        message={confirmModal.message}
+        isDanger={confirmModal.isDanger}
+      />
+
       <div className="max-w-5xl mx-auto px-4">
         
         <div className="mb-10">
@@ -210,7 +267,7 @@ const MyItemsPage: React.FC = () => {
                         {(activeTab === 'selling' ? sellingItems : savedItems).map((item) => (
                             <div key={item.id} className="flex flex-col md:flex-row gap-4 bg-white border border-gray-100 p-4 rounded-xl hover:shadow-md transition-shadow group">
                                 <Link to={`/product/${item.id}`} className="w-full md:w-32 h-32 flex-shrink-0 bg-gray-100 rounded-lg overflow-hidden relative">
-                                    <img src={item.images?.[0] || 'https://via.placeholder.com/150'} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/>
+                                    <img src={item.images?.[0] || 'https://via.placeholder.com/150'} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" alt={item.title}/>
                                     {item.status === ProductStatus.SOLD && (
                                         <div className="absolute inset-0 bg-black/50 flex items-center justify-center">
                                             <span className="text-white text-xs font-bold border px-2 py-1 rounded">ĐÃ BÁN</span>
@@ -234,37 +291,44 @@ const MyItemsPage: React.FC = () => {
 
                                     {/* Actions Section */}
                                     <div className="mt-4 pt-4 border-t border-gray-50 flex justify-end items-center gap-2">
-                                            {activeTab === 'selling' ? (
-                                                <>
-                                                    <button 
-                                                        onClick={() => navigate(`/edit-item/${item.id}`)}
-                                                        className="text-xs font-bold px-3 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center transition-colors"
-                                                    >
-                                                        <Edit3 className="w-3.5 h-3.5 mr-1"/> Sửa tin
-                                                    </button>
-
-                                                    <button 
-                                                        onClick={() => handleStatusToggle(item)}
-                                                        className={`text-xs font-bold px-3 py-2 rounded-lg flex items-center transition ${item.status === ProductStatus.SOLD ? 'bg-green-50 text-green-600 hover:bg-green-100' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                                                    >
-                                                        {item.status === ProductStatus.SOLD ? <><CheckCircle2 className="w-3 h-3 mr-1"/> Đăng bán lại</> : <><XCircle className="w-3 h-3 mr-1"/> Đã bán</>}
-                                                    </button>
-                                                    
-                                                    <button onClick={() => handleDelete(item.id, false)} className="p-2 text-gray-400 hover:text-red-500 transition-colors" title="Xóa tin">
-                                                        <Trash2 className="w-4 h-4"/>
-                                                    </button>
-                                                </>
-                                            ) : (
-                                                <button onClick={() => handleDelete(item.id, true)} className="text-xs font-bold px-3 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 flex items-center">
-                                                    <Heart className="w-3 h-3 mr-1 fill-current"/> Bỏ lưu
+                                        {activeTab === 'selling' ? (
+                                            <>
+                                                <button 
+                                                    onClick={() => navigate(`/edit-item/${item.id}`)}
+                                                    className="text-xs font-bold px-3 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center transition-colors"
+                                                >
+                                                    <Edit3 className="w-3.5 h-3.5 mr-1"/> Sửa tin
                                                 </button>
-                                            )}
-                                            
-                                            <div className="w-[1px] h-4 bg-gray-200 mx-1"></div>
-                                            
-                                            <Link to={`/product/${item.id}`} className="text-xs font-bold px-4 py-2 rounded-lg bg-[#034EA2] text-white hover:bg-[#003875] flex items-center">
-                                                Xem <ChevronRight className="w-3 h-3 ml-1"/>
-                                            </Link>
+
+                                                <button 
+                                                    onClick={() => handleStatusToggle(item)}
+                                                    className={`text-xs font-bold px-3 py-2 rounded-lg flex items-center transition ${item.status === ProductStatus.SOLD ? 'bg-green-50 text-green-600 hover:bg-green-100' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                                                >
+                                                    {item.status === ProductStatus.SOLD ? <><CheckCircle2 className="w-3 h-3 mr-1"/> Đăng bán lại</> : <><XCircle className="w-3 h-3 mr-1"/> Đã bán</>}
+                                                </button>
+                                                
+                                                <button 
+                                                    onClick={() => requestDelete(item.id, false)} 
+                                                    className="p-2 text-gray-400 hover:text-red-500 transition-colors" 
+                                                    title="Xóa tin"
+                                                >
+                                                    <Trash2 className="w-4 h-4"/>
+                                                </button>
+                                            </>
+                                        ) : (
+                                            <button 
+                                                onClick={() => requestDelete(item.id, true)} 
+                                                className="text-xs font-bold px-3 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 flex items-center"
+                                            >
+                                                <Heart className="w-3 h-3 mr-1 fill-current"/> Bỏ lưu
+                                            </button>
+                                        )}
+                                        
+                                        <div className="w-[1px] h-4 bg-gray-200 mx-1"></div>
+                                        
+                                        <Link to={`/product/${item.id}`} className="text-xs font-bold px-4 py-2 rounded-lg bg-[#034EA2] text-white hover:bg-[#003875] flex items-center">
+                                            Xem <ChevronRight className="w-3 h-3 ml-1"/>
+                                        </Link>
                                     </div>
                                 </div>
                             </div>
