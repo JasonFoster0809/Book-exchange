@@ -5,7 +5,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { 
   Package, Heart, TrendingUp, Eye, Trash2, 
   CheckCircle2, XCircle, ChevronRight, ShoppingBag, LayoutDashboard,
-  Edit3 // Import thêm icon Edit
+  Edit3 
 } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext';
 import { Product, ProductStatus } from '../types';
@@ -39,36 +39,58 @@ const MyItemsPage: React.FC = () => {
     try {
       if (!user) return;
 
+      // 1. Lấy tin mình đăng (Selling)
       const { data: myProducts, error: err1 } = await supabase
         .from('products')
-        .select('*')
+        // FIX: Join thêm profile để có đủ data seller (chính mình)
+        .select('*, seller:profiles!seller_id (name, avatar_url, verified_status)')
         .eq('seller_id', user.id)
-        .order('posted_at', { ascending: false });
+        .order('created_at', { ascending: false }); // FIX: posted_at -> created_at
 
       if (err1) throw err1;
 
+      // 2. Lấy tin mình lưu (Saved)
       const { data: savedData, error: err2 } = await supabase
         .from('saved_products')
-        .select('product:products(*)')
+        // FIX: Join lồng nhau để lấy Product + Seller của Product đó
+        .select(`
+          product:products (
+            *,
+            seller:profiles!seller_id (name, avatar_url, verified_status)
+          )
+        `)
         .eq('user_id', user.id);
 
       if (err2) throw err2;
 
+      // 3. Map dữ liệu Selling
       const myItemsMap = (myProducts || []).map((p: any) => ({
-        ...p, sellerId: p.seller_id, postedAt: p.posted_at, tradeMethod: p.trade_method
+        ...p,
+        sellerId: p.seller_id,
+        postedAt: p.created_at, // FIX: Map created_at
+        tradeMethod: p.trade_method,
+        seller: p.seller, // Data từ relation
+        images: p.images || []
       }));
 
+      // 4. Map dữ liệu Saved
       const savedItemsMap = (savedData || [])
         // @ts-ignore
         .map((item: any) => item.product)
-        .filter((p: any) => p !== null)
+        .filter((p: any) => p !== null) // Lọc tin đã bị xóa
         .map((p: any) => ({
-            ...p, sellerId: p.seller_id, postedAt: p.posted_at, tradeMethod: p.trade_method
+            ...p,
+            sellerId: p.seller_id,
+            postedAt: p.created_at, // FIX: Map created_at
+            tradeMethod: p.trade_method,
+            seller: p.seller, // Data từ relation lồng nhau
+            images: p.images || []
       }));
 
       setSellingItems(myItemsMap);
       setSavedItems(savedItemsMap);
 
+      // 5. Tính Stats
       const totalViews = myItemsMap.reduce((acc: number, cur: any) => acc + (cur.view_count || 0), 0);
       const soldCount = myItemsMap.filter((p: any) => p.status === ProductStatus.SOLD).length;
 
@@ -80,6 +102,7 @@ const MyItemsPage: React.FC = () => {
 
     } catch (error) {
       console.error(error);
+      addToast("Lỗi tải dữ liệu", "error");
     } finally {
       setLoading(false);
     }
@@ -91,16 +114,18 @@ const MyItemsPage: React.FC = () => {
 
     try {
         if (isSaved) {
-            await supabase.from('saved_products').delete().eq('user_id', user.id).eq('product_id', id);
+            const { error } = await supabase.from('saved_products').delete().eq('user_id', user.id).eq('product_id', id);
+            if (error) throw error;
             setSavedItems(prev => prev.filter(p => p.id !== id));
             addToast("Đã bỏ lưu tin", "info");
         } else {
-            await supabase.from('products').delete().eq('id', id);
+            const { error } = await supabase.from('products').delete().eq('id', id);
+            if (error) throw error;
             setSellingItems(prev => prev.filter(p => p.id !== id));
             addToast("Đã xóa tin đăng", "success");
         }
     } catch (error) {
-        addToast("Có lỗi xảy ra", "error");
+        addToast("Có lỗi xảy ra khi xóa", "error");
     }
   };
 
@@ -112,6 +137,8 @@ const MyItemsPage: React.FC = () => {
       if (!error) {
           setSellingItems(prev => prev.map(p => p.id === product.id ? {...p, status: newStatus as ProductStatus} : p));
           addToast(newStatus === 'sold' ? "Đã đánh dấu Đã Bán" : "Đã đăng bán lại", "success");
+      } else {
+          addToast("Lỗi cập nhật trạng thái", "error");
       }
   };
 
@@ -207,38 +234,37 @@ const MyItemsPage: React.FC = () => {
 
                                     {/* Actions Section */}
                                     <div className="mt-4 pt-4 border-t border-gray-50 flex justify-end items-center gap-2">
-                                        {activeTab === 'selling' ? (
-                                            <>
-                                                {/* NÚT CHỈNH SỬA - MỚI THÊM */}
-                                                <button 
-                                                    onClick={() => navigate(`/edit-item/${item.id}`)}
-                                                    className="text-xs font-bold px-3 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center transition-colors"
-                                                >
-                                                    <Edit3 className="w-3.5 h-3.5 mr-1"/> Sửa tin
-                                                </button>
+                                            {activeTab === 'selling' ? (
+                                                <>
+                                                    <button 
+                                                        onClick={() => navigate(`/edit-item/${item.id}`)}
+                                                        className="text-xs font-bold px-3 py-2 rounded-lg bg-blue-50 text-blue-600 hover:bg-blue-100 flex items-center transition-colors"
+                                                    >
+                                                        <Edit3 className="w-3.5 h-3.5 mr-1"/> Sửa tin
+                                                    </button>
 
-                                                <button 
-                                                    onClick={() => handleStatusToggle(item)}
-                                                    className={`text-xs font-bold px-3 py-2 rounded-lg flex items-center transition ${item.status === ProductStatus.SOLD ? 'bg-green-50 text-green-600 hover:bg-green-100' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
-                                                >
-                                                    {item.status === ProductStatus.SOLD ? <><CheckCircle2 className="w-3 h-3 mr-1"/> Đăng bán lại</> : <><XCircle className="w-3 h-3 mr-1"/> Đã bán</>}
+                                                    <button 
+                                                        onClick={() => handleStatusToggle(item)}
+                                                        className={`text-xs font-bold px-3 py-2 rounded-lg flex items-center transition ${item.status === ProductStatus.SOLD ? 'bg-green-50 text-green-600 hover:bg-green-100' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}
+                                                    >
+                                                        {item.status === ProductStatus.SOLD ? <><CheckCircle2 className="w-3 h-3 mr-1"/> Đăng bán lại</> : <><XCircle className="w-3 h-3 mr-1"/> Đã bán</>}
+                                                    </button>
+                                                    
+                                                    <button onClick={() => handleDelete(item.id, false)} className="p-2 text-gray-400 hover:text-red-500 transition-colors" title="Xóa tin">
+                                                        <Trash2 className="w-4 h-4"/>
+                                                    </button>
+                                                </>
+                                            ) : (
+                                                <button onClick={() => handleDelete(item.id, true)} className="text-xs font-bold px-3 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 flex items-center">
+                                                    <Heart className="w-3 h-3 mr-1 fill-current"/> Bỏ lưu
                                                 </button>
-                                                
-                                                <button onClick={() => handleDelete(item.id, false)} className="p-2 text-gray-400 hover:text-red-500 transition-colors" title="Xóa tin">
-                                                    <Trash2 className="w-4 h-4"/>
-                                                </button>
-                                            </>
-                                        ) : (
-                                            <button onClick={() => handleDelete(item.id, true)} className="text-xs font-bold px-3 py-2 rounded-lg bg-red-50 text-red-600 hover:bg-red-100 flex items-center">
-                                                <Heart className="w-3 h-3 mr-1 fill-current"/> Bỏ lưu
-                                            </button>
-                                        )}
-                                        
-                                        <div className="w-[1px] h-4 bg-gray-200 mx-1"></div>
-                                        
-                                        <Link to={`/product/${item.id}`} className="text-xs font-bold px-4 py-2 rounded-lg bg-[#034EA2] text-white hover:bg-[#003875] flex items-center">
-                                            Xem <ChevronRight className="w-3 h-3 ml-1"/>
-                                        </Link>
+                                            )}
+                                            
+                                            <div className="w-[1px] h-4 bg-gray-200 mx-1"></div>
+                                            
+                                            <Link to={`/product/${item.id}`} className="text-xs font-bold px-4 py-2 rounded-lg bg-[#034EA2] text-white hover:bg-[#003875] flex items-center">
+                                                Xem <ChevronRight className="w-3 h-3 ml-1"/>
+                                            </Link>
                                     </div>
                                 </div>
                             </div>
