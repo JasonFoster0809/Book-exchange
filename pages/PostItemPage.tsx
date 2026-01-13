@@ -34,12 +34,14 @@ const VisualEngine = () => (
   <style>{`
     :root { --primary: #00418E; }
     body { background-color: #F8FAFC; color: #0F172A; }
+    
     .glass-panel { 
       background: rgba(255, 255, 255, 0.85); 
       backdrop-filter: blur(20px); 
       border: 1px solid rgba(255, 255, 255, 0.6); 
       box-shadow: 0 20px 40px -10px rgba(0, 65, 142, 0.1); 
     }
+    
     .input-modern { 
       width: 100%; padding: 16px; border-radius: 16px; 
       border: 2px solid #E2E8F0; background: white; 
@@ -47,11 +49,16 @@ const VisualEngine = () => (
     }
     .input-modern:focus { border-color: var(--primary); box-shadow: 0 0 0 4px rgba(0, 65, 142, 0.1); }
     
-    /* Animation */
+    /* Ẩn nút tăng giảm số mặc định của trình duyệt để tránh vỡ giao diện */
+    input[type=number]::-webkit-inner-spin-button, 
+    input[type=number]::-webkit-outer-spin-button { 
+      -webkit-appearance: none; margin: 0; 
+    }
+    input[type=number] { -moz-appearance: textfield; }
+
     @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
     .animate-enter { animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
     
-    /* Device Mockup */
     .mockup-mobile { 
       width: 320px; height: 640px; margin: 0 auto; 
       border: 8px solid #1e293b; border-radius: 40px; 
@@ -136,8 +143,8 @@ const PostItemPage: React.FC = () => {
               price: data.price.toString(),
               category: data.category,
               condition: data.condition,
-              tradeMethod: data.trade_method, // DB: snake_case
-              location: data.location_name,   // DB: snake_case
+              tradeMethod: data.trade_method, 
+              location: data.location_name,   
               tags: data.tags || []
             }
           });
@@ -195,18 +202,18 @@ const PostItemPage: React.FC = () => {
         }
       }
 
-      // 2. Prepare Payload (Snake Case for SQL)
+      // 2. Prepare Payload
       const payload = {
         title: state.title,
         description: state.description,
         price: parseInt(state.price.replace(/\D/g, '')),
         category: state.category,
         condition: state.condition,
-        trade_method: state.tradeMethod, // Column: trade_method
-        location_name: state.location,   // Column: location_name
+        trade_method: state.tradeMethod,
+        location_name: state.location,
         images: finalUrls,
         tags: state.tags,
-        seller_id: user.id,              // Column: seller_id
+        seller_id: user.id,
         status: 'available',
         view_count: 0
       };
@@ -297,10 +304,17 @@ const PostItemPage: React.FC = () => {
                 
                 <div className="grid md:grid-cols-2 gap-6">
                   <div>
-                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Giá bán (VNĐ)</label>
+                    <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Giá bán</label>
                     <div className="relative">
-                      <DollarSign className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
-                      <input value={state.price} onChange={e => dispatch({type:'SET_FIELD', field:'price', value:e.target.value})} className="input-modern pl-9 font-bold text-[#00418E]" placeholder="0" />
+                      {/* ĐÃ SỬA: Bỏ icon trái, thêm text phải, thêm padding right */}
+                      <input 
+                        value={state.price} 
+                        onChange={e => dispatch({type:'SET_FIELD', field:'price', value:e.target.value})} 
+                        className="input-modern pr-16 font-bold text-[#00418E] text-lg" 
+                        placeholder="0" 
+                        type="number"
+                      />
+                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 font-bold text-sm pointer-events-none">VNĐ</span>
                     </div>
                   </div>
                   <div>
@@ -423,7 +437,7 @@ const PostItemPage: React.FC = () => {
                       <span className="text-xs text-slate-400 font-bold"><Eye size={12} className="inline mr-1"/> 0</span>
                     </div>
                     <h2 className="text-xl font-black text-slate-900 leading-tight mb-2">{state.title}</h2>
-                    <p className="text-2xl font-black text-[#00418E] mb-6">{parseInt(state.price.replace(/\D/g, '')).toLocaleString()}đ</p>
+                    <p className="text-2xl font-black text-[#00418E] mb-6">{state.price ? parseInt(state.price.replace(/\D/g, '')).toLocaleString() : 0}đ</p>
                     
                     <div className="grid grid-cols-2 gap-2 mb-6">
                       <div className="bg-slate-50 p-3 rounded-xl border"><p className="text-[10px] text-slate-400 uppercase font-bold">Tình trạng</p><p className="text-sm font-bold">{CONDITIONS.find(c => c.value === state.condition)?.label}</p></div>
