@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { 
   ArrowLeft, Plus, Package, Edit3, Trash2, Eye, 
-  MoreVertical, CheckCircle2, AlertCircle, Loader2 
+  MoreVertical, CheckCircle2, AlertCircle, Loader2, RotateCcw 
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -42,7 +42,6 @@ const MyListingsPage: React.FC = () => {
       try {
         const { data, error } = await supabase
           .from('products')
-          // FIX: Join đúng relation và lấy verified_status
           .select(`
             *, 
             seller:profiles!seller_id ( name, avatar_url, verified_status )
@@ -52,11 +51,9 @@ const MyListingsPage: React.FC = () => {
 
         if (error) throw error;
 
-        // Map data
         const mappedProducts = (data || []).map((p: any) => ({
           ...p,
           sellerId: p.seller_id,
-          // seller đã được join ở trên
           postedAt: p.created_at,
           tradeMethod: p.trade_method,
           location: p.location_name,
