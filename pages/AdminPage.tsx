@@ -2,7 +2,7 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Users, Package, AlertTriangle, 
-  Search, LogOut, CheckCircle, Trash2, 
+  Search, LogOut, CheckCircle, Trash2,XCircle,TrendingUp,
   Shield, Ban, Eye, ChevronLeft, ChevronRight,
   Activity, Calendar, ArrowUpRight
 } from "lucide-react";
@@ -485,3 +485,4 @@ const AdminPage = () => {
 };
 
 export default AdminPage;
+
