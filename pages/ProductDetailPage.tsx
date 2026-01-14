@@ -3,8 +3,8 @@ import { useParams, useNavigate, Link } from "react-router-dom";
 import {
   Heart, MessageCircle, Share2, ArrowLeft, Eye, MapPin,
   Clock, Star, Box, ShieldCheck, Calendar, ArrowRight,
-  Loader2, AlertTriangle, User, CheckCircle2, Flag, Edit3,
-  MessageSquare, Send, Trash, X, Copy, Check
+  Loader2, AlertTriangle, User as UserIcon, CheckCircle2, Flag, Edit3,
+  MessageSquare, Send, Trash, X, Check, ZoomIn
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -13,16 +13,17 @@ import { useTranslation } from 'react-i18next';
 import { Product } from "../types";
 
 // ============================================================================
-// 1. VISUAL ENGINE (Styles)
+// 1. VISUAL ENGINE (Đã nâng cấp Z-Index và Modal)
 // ============================================================================
 const VisualEngine = () => (
   <style>{`
     :root { --primary: #00418E; }
     body { background-color: #F8FAFC; font-family: 'Inter', sans-serif; }
     
+    /* Navbar & Glass Effects */
     .glass-bar { 
-      background: rgba(255, 255, 255, 0.85); 
-      backdrop-filter: blur(16px); 
+      background: rgba(255, 255, 255, 0.9); 
+      backdrop-filter: blur(20px); 
       border-bottom: 1px solid rgba(255, 255, 255, 0.5); 
       z-index: 40;
     }
@@ -45,15 +46,20 @@ const VisualEngine = () => (
                   radial-gradient(at 100% 0%, rgba(0, 229, 255, 0.08) 0px, transparent 50%);
     }
 
-    .animate-enter { animation: slideUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
+    /* Animation */
+    .animate-enter { animation: slideUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
     @keyframes slideUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
     
+    .animate-zoom-in { animation: zoomIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; transform: scale(0.9); }
+    @keyframes zoomIn { to { opacity: 1; transform: scale(1); } }
+
     .hide-scrollbar::-webkit-scrollbar { display: none; }
 
-    /* Modal Backdrop */
+    /* Modal Backdrop - Z-Index cao nhất để đè lên Navbar */
     .modal-backdrop {
-      background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px);
-      position: fixed; inset: 0; z-index: 100;
+      background: rgba(0, 0, 0, 0.95); /* Nền tối hơn */
+      backdrop-filter: blur(8px);
+      position: fixed; inset: 0; z-index: 9999; /* Đè lên tất cả */
       display: flex; align-items: center; justify-content: center;
       animation: fadeIn 0.2s ease-out;
     }
@@ -99,16 +105,26 @@ const timeAgo = (dateString: string) => {
 const formatCurrency = (amount: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
 
 // ============================================================================
-// 3. SUB-COMPONENTS (Modals & Widgets)
+// 3. SUB-COMPONENTS
 // ============================================================================
 
-// --- Image Lightbox (Zoom ảnh) ---
+// --- Image Lightbox (ĐÃ FIX ZOOM TO) ---
 const ImageLightbox = ({ src, onClose }: { src: string, onClose: () => void }) => (
   <div className="modal-backdrop" onClick={onClose}>
-    <button className="absolute top-6 right-6 text-white/80 hover:text-white transition-colors p-2 bg-black/20 rounded-full">
-      <X size={32}/>
+    {/* Close Button */}
+    <button className="absolute top-4 right-4 text-white/70 hover:text-white transition-colors p-3 bg-white/10 hover:bg-white/20 rounded-full z-50 backdrop-blur-md border border-white/10">
+      <X size={28}/>
     </button>
-    <img src={src} className="max-w-[95vw] max-h-[95vh] rounded-lg shadow-2xl object-contain animate-enter" onClick={e => e.stopPropagation()} />
+    
+    {/* Image Container */}
+    <div className="w-full h-full flex items-center justify-center p-4">
+      <img 
+        src={src} 
+        className="animate-zoom-in rounded-lg shadow-2xl object-contain max-h-[95vh] max-w-[95vw] w-auto h-auto min-h-[50vh] min-w-[50vw]" // Thêm min-h/min-w để không bị bé tí
+        style={{ maxHeight: '95vh', maxWidth: '95vw' }} // Fallback
+        onClick={e => e.stopPropagation()} 
+      />
+    </div>
   </div>
 );
 
@@ -119,12 +135,11 @@ const ReportModal = ({ onClose, onSubmit }: { onClose: () => void, onSubmit: (re
 
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl m-4 animate-enter" onClick={e => e.stopPropagation()}>
+      <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl m-4 animate-zoom-in" onClick={e => e.stopPropagation()}>
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-lg font-bold text-gray-900 flex items-center gap-2"><AlertTriangle className="text-red-500"/> Báo cáo tin đăng</h3>
           <button onClick={onClose}><X size={20} className="text-gray-400 hover:text-gray-600"/></button>
         </div>
-        <p className="text-sm text-gray-500 mb-4">Hãy chọn lý do bạn muốn báo cáo sản phẩm này.</p>
         <div className="space-y-2 mb-6">
           {reasons.map(r => (
             <button key={r} onClick={() => setReason(r)} className={`w-full text-left px-4 py-3 rounded-xl border transition-all ${reason === r ? 'border-[#00418E] bg-blue-50 text-[#00418E] font-medium' : 'border-gray-200 hover:border-blue-200'}`}>
@@ -132,11 +147,7 @@ const ReportModal = ({ onClose, onSubmit }: { onClose: () => void, onSubmit: (re
             </button>
           ))}
         </div>
-        <button 
-          disabled={!reason}
-          onClick={() => onSubmit(reason)}
-          className="w-full bg-red-600 text-white py-3 rounded-xl font-bold hover:bg-red-700 disabled:opacity-50 transition-colors"
-        >
+        <button disabled={!reason} onClick={() => onSubmit(reason)} className="w-full bg-red-600 text-white py-3 rounded-xl font-bold hover:bg-red-700 disabled:opacity-50 transition-colors">
           Gửi báo cáo
         </button>
       </div>
@@ -154,12 +165,10 @@ const ProductDetailPage: React.FC = () => {
   const { addToast } = useToast();
   const { t } = useTranslation();
 
-  // Data State
   const [product, setProduct] = useState<ProductDetail | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
   
-  // UI State
   const [loading, setLoading] = useState(true);
   const [activeImg, setActiveImg] = useState(0);
   const [isLiked, setIsLiked] = useState(false);
@@ -167,18 +176,16 @@ const ProductDetailPage: React.FC = () => {
   const [showReport, setShowReport] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
 
-  // Comment State
   const [newComment, setNewComment] = useState("");
   const [isPostingComment, setIsPostingComment] = useState(false);
   const [replyTo, setReplyTo] = useState<Comment | null>(null);
 
-  // --- 1. FETCH DATA ---
+  // --- FETCH DATA ---
   useEffect(() => {
     const fetchData = async () => {
       if (!id) return;
       setLoading(true);
       try {
-        // A. Product
         const { data: pData, error } = await supabase
           .from("products")
           .select(`*, profiles:seller_id(id, name, avatar_url, verified_status, student_code)`)
@@ -197,11 +204,11 @@ const ProductDetailPage: React.FC = () => {
           location: pData.location_name || "TP.HCM"
         };
         setProduct(mappedProduct);
+        
         supabase.rpc("increment_view_count", { product_id: id }).then(() => {
              setProduct(prev => prev ? ({...prev, view_count: (prev.view_count || 0) + 1}) : null);
         });
 
-        // B. Related Products (Cùng category, khác ID)
         if (pData.category) {
           const { data: related } = await supabase
             .from('products')
@@ -213,7 +220,6 @@ const ProductDetailPage: React.FC = () => {
           if (related) setRelatedProducts(related as Product[]);
         }
 
-        // C. Like Status
         if (currentUser) {
           const { data: sData } = await supabase.from("saved_products").select("id").eq("user_id", currentUser.id).eq("product_id", id).maybeSingle();
           if (sData) setIsLiked(true);
@@ -227,7 +233,6 @@ const ProductDetailPage: React.FC = () => {
     };
     fetchData();
 
-    // D. Realtime View Count
     if (id) {
         const ch = supabase.channel(`view_${id}`).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products', filter: `id=eq.${id}` }, 
           (payload) => setProduct(prev => prev ? { ...prev, ...payload.new } : null)
@@ -236,7 +241,7 @@ const ProductDetailPage: React.FC = () => {
     }
   }, [id, currentUser]);
 
-  // --- 2. FETCH COMMENTS & REALTIME ---
+  // --- FETCH COMMENTS ---
   useEffect(() => {
     if (!id) return;
     const fetchComments = async () => {
@@ -248,7 +253,7 @@ const ProductDetailPage: React.FC = () => {
     return () => { supabase.removeChannel(ch); };
   }, [id]);
 
-  // --- 3. ACTIONS ---
+  // --- ACTIONS ---
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return navigate("/auth");
@@ -264,16 +269,15 @@ const ProductDetailPage: React.FC = () => {
       });
       if (error) throw error;
 
-      // Notification
+      const actorName = currentUser.name || currentUser.email?.split('@')[0] || "Người dùng";
+
       if (product.sellerId !== currentUser.id) {
-        const actorName = currentUser.name || "Người dùng";
         await supabase.from('notifications').insert({
           user_id: product.sellerId, actor_id: currentUser.id, type: 'comment',
           title: '💬 Bình luận mới', content: `${actorName} đã bình luận vào bài "${product.title}".`, link: `/product/${product.id}`
         });
       }
       if (replyTo && replyTo.user_id !== currentUser.id && replyTo.user_id !== product.sellerId) {
-         const actorName = currentUser.name || "Người dùng";
          await supabase.from('notifications').insert({
             user_id: replyTo.user_id, actor_id: currentUser.id, type: 'comment',
             title: '↩️ Phản hồi mới', content: `${actorName} đã trả lời bình luận của bạn.`, link: `/product/${product.id}`
@@ -351,28 +355,38 @@ const ProductDetailPage: React.FC = () => {
       </div>
 
       <main className="mx-auto max-w-7xl px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
-        
-        {/* --- LEFT: IMAGES & COMMENTS --- */}
         <div className="lg:col-span-7 space-y-8 animate-enter">
+          
           {/* Gallery */}
           <div className="space-y-4">
-            <div className="aspect-[4/3] w-full rounded-[2rem] overflow-hidden bg-white shadow-xl border border-white/60 relative group cursor-zoom-in" onClick={() => setShowLightbox(true)}>
+            <div 
+              className="aspect-[4/3] w-full rounded-[2rem] overflow-hidden bg-white shadow-xl border border-white/60 relative group cursor-zoom-in transition-all hover:shadow-2xl" 
+              onClick={() => setShowLightbox(true)}
+            >
               {product.images.length > 0 ? (
                 <img src={product.images[activeImg]} className="w-full h-full object-contain p-2 transition-transform duration-500 group-hover:scale-105" alt="Product" />
               ) : <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400">No Image</div>}
               
+              {/* Badge Overlay */}
               {product.status !== 'available' && (
                 <div className="absolute top-4 right-4 px-3 py-1.5 rounded-lg border font-black text-xs uppercase tracking-wider shadow-sm backdrop-blur-md bg-slate-100 text-slate-500">
                   {product.status === 'sold' ? 'Đã bán' : 'Đang giao dịch'}
                 </div>
               )}
               
+              {/* Zoom Hint */}
+              <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-black/40 text-white px-4 py-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity backdrop-blur-sm flex items-center gap-2 pointer-events-none">
+                <ZoomIn size={16}/> Xem phóng to
+              </div>
+
               {product.images.length > 1 && (
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/50 backdrop-blur-md px-3 py-1 rounded-full text-white text-xs font-bold">
                   {activeImg + 1} / {product.images.length}
                 </div>
               )}
             </div>
+            
+            {/* Thumbnails */}
             {product.images.length > 1 && (
               <div className="flex gap-3 overflow-x-auto pb-2 hide-scrollbar snap-x">
                 {product.images.map((img, i) => (
@@ -384,7 +398,6 @@ const ProductDetailPage: React.FC = () => {
             )}
           </div>
 
-          {/* Description */}
           <div className="glass-panel p-8 rounded-[2rem]">
             <h3 className="font-bold text-lg mb-6 flex items-center gap-2 text-slate-800"><ShieldCheck className="text-[#00418E]" size={20}/> {t('product.description_title')}</h3>
             <div className="prose prose-sm max-w-none text-slate-600 leading-relaxed whitespace-pre-wrap font-medium">
@@ -392,7 +405,6 @@ const ProductDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {/* Comments */}
           <div className="glass-panel p-8 rounded-[2rem]">
             <h3 className="font-bold text-lg mb-6 flex items-center gap-2 text-slate-800"><MessageSquare className="text-[#00418E]" size={20}/> Bình luận ({comments.length})</h3>
             <form onSubmit={handlePostComment} className="flex gap-3 mb-8">
@@ -434,7 +446,6 @@ const ProductDetailPage: React.FC = () => {
           </div>
         </div>
 
-        {/* --- RIGHT: INFO & ACTIONS --- */}
         <div className="lg:col-span-5 space-y-6 animate-enter" style={{animationDelay: '100ms'}}>
           <div className="glass-panel p-8 rounded-[2.5rem] lg:sticky lg:top-24 border-t-4 border-t-[#00418E]">
             <div className="flex justify-between items-start mb-6">
@@ -466,7 +477,7 @@ const ProductDetailPage: React.FC = () => {
 
             <div className="group flex items-center gap-4 p-4 bg-white/50 border border-white rounded-2xl mb-8 cursor-pointer hover:bg-white hover:shadow-md transition-all" onClick={() => navigate(`/profile/${product.seller?.id}`)}>
               <div className="relative">
-                <img src={product.seller?.avatar_url || `https://ui-avatars.com/api/?name=${product.seller?.name || 'User'}`} className="w-14 h-14 rounded-full border-2 border-white shadow-sm object-cover"/>
+                <img src={product.seller?.avatar_url || `https://ui-avatars.com/api/?name=${product.seller?.name || 'User'}&background=random`} className="w-14 h-14 rounded-full border-2 border-white shadow-sm object-cover"/>
                 {product.seller?.verified_status === 'verified' && <div className="absolute -bottom-1 -right-1 bg-blue-500 text-white p-0.5 rounded-full border-2 border-white"><CheckCircle2 size={12}/></div>}
               </div>
               <div className="flex-1 min-w-0">
@@ -503,27 +514,7 @@ const ProductDetailPage: React.FC = () => {
         </div>
       </main>
 
-      {/* --- RELATED PRODUCTS SECTION (NEW) --- */}
-      {relatedProducts.length > 0 && (
-        <section className="mx-auto max-w-7xl px-4 py-8 border-t border-slate-200 mt-8">
-          <h2 className="text-2xl font-black text-slate-800 mb-6">Sản phẩm tương tự</h2>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            {relatedProducts.map(p => (
-              <Link to={`/product/${p.id}`} key={p.id} className="bg-white rounded-2xl shadow-sm border border-slate-100 overflow-hidden hover:shadow-md transition-all group">
-                <div className="aspect-square relative overflow-hidden">
-                  <img src={p.images?.[0] || 'https://via.placeholder.com/200'} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"/>
-                </div>
-                <div className="p-4">
-                  <h4 className="font-bold text-slate-900 truncate mb-1">{p.title}</h4>
-                  <p className="text-[#00418E] font-black">{formatCurrency(p.price)}</p>
-                </div>
-              </Link>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* --- MOBILE STICKY BAR (NEW) --- */}
+      {/* MOBILE STICKY BAR */}
       <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-3 z-30 flex gap-3 shadow-[0_-4px_20px_rgba(0,0,0,0.05)] pb-safe">
         {isOwner ? (
            <button onClick={() => navigate(`/edit-item/${product.id}`)} className="flex-1 bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center items-center gap-2">
