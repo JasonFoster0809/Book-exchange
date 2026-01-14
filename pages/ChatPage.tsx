@@ -11,7 +11,9 @@ import {
 } from 'lucide-react'; 
 import { playMessageSound } from '../utils/audio';
 
-// --- VISUAL ENGINE ---
+// ============================================================================
+// STYLES & VISUAL ENGINE
+// ============================================================================
 const VisualEngine = () => (
   <style>{`
     .chat-scrollbar::-webkit-scrollbar { width: 5px; }
@@ -31,29 +33,58 @@ const VisualEngine = () => (
       background: #FFFFFF; color: #1E293B; border: 1px solid #F1F5F9;
       border-bottom-left-radius: 4px; margin-right: auto; 
     }
+    .msg-image { padding: 4px; background: transparent; border: none; box-shadow: none; }
     
-    .badge-pop { animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-    @keyframes pop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
-
     .transaction-card {
       background: rgba(255, 255, 255, 0.95); border-bottom: 1px solid #E2E8F0; 
       z-index: 20; backdrop-filter: blur(12px);
     }
+    
     .animate-slide-in { animation: slideIn 0.3s ease-out forwards; }
     @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
     .typing-dot { width: 6px; height: 6px; background: #94a3b8; border-radius: 50%; animation: typing 1.4s infinite ease-in-out both; }
-    .typing-dot:nth-child(1) { animation-delay: -0.32s; } .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+    .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+    .typing-dot:nth-child(2) { animation-delay: -0.16s; }
     @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
-    
-    .dropdown-menu {
-      position: absolute; top: 100%; right: 0; margin-top: 8px; background: white; border: 1px solid #E2E8F0; 
-      border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1); width: 220px; overflow: hidden; z-index: 50;
+
+    .context-menu {
+      position: absolute; background: white; border: 1px solid #e2e8f0; 
+      border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); z-index: 50;
+      min-width: 160px; overflow: hidden; animation: fadeIn 0.1s;
     }
-    .dropdown-item { display: flex; items-center; gap: 10px; width: 100%; padding: 12px 16px; text-align: left; font-size: 14px; font-weight: 500; color: #475569; transition: all 0.2s; }
+    .context-item {
+      padding: 10px 14px; font-size: 13px; color: #ef4444; font-weight: 500;
+      display: flex; items-center; gap: 8px; cursor: pointer; transition: background 0.1s;
+    }
+    .context-item:hover { background: #fef2f2; }
+
+    .dropdown-menu {
+      position: absolute; top: 100%; right: 0; margin-top: 8px;
+      background: white; border: 1px solid #E2E8F0; border-radius: 12px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+      width: 220px; overflow: hidden; z-index: 50;
+      animation: fadeIn 0.1s ease-out;
+    }
+    .dropdown-item {
+      display: flex; items-center; gap: 10px; width: 100%;
+      padding: 12px 16px; text-align: left; font-size: 14px; font-weight: 500;
+      color: #475569; transition: all 0.2s;
+    }
     .dropdown-item:hover { background: #F8FAFC; color: #00418E; }
-    .dropdown-item.danger { color: #EF4444; } .dropdown-item.danger:hover { background: #FEF2F2; }
-    .date-divider { display: flex; justify-content: center; margin: 24px 0; position: relative; }
-    .date-divider span { background: #E2E8F0; color: #64748B; font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 12px; z-index: 10; }
+    .dropdown-item.danger { color: #EF4444; }
+    .dropdown-item.danger:hover { background: #FEF2F2; }
+
+    .date-divider {
+      display: flex; justify-content: center; margin: 24px 0; position: relative;
+    }
+    .date-divider span {
+      background: #E2E8F0; color: #64748B; font-size: 11px; font-weight: 600;
+      padding: 4px 12px; border-radius: 12px; z-index: 10;
+    }
+    
+    .badge-pop { animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+    @keyframes pop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
   `}</style>
 );
 
@@ -96,13 +127,17 @@ const ChatPage: React.FC = () => {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, msgId: string } | null>(null);
 
+  // --- QUAN TRỌNG: ĐỊNH NGHĨA BIẾN Ở ĐÂY ĐỂ DÙNG TOÀN COMPONENT ---
+  const isSeller = user && targetProduct && user.id === targetProduct.seller_id;
+  const isBuyer = user && targetProduct && user.id !== targetProduct.seller_id;
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<any>(null);
 
-  // 1. Fetch Conversations & Unread Count
+  // 1. Fetch Conversations
   const fetchConversations = async () => {
       setLoadingConv(true);
       if (!user) return;
@@ -113,11 +148,8 @@ const ChatPage: React.FC = () => {
         .order('updated_at', { ascending: false });
 
       if (convData) {
-          // Tính toán số lượng tin chưa đọc
           const enriched = await Promise.all(convData.map(async (c: any) => {
               const partner = c.participant1 === user.id ? c.p2 : c.p1;
-              
-              // Đếm số tin nhắn: Của người kia gửi (sender != me) VÀ Chưa đọc (is_read = false)
               const { count } = await supabase.from('messages')
                 .select('*', { count: 'exact', head: true })
                 .eq('conversation_id', c.id)
@@ -129,7 +161,7 @@ const ChatPage: React.FC = () => {
                   partnerName: partner?.name || "User", 
                   partnerAvatar: partner?.avatar_url, 
                   partnerId: partner?.id,
-                  unread_count: count || 0 // Lưu số lượng vào state
+                  unread_count: count || 0
               };
           }));
           setConversations(enriched);
@@ -152,26 +184,21 @@ const ChatPage: React.FC = () => {
     initChat();
   }, [partnerIdParam, productIdParam, user]);
 
-  // 2. GLOBAL REALTIME: Update List & Badges
+  // 2. Global Realtime
   useEffect(() => {
     if (!user) return;
     const channel = supabase.channel('global_chat_updates')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
           const newMsg = payload.new;
-          // Nếu tin nhắn từ người khác
           if (newMsg.sender_id !== user.id) {
-              playMessageSound();
-              
-              // Nếu KHÔNG phải hội thoại đang mở -> Tăng badge
               if (activeConversation !== newMsg.conversation_id) {
+                  playMessageSound();
                   setConversations(prev => prev.map(c => 
                       c.id === newMsg.conversation_id 
                       ? { ...c, last_message: newMsg.content, updated_at: newMsg.created_at, unread_count: (c.unread_count || 0) + 1 }
                       : c
                   ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()));
               } else {
-                  // Nếu ĐANG mở hội thoại này -> Chỉ update last_message (không tăng badge)
-                  // Và đánh dấu đã đọc ngay lập tức trong DB
                   await supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id);
                   setConversations(prev => prev.map(c => 
                       c.id === newMsg.conversation_id 
@@ -191,16 +218,12 @@ const ChatPage: React.FC = () => {
     return () => { supabase.removeChannel(channel); };
   }, [user, activeConversation]);
 
-  // 3. Mark as Read Handler
+  // 3. Select Handler
   const handleSelectConversation = async (convId: string, partnerId: string) => {
       setActiveConversation(convId);
       fetchPartnerInfoInternal(partnerId);
       setTargetProduct(null); 
-
-      // UI Update: Xóa badge đỏ ngay lập tức
       setConversations(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
-
-      // DB Update: Đánh dấu tất cả tin nhắn của đối phương là đã đọc
       if(user) {
           await supabase.from('messages').update({ is_read: true })
             .eq('conversation_id', convId)
@@ -209,7 +232,7 @@ const ChatPage: React.FC = () => {
       }
   };
 
-  // 4. CHAT ROOM REALTIME
+  // 4. Chat Room Realtime
   useEffect(() => {
     if (!activeConversation) return;
     fetchMessages(activeConversation);
@@ -222,6 +245,10 @@ const ChatPage: React.FC = () => {
                 if (prev.some(m => m.id === newMsg.id)) return prev;
                 return [...prev, newMsg];
             });
+            if (newMsg.sender_id !== user?.id) {
+                playMessageSound();
+                supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id);
+            }
             setTimeout(scrollToBottom, 100);
         })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (payload) => {
@@ -244,7 +271,7 @@ const ChatPage: React.FC = () => {
     return () => { supabase.removeChannel(channel); };
   }, [activeConversation]);
 
-  // Helpers & API
+  // Helpers
   const checkAndCreateConversation = async (pId: string, prodId: string | null) => {
       if (!user) return;
       let convId = null;
@@ -369,7 +396,6 @@ const ChatPage: React.FC = () => {
 
   const filteredConversations = conversations.filter(c => c.partnerName?.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  // UI Helpers
   const formatMessageDate = (dateStr: string) => {
       const d = new Date(dateStr);
       const now = new Date();
@@ -438,7 +464,6 @@ const ChatPage: React.FC = () => {
                       </div>
                       <div className="flex justify-between items-center mt-0.5">
                           <p className={`text-xs truncate max-w-[200px] ${conv.unread_count > 0 ? 'text-slate-900 font-bold' : 'text-slate-500 font-medium'}`}>{conv.last_message || "Bắt đầu trò chuyện"}</p>
-                          {/* UNREAD BADGE */}
                           {conv.unread_count > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full badge-pop min-w-[18px] text-center shadow-sm border border-white">{conv.unread_count}</span>}
                       </div>
                   </div>
