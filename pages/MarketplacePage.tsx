@@ -4,7 +4,7 @@ import {
   Search, Filter, X, ChevronDown, MapPin, 
   ArrowUpDown, SlidersHorizontal, Package, 
   Ghost, Clock, Heart, ShoppingBag, Check,
-  LayoutGrid, List, Eye, Bell, ChevronRight, User
+  LayoutGrid, List, Eye, Bell, ChevronRight, User, ArrowRight // <--- Đã thêm ArrowRight
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { Product } from "../types";
@@ -33,13 +33,14 @@ enum SortOption {
   MOST_VIEWED = "most_viewed",
 }
 
+// Fix Types: Sử dụng string cho các trường input để tránh lỗi Type mismatch
 interface FilterState {
   category: string;
   sort: SortOption;
   search: string;
-  minPrice: number | "";
-  maxPrice: number | "";
-  condition: "all" | "new" | "used";
+  minPrice: string; // Changed form number | "" to string
+  maxPrice: string; // Changed form number | "" to string
+  condition: string; // Relaxed type to string to handle ""
   location: string;
 }
 
@@ -203,7 +204,7 @@ const ProductCard = ({ product, viewMode, onQuickView }: { product: Product, vie
           loading="lazy"
         />
         {product.condition === 'new' && (
-          <span className="absolute top-2 left-2 bg-[#00388D] text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm">MỚI</span>
+          <span className="absolute top-2 left-2 bg-[#00388D] text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm">MỚI 100%</span>
         )}
         <div className={`absolute top-2 right-2 flex-col gap-2 ${isGrid ? 'flex opacity-0 group-hover:opacity-100 transition-opacity' : 'flex'}`}>
            <button onClick={handleLike} className="p-1.5 bg-white/90 rounded-full text-gray-500 hover:text-red-500 hover:bg-white shadow-sm"><Heart size={16}/></button>
@@ -272,7 +273,7 @@ const MarketPage = () => {
     category: searchParams.get("category") || "",
     minPrice: "",
     maxPrice: "",
-    condition: "",
+    condition: "all",
     location: "",
     sort: SortOption.NEWEST
   });
@@ -291,11 +292,13 @@ const MarketPage = () => {
     try {
       let query = supabase.from("products").select("*", { count: 'exact' }).eq("status", "available");
 
+      // Filter Logic
       if (filters.search) query = query.ilike("title", `%${filters.search}%`);
       if (filters.category) query = query.eq("category", filters.category);
+      // Fix: Convert string price to number before query
       if (filters.minPrice) query = query.gte("price", Number(filters.minPrice));
       if (filters.maxPrice) query = query.lte("price", Number(filters.maxPrice));
-      if (filters.condition) query = query.eq("condition", filters.condition);
+      if (filters.condition && filters.condition !== "all") query = query.eq("condition", filters.condition);
       if (filters.location) query = query.ilike("location_name", `%${filters.location}%`);
 
       switch (filters.sort) {
@@ -317,10 +320,12 @@ const MarketPage = () => {
   };
 
   const loadMore = () => { const nextPage = page + 1; setPage(nextPage); fetchProducts(nextPage); };
+  
   const clearFilters = () => {
-    setFilters({ search: "", category: "", minPrice: "", maxPrice: "", condition: "", location: "", sort: SortOption.NEWEST });
+    setFilters({ search: "", category: "", minPrice: "", maxPrice: "", condition: "all", location: "", sort: SortOption.NEWEST });
     setSearchParams({});
   };
+  
   const saveSearch = () => addToast("Đã lưu bộ lọc tìm kiếm này!", "success");
 
   // Filter Sidebar Content
@@ -365,7 +370,7 @@ const MarketPage = () => {
       <div>
         <h4 className="text-sm font-bold text-gray-700 mb-3">Tình trạng</h4>
         <select className="input-field cursor-pointer" value={filters.condition} onChange={e => setFilters({...filters, condition: e.target.value})}>
-          <option value="">Tất cả</option>
+          <option value="all">Tất cả</option>
           <option value="new">Mới 100%</option>
           <option value="used">Đã qua sử dụng</option>
         </select>
@@ -435,6 +440,16 @@ const MarketPage = () => {
               </div>
             </div>
           </div>
+
+          {/* Active Filters Tag */}
+          {(filters.search || filters.category || filters.minPrice || filters.maxPrice || (filters.condition && filters.condition !== "all")) && (
+            <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-gray-100">
+              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider py-1">Đang lọc:</span>
+              {filters.search && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-200 flex items-center gap-1">"{filters.search}" <X size={12} className="cursor-pointer" onClick={()=>setFilters({...filters, search:""})}/></span>}
+              {filters.category && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-200 flex items-center gap-1">{CATEGORIES.find(c=>c.id===filters.category)?.label} <X size={12} className="cursor-pointer" onClick={()=>setFilters({...filters, category:""})}/></span>}
+              {(filters.minPrice || filters.maxPrice) && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-200 flex items-center gap-1">{filters.minPrice || 0} - {filters.maxPrice || '∞'} <X size={12} className="cursor-pointer" onClick={()=>setFilters({...filters, minPrice:"", maxPrice:""})}/></span>}
+            </div>
+          )}
         </div>
       </div>
 
@@ -447,16 +462,6 @@ const MarketPage = () => {
         </aside>
 
         <main className="min-h-[500px]">
-          {/* Active Filters */}
-          {(filters.search || filters.category || filters.minPrice || filters.location) && (
-            <div className="flex flex-wrap gap-2 mb-6">
-              {filters.search && <span className="text-xs bg-white border border-blue-200 text-blue-700 px-3 py-1.5 rounded-full flex items-center gap-1 font-medium shadow-sm">Từ khóa: "{filters.search}" <X size={12} className="cursor-pointer hover:text-red-500" onClick={()=>setFilters({...filters, search:""})}/></span>}
-              {filters.category && <span className="text-xs bg-white border border-blue-200 text-blue-700 px-3 py-1.5 rounded-full flex items-center gap-1 font-medium shadow-sm">{CATEGORIES.find(c=>c.id===filters.category)?.label} <X size={12} className="cursor-pointer hover:text-red-500" onClick={()=>setFilters({...filters, category:""})}/></span>}
-              {filters.location && <span className="text-xs bg-white border border-blue-200 text-blue-700 px-3 py-1.5 rounded-full flex items-center gap-1 font-medium shadow-sm">{filters.location} <X size={12} className="cursor-pointer hover:text-red-500" onClick={()=>setFilters({...filters, location:""})}/></span>}
-              <button onClick={clearFilters} className="text-xs text-gray-500 hover:text-red-500 underline ml-2">Xóa tất cả</button>
-            </div>
-          )}
-
           {loading && products.length === 0 ? (
             <div className={`grid gap-6 ${viewMode === 'grid' ? 'grid-cols-2 md:grid-cols-3 xl:grid-cols-4' : 'grid-cols-1'}`}>
               {[...Array(8)].map((_, i) => (
@@ -477,7 +482,11 @@ const MarketPage = () => {
               
               {hasMore && (
                 <div className="mt-12 text-center">
-                  <button onClick={loadMore} disabled={loading} className="px-8 py-3 bg-white border border-gray-300 text-gray-700 font-bold rounded-lg hover:bg-gray-50 hover:border-[#00388D] hover:text-[#00388D] transition-all shadow-sm disabled:opacity-50">
+                  <button 
+                    onClick={loadMore} 
+                    disabled={loading}
+                    className="px-8 py-3 bg-white border border-gray-300 text-gray-700 font-bold rounded-lg hover:bg-gray-50 hover:border-[#00388D] hover:text-[#00388D] transition-all shadow-sm disabled:opacity-50"
+                  >
                     {loading ? "Đang tải..." : "Xem thêm sản phẩm"}
                   </button>
                 </div>
@@ -490,7 +499,9 @@ const MarketPage = () => {
               </div>
               <h3 className="text-lg font-bold text-gray-900 mb-1">Không tìm thấy sản phẩm nào</h3>
               <p className="text-gray-500 text-sm mb-6">Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm của bạn.</p>
-              <button onClick={clearFilters} className="px-6 py-2 bg-[#00388D] text-white font-bold rounded-lg hover:bg-[#002b6e] transition-colors">Xóa bộ lọc</button>
+              <button onClick={clearFilters} className="px-6 py-2 bg-[#00388D] text-white font-bold rounded-lg hover:bg-[#002b6e] transition-colors">
+                Xóa bộ lọc
+              </button>
             </div>
           )}
         </main>
