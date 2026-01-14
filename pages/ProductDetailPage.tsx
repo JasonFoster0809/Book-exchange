@@ -75,9 +75,11 @@ interface Comment {
   };
 }
 
-// --- UTILS (Custom Time Ago - Không cần date-fns) ---
+// --- UTILS ---
 const timeAgo = (dateString: string) => {
-  const seconds = Math.floor((new Date().getTime() - new Date(dateString).getTime()) / 1000);
+  const date = new Date(dateString);
+  const now = new Date();
+  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000);
   if (seconds < 60) return 'Vừa xong';
   const minutes = Math.floor(seconds / 60);
   if (minutes < 60) return `${minutes} phút trước`;
@@ -129,6 +131,8 @@ const ProductDetailPage: React.FC = () => {
         };
 
         setProduct(mappedProduct);
+        
+        // Tăng view count
         supabase.rpc("increment_view_count", { product_id: id });
 
         if (currentUser) {
@@ -166,7 +170,7 @@ const ProductDetailPage: React.FC = () => {
     
     fetchComments();
 
-    // Realtime Comments
+    // Realtime Comments Listener
     const channel = supabase.channel(`comments-${id}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments', filter: `product_id=eq.${id}` }, () => {
         fetchComments(); 
@@ -180,15 +184,37 @@ const ProductDetailPage: React.FC = () => {
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return navigate("/auth");
-    if (!newComment.trim()) return;
+    if (!newComment.trim() || !product) return;
 
     setIsPostingComment(true);
     try {
-      await supabase.from('comments').insert({
+      // 1. Insert Comment
+      const { error } = await supabase.from('comments').insert({
         product_id: id,
         user_id: currentUser.id,
         content: newComment.trim()
       });
+
+      if (error) throw error;
+
+      // ===============================================
+      // 🔔 2. GỬI THÔNG BÁO CHO NGƯỜI BÁN
+      // ===============================================
+      // Nếu người comment KHÔNG PHẢI là người bán -> Gửi noti
+      if (product.sellerId !== currentUser.id) {
+        const actorName = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || "Người dùng";
+        
+        await supabase.from('notifications').insert({
+          user_id: product.sellerId, // Người nhận: Seller
+          actor_id: currentUser.id,  // Người gửi: Me
+          type: 'comment',
+          title: '💬 Bình luận mới',
+          content: `${actorName} đã bình luận vào bài "${product.title}": "${newComment.substring(0, 30)}..."`,
+          link: `/product/${product.id}`
+        });
+      }
+      // ===============================================
+
       setNewComment("");
       addToast("Đã gửi bình luận", "success");
     } catch (err) {
@@ -331,7 +357,7 @@ const ProductDetailPage: React.FC = () => {
             </div>
           </div>
 
-          {/* COMMENTS SECTION (NEW) */}
+          {/* COMMENTS SECTION */}
           <div className="glass-panel p-8 rounded-[2rem]">
             <h3 className="font-bold text-lg mb-6 flex items-center gap-2 text-slate-800">
               <MessageSquare className="text-[#00418E]" size={20}/> Bình luận ({comments.length})
@@ -391,7 +417,7 @@ const ProductDetailPage: React.FC = () => {
             {/* Meta */}
             <div className="flex justify-between items-start mb-6">
               <span className="bg-blue-50 text-[#00418E] px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider border border-blue-100">{product.category}</span>
-              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 bg-white/50 px-2 py-1 rounded-lg"><Eye size={14}/> {product.view_count}</div>
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 bg-white/50 px-2 py-1 rounded-lg"><Eye size={14}/> {product.view_count || 0}</div>
             </div>
             
             {/* Title & Price */}
