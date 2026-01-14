@@ -10,7 +10,9 @@ import {
 } from 'lucide-react'; 
 import { playMessageSound } from '../utils/audio';
 
-// --- VISUAL ENGINE ---
+// ============================================================================
+// STYLES & VISUAL ENGINE
+// ============================================================================
 const VisualEngine = () => (
   <style>{`
     .chat-scrollbar::-webkit-scrollbar { width: 5px; }
@@ -48,13 +50,30 @@ const VisualEngine = () => (
     .context-menu {
       position: absolute; background: white; border: 1px solid #e2e8f0; 
       border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 50;
-      min-width: 120px; overflow: hidden;
+      min-width: 150px; overflow: hidden;
     }
     .context-item {
-      padding: 8px 12px; font-size: 13px; color: #ef4444; font-weight: 500;
-      display: flex; items-center; gap: 8px; cursor: pointer;
+      padding: 10px 14px; font-size: 13px; color: #ef4444; font-weight: 500;
+      display: flex; items-center; gap: 8px; cursor: pointer; transition: background 0.2s;
     }
     .context-item:hover { background: #fef2f2; }
+
+    /* Dropdown Menu Style */
+    .dropdown-menu {
+      position: absolute; top: 100%; right: 0; margin-top: 8px;
+      background: white; border: 1px solid #E2E8F0; border-radius: 12px;
+      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
+      width: 220px; overflow: hidden; z-index: 50;
+      animation: fadeIn 0.1s ease-out;
+    }
+    .dropdown-item {
+      display: flex; items-center; gap: 10px; width: 100%;
+      padding: 12px 16px; text-align: left; font-size: 14px; font-weight: 500;
+      color: #475569; transition: all 0.2s;
+    }
+    .dropdown-item:hover { background: #F8FAFC; color: #00418E; }
+    .dropdown-item.danger { color: #EF4444; }
+    .dropdown-item.danger:hover { background: #FEF2F2; }
   `}</style>
 );
 
@@ -272,12 +291,24 @@ const ChatPage: React.FC = () => {
       setContextMenu(null);
   };
 
-  // Transaction Actions (Keep existing logic)
+  // --- DEFINING MISSING FUNCTIONS (Fixed) ---
+  const handleUnpinProduct = async () => {
+      if (!activeConversation) return;
+      await supabase.from('conversations').update({ current_product_id: null }).eq('id', activeConversation);
+      setTargetProduct(null);
+      setIsMenuOpen(false);
+      addToast("Đã gỡ ghim sản phẩm", "info");
+  };
+
+  const handleViewProfile = () => {
+      if(partnerProfile) navigate(`/profile/${partnerProfile.id}`);
+      setIsMenuOpen(false);
+  }
+
+  // --- TRANSACTION ACTIONS ---
   const isSeller = user && targetProduct && user.id === targetProduct.seller_id;
   const isBuyer = user && targetProduct && user.id !== targetProduct.seller_id;
-  const handleRequestDeal = async () => { /* ...existing... */ }; // Keep placeholder for brevity if unchanged logic is fine, but better full code.
-  // ... (Full transaction logic omitted for brevity as it was correct in previous turn, assume it's same)
-  // Re-implementing simplified transaction logic for completeness:
+
   const handleDealAction = async (action: string) => {
       if (!targetProduct || !activeConversation) return;
       setIsProcessing(true);
@@ -307,7 +338,7 @@ const ChatPage: React.FC = () => {
   const renderMessageContent = (msg: any) => {
       if (msg.type === 'image') return <img src={msg.content} className="rounded-lg max-w-[200px] cursor-pointer" onClick={() => window.open(msg.content, '_blank')}/>;
       if (msg.type === 'location') return (
-          <a href={msg.content} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-blue-100 underline">
+          <a href={msg.content} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-blue-100 underline hover:text-white">
               <MapPin size={16}/> Vị trí hiện tại
           </a>
       );
@@ -378,6 +409,7 @@ const ChatPage: React.FC = () => {
                       {isMenuOpen && (
                           <div className="dropdown-menu">
                               <button onClick={handleViewProfile} className="dropdown-item"><User size={16}/> Xem trang cá nhân</button>
+                              {targetProduct && <button onClick={handleUnpinProduct} className="dropdown-item"><XCircle size={16}/> Gỡ ghim sản phẩm</button>}
                               <button className="dropdown-item"><Flag size={16}/> Báo cáo người dùng</button>
                               <div className="h-px bg-slate-100 my-1"></div>
                               <button className="dropdown-item danger"><Trash size={16}/> Xóa cuộc trò chuyện</button>
@@ -415,7 +447,6 @@ const ChatPage: React.FC = () => {
 
                {/* MESSAGES */}
                <div className="flex-1 overflow-y-auto p-4 space-y-3 chat-scrollbar bg-[#F8FAFC]">
-                  {/* Nhóm tin nhắn theo ngày có thể thêm ở đây nếu muốn nâng cao hơn */}
                   {messages.map((msg, idx) => {
                       const isMe = msg.sender_id === user?.id;
                       const isSystem = msg.content?.includes("TÔI MUỐN MUA") || msg.content?.includes("ĐÃ XÁC NHẬN") || msg.content?.includes("GIAO DỊCH") || msg.content?.includes("ĐÃ HỦY");
