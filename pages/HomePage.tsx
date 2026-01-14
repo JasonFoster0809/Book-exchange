@@ -1,16 +1,16 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
   Search, ArrowRight, Zap, Users, BookOpen, Calculator, Shirt,
-  Monitor, Grid, Flame, Gift, Eye, ShoppingBag, PlusCircle,
+  Monitor, Grid, Gift, Eye, ShoppingBag, PlusCircle,
   Heart, Package, ChevronRight, Sparkles, Clock, Smile, Rocket,
-  PlayCircle, Ghost, WifiOff, MoreHorizontal, Smartphone, MapPin, TrendingUp,
+  PlayCircle, Ghost, WifiOff, MoreHorizontal, Smartphone, MapPin, TrendingUp, Filter
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { Product } from "../types";
 
 // ============================================================================
-// 1. TYPES & ENUMS (Định nghĩa chặt chẽ)
+// 1. TYPES & CONFIG
 // ============================================================================
 type ID = string | number;
 
@@ -31,13 +31,13 @@ enum SortOption {
 }
 
 interface FilterState {
-  category: ProductCategory | "all";
+  category: string;
   sort: SortOption;
   search: string;
 }
 
 // ============================================================================
-// 2. UTILS (Hàm hỗ trợ)
+// 2. UTILS
 // ============================================================================
 const Utils = {
   formatCurrency: (amount: number): string => {
@@ -55,31 +55,31 @@ const Utils = {
 };
 
 // ============================================================================
-// 3. VISUAL ENGINE (CSS Styles đẹp nhất)
+// 3. VISUAL ENGINE (CSS Styles Pro Max)
 // ============================================================================
 const GlobalStyles = () => (
   <style>{`
     :root {
-      --cobalt-900: #002147; /* Màu xanh Bách Khoa đậm */
-      --cobalt-600: #0047AB; /* Màu chủ đạo */
-      --cobalt-400: #2E5AAC;
-      --cyan-400: #00E5FF;   /* Màu điểm nhấn */
-      --light-bg: #F0F4F8;
+      --cobalt-900: #002147;
+      --cobalt-600: #0047AB;
+      --cyan-400: #00E5FF;
+      --light-bg: #F8FAFC;
     }
     
     body {
       background-color: var(--light-bg);
       color: var(--cobalt-900);
-      font-family: 'Inter', system-ui, sans-serif;
+      font-family: 'Inter', sans-serif;
       overflow-x: hidden;
     }
 
-    /* --- Aurora Background Animation --- */
+    /* --- Aurora Background --- */
     .aurora-bg {
-      position: absolute; top: 0; left: 0; right: 0; height: 100vh;
+      position: absolute; top: 0; left: 0; right: 0; height: 120vh;
       background: 
-        radial-gradient(at 0% 0%, rgba(0, 71, 171, 0.25) 0px, transparent 50%),
-        radial-gradient(at 100% 0%, rgba(0, 229, 255, 0.15) 0px, transparent 50%);
+        radial-gradient(at 0% 0%, rgba(0, 71, 171, 0.15) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(0, 229, 255, 0.1) 0px, transparent 50%),
+        radial-gradient(at 50% 100%, rgba(240, 248, 255, 0.5) 0px, transparent 50%);
       filter: blur(80px);
       z-index: -1;
       animation: aurora 10s ease-in-out infinite alternate;
@@ -89,31 +89,39 @@ const GlobalStyles = () => (
       100% { transform: scale(1.1); opacity: 1; }
     }
 
-    /* --- Animations --- */
+    /* --- Floating Icons Animation --- */
     @keyframes float {
       0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-15px); }
+      50% { transform: translateY(-20px); }
     }
     .animate-float { animation: float 6s ease-in-out infinite; }
-    
-    @keyframes fadeInUp {
-      from { opacity: 0; transform: translateY(20px); }
-      to { opacity: 1; transform: translateY(0); }
-    }
-    .animate-enter { animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
+    .delay-1000 { animation-delay: 1s; }
+    .delay-2000 { animation-delay: 2s; }
 
-    /* --- Glassmorphism Cards --- */
+    /* --- Glass Components --- */
     .glass-card {
-      background: rgba(255, 255, 255, 0.7);
-      backdrop-filter: blur(12px);
+      background: rgba(255, 255, 255, 0.65);
+      backdrop-filter: blur(16px);
       border: 1px solid rgba(255, 255, 255, 0.8);
-      box-shadow: 0 8px 32px 0 rgba(0, 71, 171, 0.05);
+      box-shadow: 0 4px 20px -5px rgba(0, 71, 171, 0.05);
+    }
+    
+    .hero-glass {
+      background: rgba(255, 255, 255, 0.7);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(255, 255, 255, 0.5);
+      box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.1);
     }
 
+    /* --- Hover Effects --- */
     .hover-lift { transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
-    .hover-lift:hover { transform: translateY(-8px); box-shadow: 0 15px 30px -10px rgba(0, 71, 171, 0.15); border-color: #BFDBFE; }
+    .hover-lift:hover { 
+      transform: translateY(-8px); 
+      box-shadow: 0 15px 30px -10px rgba(0, 71, 171, 0.15); 
+      border-color: #BFDBFE; 
+    }
 
-    /* --- Shimmer Loading Effect --- */
+    /* --- Loading Shimmer --- */
     .shimmer { position: relative; overflow: hidden; }
     .shimmer::after {
       content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
@@ -122,12 +130,18 @@ const GlobalStyles = () => (
     }
     .shimmer:hover::after { transform: translateX(100%); transition: transform 0.6s ease-in-out; }
     
+    /* --- Scrollbar --- */
     .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+    /* --- Animations --- */
+    .animate-enter { animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
+    @keyframes fadeInUp { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
   `}</style>
 );
 
 // ============================================================================
-// 4. CUSTOM HOOK (Tách logic xử lý dữ liệu)
+// 4. DATA HOOK
 // ============================================================================
 function useProducts(filter: FilterState) {
   const [products, setProducts] = useState<Product[]>([]);
@@ -140,17 +154,17 @@ function useProducts(filter: FilterState) {
     try {
       let query = supabase.from("products").select("*").eq("status", "available");
 
-      // Filter Logic
+      // Filter
       if (filter.category !== "all") query = query.eq("category", filter.category);
       if (filter.search) query = query.ilike("title", `%${filter.search}%`);
 
-      // Sort Logic
+      // Sort
       if (filter.sort === SortOption.NEWEST) query = query.order("created_at", { ascending: false });
       else if (filter.sort === SortOption.PRICE_ASC) query = query.order("price", { ascending: true });
       else if (filter.sort === SortOption.PRICE_DESC) query = query.order("price", { ascending: false });
       else if (filter.sort === SortOption.MOST_VIEWED) query = query.order("view_count", { ascending: false });
 
-      const { data, error: dbError } = await query.limit(20); // Limit 20 items
+      const { data, error: dbError } = await query.limit(20);
       if (dbError) throw dbError;
 
       setProducts(data || []);
@@ -162,15 +176,12 @@ function useProducts(filter: FilterState) {
     }
   }, [filter]);
 
-  useEffect(() => {
-    fetchProducts();
-  }, [fetchProducts]);
-
+  useEffect(() => { fetchProducts(); }, [fetchProducts]);
   return { products, loading, error, refetch: fetchProducts };
 }
 
 // ============================================================================
-// 5. SUB-COMPONENTS (Chia nhỏ để code gọn và dễ quản lý)
+// 5. SUB-COMPONENTS
 // ============================================================================
 
 const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
@@ -183,39 +194,28 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
       onClick={() => navigate(`/product/${product.id}`)}
       className="glass-card hover-lift group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl bg-white"
     >
-      {/* Image Area */}
+      {/* Image */}
       <div className="shimmer relative aspect-[4/3] overflow-hidden bg-slate-100">
         <img
-          src={displayImage}
-          alt={product.title}
-          className={Utils.cn(
-            "h-full w-full object-cover transition-transform duration-700 group-hover:scale-110",
-            imageLoaded ? "opacity-100" : "opacity-0"
-          )}
-          onLoad={() => setImageLoaded(true)}
-          loading="lazy"
+          src={displayImage} alt={product.title}
+          className={Utils.cn("h-full w-full object-cover transition-transform duration-700 group-hover:scale-110", imageLoaded ? "opacity-100" : "opacity-0")}
+          onLoad={() => setImageLoaded(true)} loading="lazy"
         />
         {/* Badges */}
         <div className="absolute left-3 top-3 flex flex-col gap-1">
           {product.price === 0 && (
-            <span className="flex items-center gap-1 rounded-full bg-red-500 px-2 py-1 text-[10px] font-bold text-white shadow-lg backdrop-blur-md">
-              <Gift size={10} /> FREE
-            </span>
+            <span className="flex items-center gap-1 rounded-full bg-red-500 px-2 py-1 text-[10px] font-bold text-white shadow-lg backdrop-blur-md"><Gift size={10} /> FREE</span>
           )}
-          {/* Logic check "Mới" (trong vòng 2 ngày) */}
           {(new Date().getTime() - new Date(product.created_at || '').getTime()) < 86400000 * 2 && (
-             <span className="flex items-center gap-1 rounded-full bg-[#0047AB] px-2 py-1 text-[10px] font-bold text-white shadow-lg backdrop-blur-md">
-                <Zap size={10} className="fill-white"/> MỚI
-             </span>
+             <span className="flex items-center gap-1 rounded-full bg-[#0047AB] px-2 py-1 text-[10px] font-bold text-white shadow-lg backdrop-blur-md"><Zap size={10} className="fill-white"/> MỚI</span>
           )}
         </div>
-        {/* Quick View Button */}
         <button className="absolute bottom-3 right-3 translate-y-10 rounded-full bg-white p-2.5 text-[#0047AB] opacity-0 shadow-lg transition-all duration-300 hover:bg-[#0047AB] hover:text-white group-hover:translate-y-0 group-hover:opacity-100">
           <ArrowRight size={18} />
         </button>
       </div>
 
-      {/* Info Area */}
+      {/* Info */}
       <div className="flex flex-1 flex-col p-4">
         <div className="mb-2 flex items-start justify-between">
           <span className="max-w-[60%] truncate rounded-full border border-blue-100 bg-blue-50 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-[#0047AB]">
@@ -244,10 +244,12 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
 };
 
 // ============================================================================
-// 6. MAIN HOMEPAGE COMPONENT
+// 6. MAIN HOMEPAGE
 // ============================================================================
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
+  const productSectionRef = useRef<HTMLDivElement>(null);
+  
   const [filter, setFilter] = useState<FilterState>({
     category: "all",
     sort: SortOption.NEWEST,
@@ -265,6 +267,13 @@ const HomePage: React.FC = () => {
 
   const { products, loading, error, refetch } = useProducts(filter);
 
+  // Scroll to products when searching
+  const handleSearchSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    setFilter(prev => ({...prev, search: searchTerm}));
+    productSectionRef.current?.scrollIntoView({ behavior: 'smooth' });
+  };
+
   return (
     <div className="relative min-h-screen selection:bg-[#0047AB] selection:text-white">
       <GlobalStyles />
@@ -274,15 +283,10 @@ const HomePage: React.FC = () => {
       <section className="relative overflow-hidden px-4 pb-24 pt-32 text-center">
         {/* Floating Icons Background */}
         <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden opacity-30">
-          <div className="animate-float absolute left-[10%] top-20 text-blue-300 delay-0">
-            <BookOpen size={64} />
-          </div>
-          <div className="animate-float absolute right-[15%] top-40 text-cyan-300 delay-1000">
-            <Monitor size={80} />
-          </div>
-          <div className="animate-float absolute bottom-40 right-[10%] text-indigo-300 delay-2000">
-            <Shirt size={72} />
-          </div>
+          <div className="animate-float absolute left-[5%] top-20 text-blue-300 delay-0"><BookOpen size={64} /></div>
+          <div className="animate-float absolute right-[10%] top-40 text-cyan-300 delay-1000"><Monitor size={80} /></div>
+          <div className="animate-float absolute bottom-40 right-[15%] text-indigo-300 delay-2000"><Shirt size={72} /></div>
+          <div className="animate-float absolute bottom-20 left-[10%] text-pink-300 delay-1000"><Heart size={50} /></div>
         </div>
 
         <div className="relative z-10 mx-auto max-w-5xl">
@@ -290,7 +294,7 @@ const HomePage: React.FC = () => {
             <div className="inline-flex cursor-default items-center gap-2 rounded-full border border-white/60 bg-white/40 px-5 py-2 shadow-sm ring-1 ring-white/50 backdrop-blur-md transition-all hover:scale-105 hover:bg-white/60">
               <Sparkles size={16} className="animate-pulse fill-yellow-400 text-yellow-400" />
               <span className="text-xs font-bold uppercase tracking-widest text-[#002147]">
-                Cổng thông tin Sinh viên Bách Khoa
+                Dành riêng cho Sinh viên Bách Khoa
               </span>
             </div>
           </div>
@@ -303,20 +307,16 @@ const HomePage: React.FC = () => {
           </h1>
 
           <p className="animate-enter mx-auto mb-12 max-w-2xl text-lg font-medium leading-relaxed text-slate-600 md:text-xl" style={{ animationDelay: "200ms" }}>
-            Nền tảng mua bán phi lợi nhuận dành riêng cho sinh viên. <br className="hidden md:block" />
-            Tìm giáo trình, laptop, và dụng cụ học tập giá rẻ ngay tại trường.
+            Nền tảng mua bán phi lợi nhuận. Tìm giáo trình, laptop, và dụng cụ học tập giá rẻ ngay tại trường ĐH Bách Khoa.
           </p>
 
           {/* Search Bar */}
           <div className="animate-enter group relative z-20 mx-auto mb-20 w-full max-w-2xl" style={{ animationDelay: "300ms" }}>
             <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-[#0047AB] to-[#00E5FF] opacity-30 blur-lg transition duration-1000 group-hover:opacity-50"></div>
-            <form
-              onSubmit={(e) => { e.preventDefault(); navigate(`/market?search=${encodeURIComponent(searchTerm)}`); }}
-              className="relative flex items-center rounded-full border border-white/50 bg-white/90 p-2 shadow-xl backdrop-blur-xl transition-all hover:bg-white hover:shadow-2xl"
-            >
+            <form onSubmit={handleSearchSubmit} className="relative flex items-center rounded-full border border-white/50 bg-white/90 p-2 shadow-xl backdrop-blur-xl transition-all hover:bg-white hover:shadow-2xl">
               <Search className="ml-4 text-slate-400 group-focus-within:text-[#0047AB]" size={22} />
               <input
-                placeholder="Bạn đang tìm gì? (VD: Giải tích 1, Casio 580...)"
+                placeholder="Bạn muốn tìm gì hôm nay? (VD: Giải tích 1...)"
                 className="h-14 w-full border-none bg-transparent px-4 text-base font-medium text-slate-900 outline-none placeholder:text-slate-400"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -327,7 +327,7 @@ const HomePage: React.FC = () => {
             </form>
           </div>
 
-          {/* Quick Actions */}
+          {/* Quick Actions Grid */}
           <div className="animate-enter grid grid-cols-2 gap-4 px-4 md:grid-cols-4" style={{ animationDelay: "400ms" }}>
             {[
               { title: "Dạo Chợ", desc: "Săn deal hời", icon: <ShoppingBag size={24} />, link: "/market", color: "text-cyan-600", bg: "bg-cyan-50" },
@@ -349,8 +349,8 @@ const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* --- CATEGORY BAR (Sticky) --- */}
-      <div className="sticky top-0 z-40 mb-12 border-y border-white/20 bg-white/80 py-4 shadow-sm backdrop-blur-xl">
+      {/* --- STICKY CATEGORY BAR --- */}
+      <div className="sticky top-0 z-40 mb-12 border-y border-white/20 bg-white/80 py-4 shadow-sm backdrop-blur-xl transition-all">
         <div className="hide-scrollbar mx-auto max-w-7xl overflow-x-auto px-4">
           <div className="flex min-w-max justify-center gap-3">
             {[
@@ -380,7 +380,7 @@ const HomePage: React.FC = () => {
       </div>
 
       {/* --- PRODUCTS SECTION --- */}
-      <section className="mx-auto mb-24 min-h-[600px] max-w-7xl px-4">
+      <section className="mx-auto mb-24 min-h-[600px] max-w-7xl px-4" ref={productSectionRef}>
         <div className="mb-10 flex flex-col items-center justify-between gap-6 md:flex-row">
           <div className="text-center md:text-left">
             <h2 className="flex items-center justify-center gap-3 text-3xl font-black text-[#002147] md:justify-start">
@@ -394,8 +394,8 @@ const HomePage: React.FC = () => {
           <div className="flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
             {[
               { id: SortOption.NEWEST, label: "Mới nhất" },
-              { id: SortOption.PRICE_ASC, label: "Giá tốt" },
-              { id: SortOption.MOST_VIEWED, label: "Hot" },
+              { id: SortOption.PRICE_ASC, label: "Giá rẻ" },
+              { id: SortOption.MOST_VIEWED, label: "Xem nhiều" },
             ].map((opt) => (
               <button
                 key={opt.id}
@@ -413,6 +413,7 @@ const HomePage: React.FC = () => {
           </div>
         </div>
 
+        {/* Grid */}
         <div className="grid grid-cols-2 gap-6 md:grid-cols-3 lg:grid-cols-4">
           {loading ? (
             [...Array(8)].map((_, i) => (
@@ -425,10 +426,8 @@ const HomePage: React.FC = () => {
           ) : error ? (
             <div className="glass-card col-span-full rounded-3xl py-20 text-center">
               <WifiOff size={40} className="mx-auto mb-4 text-red-500" />
-              <p className="text-slate-500">Lỗi kết nối</p>
-              <button onClick={refetch} className="mt-4 rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold hover:bg-white">
-                Thử lại
-              </button>
+              <p className="text-slate-500">Lỗi kết nối server</p>
+              <button onClick={refetch} className="mt-4 rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold hover:bg-white">Thử lại</button>
             </div>
           ) : products.length > 0 ? (
             products.map((p) => (
@@ -439,32 +438,28 @@ const HomePage: React.FC = () => {
           ) : (
             <div className="col-span-full rounded-3xl border-2 border-dashed border-slate-200 bg-white/50 py-20 text-center">
               <Ghost size={48} className="mx-auto mb-4 text-slate-300" />
-              <h3 className="text-xl font-bold text-slate-800">
-                Chưa có tin đăng nào
-              </h3>
-              <Link to="/post-item">
-                <button className="mt-4 flex items-center gap-2 rounded-xl bg-[#0047AB] px-6 py-2 text-sm font-bold text-white shadow-lg transition-transform hover:scale-105">
-                  <PlusCircle size={18} /> Đăng tin ngay
-                </button>
-              </Link>
+              <h3 className="text-xl font-bold text-slate-800">Không tìm thấy sản phẩm nào</h3>
+              <p className="text-sm text-slate-500 mt-2">Hãy thử thay đổi từ khóa hoặc danh mục khác.</p>
+              <button 
+                onClick={() => {setFilter({category: 'all', sort: SortOption.NEWEST, search: ''}); setSearchTerm('')}} 
+                className="text-[#00418E] font-bold hover:underline mt-4 inline-block"
+              >
+                Xóa bộ lọc
+              </button>
             </div>
           )}
         </div>
 
         {products.length > 0 && !loading && (
           <div className="mt-16 text-center">
-            <Link
-              to="/market"
-              className="group inline-flex items-center gap-2 rounded-full border border-white bg-white/80 px-10 py-4 text-base font-bold text-[#002147] shadow-md backdrop-blur transition-all hover:border-[#0047AB] hover:text-[#0047AB] hover:shadow-xl hover:scale-105"
-            >
-              Xem toàn bộ thị trường 
-              <ArrowRight size={20} className="transition-transform group-hover:translate-x-1" />
+            <Link to="/market" className="group inline-flex items-center gap-2 rounded-full border border-white bg-white/80 px-10 py-4 text-base font-bold text-[#002147] shadow-md backdrop-blur transition-all hover:border-[#0047AB] hover:text-[#0047AB] hover:shadow-xl hover:scale-105">
+              Xem toàn bộ thị trường <ArrowRight size={20} className="transition-transform group-hover:translate-x-1" />
             </Link>
           </div>
         )}
       </section>
 
-      {/* --- STATS BANNER --- */}
+      {/* --- STATS SECTION --- */}
       <section className="mb-24 border-y border-white/20 bg-white/60 py-16 backdrop-blur-md">
         <div className="mx-auto max-w-7xl px-4">
           <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
@@ -479,16 +474,14 @@ const HomePage: React.FC = () => {
                   {s.icon}
                 </div>
                 <h4 className="mb-1 text-3xl font-black text-[#002147]">{s.val}</h4>
-                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                  {s.label}
-                </p>
+                <p className="text-xs font-bold uppercase tracking-wider text-slate-400">{s.label}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* --- AI BANNER SECTION --- */}
+      {/* --- AI MARKETING BANNER --- */}
       <section className="mx-auto mb-24 max-w-7xl px-4">
         <div className="group relative overflow-hidden rounded-[2.5rem] bg-[#002147] p-12 text-white shadow-2xl">
           <div className="absolute -mr-20 -mt-20 right-0 top-0 h-[600px] w-[600px] rounded-full bg-[#0047AB]/30 blur-[120px] transition-all duration-1000 group-hover:bg-[#00E5FF]/20"></div>
@@ -519,6 +512,7 @@ const HomePage: React.FC = () => {
               </div>
             </div>
 
+            {/* AI Mockup UI */}
             <div className="relative hidden lg:block">
               <div className="absolute inset-0 rotate-6 transform rounded-2xl bg-gradient-to-r from-[#0047AB] to-[#00E5FF] opacity-30 blur-lg transition-transform duration-700 group-hover:rotate-12"></div>
               <div className="rotate-3 transform rounded-2xl border border-white/10 bg-[#001529]/80 p-6 shadow-2xl backdrop-blur-xl transition-all duration-500 hover:rotate-0 hover:scale-105">
