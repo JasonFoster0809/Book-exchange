@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -7,24 +7,21 @@ import {
   Send, Image as ImageIcon, Phone, ArrowLeft, Loader2, ShoppingBag, 
   CheckCircle2, Search, MessageCircle, MoreVertical, X, AlertCircle,
   Truck, DollarSign, XCircle, User, Flag, Trash, MapPin, Smile, CheckCheck,
-  ChevronDown, ExternalLink, Maximize2
+  ExternalLink, Maximize2, ChevronDown
 } from 'lucide-react'; 
 import { playMessageSound } from '../utils/audio';
 
-// ============================================================================
-// STYLES & VISUAL ENGINE
-// ============================================================================
+// --- VISUAL ENGINE ---
 const VisualEngine = () => (
   <style>{`
-    .chat-scrollbar::-webkit-scrollbar { width: 6px; }
+    .chat-scrollbar::-webkit-scrollbar { width: 5px; }
     .chat-scrollbar::-webkit-scrollbar-track { background: transparent; }
     .chat-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
-    .chat-scrollbar::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
     
     .msg-bubble { 
       max-width: 75%; padding: 10px 14px; border-radius: 18px; 
       position: relative; font-size: 14px; line-height: 1.5; word-wrap: break-word; 
-      box-shadow: 0 1px 2px rgba(0,0,0,0.05); transition: all 0.2s;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
     }
     .msg-me { 
       background: linear-gradient(135deg, #00418E 0%, #0065D1 100%); 
@@ -51,12 +48,12 @@ const VisualEngine = () => (
 
     .context-menu {
       position: absolute; background: white; border: 1px solid #e2e8f0; 
-      border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 50;
-      min-width: 160px; overflow: hidden; animation: fadeIn 0.1s ease-out;
+      border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); z-index: 50;
+      min-width: 160px; overflow: hidden; animation: fadeIn 0.1s;
     }
     .context-item {
-      padding: 10px 14px; font-size: 13px; color: #ef4444; font-weight: 600;
-      display: flex; items-center; gap: 8px; cursor: pointer; transition: background 0.2s;
+      padding: 10px 14px; font-size: 13px; color: #ef4444; font-weight: 500;
+      display: flex; items-center; gap: 8px; cursor: pointer; transition: background 0.1s;
     }
     .context-item:hover { background: #fef2f2; }
 
@@ -75,25 +72,17 @@ const VisualEngine = () => (
     .dropdown-item:hover { background: #F8FAFC; color: #00418E; }
     .dropdown-item.danger { color: #EF4444; }
     .dropdown-item.danger:hover { background: #FEF2F2; }
-
-    .date-divider {
-      display: flex; align-items: center; justify-content: center; margin: 20px 0;
-    }
-    .date-divider span {
-      background: #E2E8F0; color: #64748B; font-size: 11px; font-weight: 600;
-      padding: 4px 12px; border-radius: 12px;
-    }
   `}</style>
 );
 
 const QUICK_REPLIES = ["Sản phẩm còn mới không?", "Có bớt giá không bạn?", "Giao dịch ở H6 nhé?", "Cho mình xem thêm ảnh thật"];
 const COMMON_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"];
 
-// --- IMAGE LIGHTBOX COMPONENT ---
+// --- LIGHTBOX COMPONENT ---
 const ImageModal = ({ src, onClose }: { src: string, onClose: () => void }) => (
-  <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
-    <button className="absolute top-4 right-4 text-white/70 hover:text-white p-2 transition-colors"><X size={32}/></button>
-    <img src={src} className="max-w-full max-h-[90vh] rounded-lg object-contain shadow-2xl scale-100 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}/>
+  <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
+    <button className="absolute top-4 right-4 text-white/70 hover:text-white p-2"><X size={32}/></button>
+    <img src={src} className="max-w-full max-h-[90vh] rounded-lg object-contain shadow-2xl" onClick={(e) => e.stopPropagation()}/>
   </div>
 );
 
@@ -156,8 +145,11 @@ const ChatPage: React.FC = () => {
     fetchMessages(activeConversation);
     if (!targetProduct) fetchPinnedProduct(activeConversation);
 
+    console.log("Connecting Realtime to:", activeConversation);
+
     const channel = supabase.channel(`chat_room:${activeConversation}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversation}` }, (payload) => {
+            console.log("New message received:", payload);
             setMessages(prev => {
                 if (prev.some(m => m.id === payload.new.id)) return prev;
                 return [...prev, payload.new];
@@ -180,7 +172,9 @@ const ChatPage: React.FC = () => {
                 typingTimeoutRef.current = setTimeout(() => setPartnerTyping(false), 2000);
             }
         })
-        .subscribe();
+        .subscribe((status) => {
+            if(status === 'SUBSCRIBED') console.log("Realtime Connected!");
+        });
 
     return () => { supabase.removeChannel(channel); };
   }, [activeConversation]);
@@ -300,7 +294,7 @@ const ChatPage: React.FC = () => {
           const { data } = supabase.storage.from('chat-images').getPublicUrl(fileName);
           await handleSendMessage(undefined, data.publicUrl, 'image');
       } catch (err) {
-          addToast("Lỗi gửi ảnh (Check bucket public)", "error");
+          addToast("Lỗi gửi ảnh", "error");
       } finally {
           setUploading(false);
       }
@@ -323,6 +317,7 @@ const ChatPage: React.FC = () => {
       setContextMenu(null);
   };
 
+  // --- MENU ACTIONS (Đã thêm đầy đủ) ---
   const handleUnpinProduct = async () => {
       if (!activeConversation) return;
       await supabase.from('conversations').update({ current_product_id: null }).eq('id', activeConversation);
@@ -365,7 +360,7 @@ const ChatPage: React.FC = () => {
 
   const filteredConversations = conversations.filter(c => c.partnerName?.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  // Helpers
+  // Render Helpers
   const formatMessageDate = (dateStr: string) => {
       const d = new Date(dateStr);
       const now = new Date();
@@ -389,7 +384,7 @@ const ChatPage: React.FC = () => {
               <MapPin size={16}/> Vị trí hiện tại <ExternalLink size={12}/>
           </a>
       );
-      // Auto Linkify
+      
       const urlRegex = /(https?:\/\/[^\s]+)/g;
       const parts = msg.content.split(urlRegex);
       return <p>{parts.map((part: string, i: number) => part.match(urlRegex) ? <a key={i} href={part} target="_blank" rel="noreferrer" className="text-blue-200 hover:underline">{part}</a> : part)}</p>;
@@ -502,7 +497,6 @@ const ChatPage: React.FC = () => {
                       const isMe = msg.sender_id === user?.id;
                       const isSystem = msg.content?.includes("TÔI MUỐN MUA") || msg.content?.includes("ĐÃ XÁC NHẬN") || msg.content?.includes("GIAO DỊCH") || msg.content?.includes("ĐÃ HỦY");
                       
-                      // Date Grouping
                       const prevMsg = messages[idx-1];
                       const showDate = !prevMsg || new Date(msg.created_at).toDateString() !== new Date(prevMsg.created_at).toDateString();
 
