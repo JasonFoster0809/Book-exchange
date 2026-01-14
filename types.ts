@@ -32,8 +32,8 @@ export enum ProductCondition {
 
 export enum ProductStatus {
   AVAILABLE = 'available',
-  PENDING = 'pending',
-  SOLD = 'sold',
+  PENDING = 'pending', // Đang giao dịch
+  SOLD = 'sold',       // Đã bán
   HIDDEN = 'hidden'
 }
 
@@ -43,7 +43,6 @@ export enum HuntStatus {
   COMPLETED = 'completed'
 }
 
-// --- THÊM ENUM NÀY ĐỂ FIX LỖI MARKETPLACE ---
 export enum SortOption {
   NEWEST = "newest",
   PRICE_ASC = "price_asc",
@@ -118,7 +117,7 @@ export interface Product {
   status: ProductStatus | string;
   condition: ProductCondition | string;
   
-  // DB Fields
+  // DB Fields (Tương ứng với cột trong Supabase)
   created_at?: string;      
   seller_id?: string;       
   location_name?: string;   
@@ -127,17 +126,17 @@ export interface Product {
   like_count?: number;
   tags?: string[];
 
-  // UI Fields (Map từ DB sang)
+  // UI Fields (Đã map để dùng trong React Component)
   sellerId: string;         
-  postedAt: string;         
+  postedAt: string; // Map từ created_at
   tradeMethod: TradeMethod | string; 
-  location?: string;        
+  location?: string; // Map từ location_name
   
   isLookingToBuy?: boolean; 
-  buyerId?: string;
+  buyerId?: string; // ID người mua (khi status = pending/sold)
   campus?: Campus | string; 
   
-  seller?: User | any;      
+  seller?: User | any;      // Object chứa thông tin người bán (join từ profiles)
   profiles?: DBProfile;     
 
   isLiked?: boolean;
@@ -145,7 +144,40 @@ export interface Product {
 }
 
 // ==========================================
-// 4. OTHER INTERFACES
+// 4. CHAT INTERFACES (CẬP NHẬT MỚI)
+// ==========================================
+
+export interface ChatMessage {
+  id: string;
+  conversation_id: string;
+  sender_id: string;
+  content: string;
+  // Cập nhật: Thêm 'location' và 'system' để hỗ trợ tính năng mới
+  type: 'text' | 'image' | 'location' | 'system'; 
+  image_url?: string; // Optional: dùng cho legacy hoặc fallback
+  created_at: string;
+}
+
+export interface ChatSession {
+  id: string;
+  participant1: string;
+  participant2: string;
+  
+  // UI Fields (Map từ Profile đối phương)
+  partnerName?: string;
+  partnerAvatar?: string;
+  partnerId?: string;
+  
+  last_message?: string;
+  unread_count?: number;
+  updated_at?: string;
+  
+  // Cập nhật: ID sản phẩm đang được ghim/giao dịch trong cuộc hội thoại này
+  current_product_id?: string | null; 
+}
+
+// ==========================================
+// 5. OTHER INTERFACES
 // ==========================================
 
 export interface Review {
@@ -156,29 +188,6 @@ export interface Review {
   rating: number;
   comment: string;
   createdAt: string;
-}
-
-export interface ChatMessage {
-  id: string;
-  conversation_id: string;
-  sender_id: string;
-  content: string;
-  type: 'text' | 'image' | 'location';
-  image_url?: string;
-  created_at: string;
-}
-
-export interface ChatSession {
-  id: string;
-  participant1: string;
-  participant2: string;
-  partnerName?: string;
-  partnerAvatar?: string;
-  partnerId?: string;
-  isPartnerRestricted?: boolean;
-  last_message?: string;
-  unread_count?: number;
-  updated_at?: string;
 }
 
 export interface Comment {
