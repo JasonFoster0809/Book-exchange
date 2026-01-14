@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useRef } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams, Link } from "react-router-dom";
 import {
   Search, Filter, X, ChevronDown, MapPin, 
   ArrowUpDown, SlidersHorizontal, Package, 
-  Ghost, Clock, Heart, ShoppingBag, Check
+  Ghost, Clock, Heart, ShoppingBag, Check,
+  LayoutGrid, List, Eye, Bell, ChevronRight, User
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { Product } from "../types";
@@ -11,11 +12,10 @@ import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 
 // ============================================================================
-// 1. CONFIG & STYLES
+// 1. CONFIG & TYPES
 // ============================================================================
 const ITEMS_PER_PAGE = 12;
 
-const LOCATIONS = ["TP.HCM", "Hà Nội", "Đà Nẵng", "Cần Thơ", "Khác"];
 const CATEGORIES = [
   { id: "textbook", label: "Sách & Giáo trình" },
   { id: "electronics", label: "Điện tử & Laptop" },
@@ -24,65 +24,158 @@ const CATEGORIES = [
   { id: "other", label: "Khác" },
 ];
 
+const LOCATIONS = ["TP.HCM", "Hà Nội", "Đà Nẵng", "Cần Thơ", "Khác"];
+
+enum SortOption {
+  NEWEST = "newest",
+  PRICE_ASC = "price_asc",
+  PRICE_DESC = "price_desc",
+  MOST_VIEWED = "most_viewed",
+}
+
+interface FilterState {
+  category: string;
+  sort: SortOption;
+  search: string;
+  minPrice: number | "";
+  maxPrice: number | "";
+  condition: "all" | "new" | "used";
+  location: string;
+}
+
+// ============================================================================
+// 2. UTILS
+// ============================================================================
+const Utils = {
+  formatCurrency: (amount: number) => 
+    new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount),
+  
+  timeAgo: (dateString: string) => {
+    if (!dateString) return "";
+    const diff = (new Date().getTime() - new Date(dateString).getTime()) / 1000;
+    if (diff < 3600) return "Vừa xong";
+    if (diff < 86400) return Math.floor(diff / 3600) + " giờ trước";
+    return new Date(dateString).toLocaleDateString('vi-VN');
+  },
+
+  cn: (...classes: (string | undefined | false)[]) => classes.filter(Boolean).join(" "),
+};
+
+// ============================================================================
+// 3. VISUAL ENGINE
+// ============================================================================
 const VisualEngine = () => (
   <style>{`
     :root {
       --primary: #00388D;
-      --bg-body: #F9FAFB;
-      --text-main: #111827;
+      --primary-hover: #002b6e;
+      --bg-body: #F3F4F6;
       --border: #E5E7EB;
     }
-    body { background-color: var(--bg-body); color: var(--text-main); font-family: 'Inter', sans-serif; }
+    body { background-color: var(--bg-body); color: #1F2937; font-family: 'Inter', sans-serif; }
 
     /* Layout */
-    .market-layout { display: grid; grid-template-columns: 280px 1fr; gap: 32px; max-width: 1280px; margin: 0 auto; padding: 24px; }
+    .market-layout { display: grid; grid-template-columns: 260px 1fr; gap: 24px; max-width: 1280px; margin: 0 auto; padding: 24px; }
     @media (max-width: 1024px) { .market-layout { grid-template-columns: 1fr; } }
 
-    /* Components */
+    /* Filter Sidebar */
     .filter-sidebar {
-      background: white; border: 1px solid var(--border); border-radius: 12px;
-      padding: 24px; height: fit-content; position: sticky; top: 100px;
-    }
-    
-    .product-card {
       background: white; border: 1px solid var(--border); border-radius: 8px;
-      overflow: hidden; transition: all 0.2s; position: relative;
+      padding: 20px; height: fit-content; position: sticky; top: 80px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.05);
     }
-    .product-card:hover {
-      border-color: var(--primary); transform: translateY(-4px);
+
+    /* Product Card (Grid) */
+    .card-grid {
+      background: white; border: 1px solid var(--border); border-radius: 8px;
+      overflow: hidden; transition: all 0.2s; position: relative; display: flex; flex-direction: column;
+    }
+    .card-grid:hover {
+      border-color: var(--primary); transform: translateY(-2px);
       box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1);
     }
-
-    .custom-checkbox { accent-color: var(--primary); width: 16px; height: 16px; cursor: pointer; }
+    .card-grid .img-wrapper { aspect-ratio: 4/3; position: relative; overflow: hidden; background: #f3f4f6; }
     
-    .price-input {
-      width: 100%; padding: 8px 12px; border: 1px solid var(--border);
-      border-radius: 6px; font-size: 0.875rem; outline: none;
+    /* Product Card (List) */
+    .card-list {
+      background: white; border: 1px solid var(--border); border-radius: 8px;
+      overflow: hidden; transition: all 0.2s; display: flex; flex-direction: row; height: 180px;
     }
-    .price-input:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(0, 56, 141, 0.1); }
+    .card-list:hover { border-color: var(--primary); box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1); }
+    .card-list .img-wrapper { width: 240px; height: 100%; position: relative; overflow: hidden; background: #f3f4f6; flex-shrink: 0; }
+    @media (max-width: 640px) { .card-list { flex-direction: column; height: auto; } .card-list .img-wrapper { width: 100%; aspect-ratio: 4/3; } }
 
-    /* Utilities */
+    /* Inputs */
+    .input-field {
+      width: 100%; padding: 8px 12px; border: 1px solid var(--border);
+      border-radius: 6px; font-size: 0.875rem; outline: none; transition: border-color 0.2s;
+    }
+    .input-field:focus { border-color: var(--primary); box-shadow: 0 0 0 2px rgba(0, 56, 141, 0.1); }
+
+    /* Modal */
+    .modal-backdrop {
+      background: rgba(0, 0, 0, 0.6); backdrop-filter: blur(4px);
+      position: fixed; inset: 0; z-index: 100;
+      display: flex; align-items: center; justify-content: center;
+      animation: fadeIn 0.2s;
+    }
+    .modal-content { animation: zoomIn 0.2s cubic-bezier(0.16, 1, 0.3, 1); }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes zoomIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
+
     .hide-scrollbar::-webkit-scrollbar { display: none; }
     .line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-    
-    /* Mobile Filter Drawer */
-    .mobile-drawer {
-      position: fixed; inset: 0; z-index: 50; transform: translateX(100%); transition: transform 0.3s ease-in-out;
-    }
-    .mobile-drawer.open { transform: translateX(0); }
-    .drawer-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,0.5); }
-    .drawer-content { 
-      position: absolute; right: 0; top: 0; bottom: 0; width: 320px; 
-      background: white; padding: 24px; overflow-y: auto;
-    }
   `}</style>
 );
 
 // ============================================================================
-// 2. HELPER COMPONENTS
+// 4. SUB-COMPONENTS
 // ============================================================================
 
-const ProductCard = ({ product }: { product: Product }) => {
+// --- Quick View Modal ---
+const QuickViewModal = ({ product, onClose }: { product: Product, onClose: () => void }) => {
+  const navigate = useNavigate();
+  return (
+    <div className="modal-backdrop" onClick={onClose}>
+      <div className="modal-content bg-white rounded-lg w-full max-w-4xl m-4 flex flex-col md:flex-row overflow-hidden shadow-2xl relative" onClick={e => e.stopPropagation()}>
+        <button onClick={onClose} className="absolute top-4 right-4 p-2 bg-gray-100 rounded-full hover:bg-gray-200 transition-colors z-10"><X size={20}/></button>
+        
+        {/* Image Side */}
+        <div className="w-full md:w-1/2 bg-gray-50 flex items-center justify-center p-8">
+          <img src={product.images?.[0] || 'https://via.placeholder.com/400'} className="max-h-[300px] object-contain mix-blend-multiply"/>
+        </div>
+
+        {/* Info Side */}
+        <div className="w-full md:w-1/2 p-8 flex flex-col">
+          <div className="mb-4">
+            <span className="text-xs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded uppercase tracking-wide">{product.category}</span>
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-2 leading-tight">{product.title}</h2>
+          <div className="flex items-center gap-4 mb-6">
+            <p className="text-2xl font-bold text-[#00388D]">{product.price === 0 ? "Miễn phí" : Utils.formatCurrency(product.price)}</p>
+            <span className="text-sm text-gray-500 border-l pl-4 border-gray-300">{Utils.timeAgo(product.created_at)}</span>
+          </div>
+          
+          <div className="bg-gray-50 p-4 rounded-lg border border-gray-100 mb-6 space-y-2">
+            <div className="flex justify-between text-sm"><span className="text-gray-500">Tình trạng:</span> <span className="font-medium text-gray-900">{product.condition === 'new' ? 'Mới 100%' : 'Đã qua sử dụng'}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-gray-500">Khu vực:</span> <span className="font-medium text-gray-900">{product.location_name || 'Toàn quốc'}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-gray-500">Người bán:</span> <span className="font-medium text-blue-600 cursor-pointer hover:underline">Xem hồ sơ</span></div>
+          </div>
+
+          <div className="mt-auto flex gap-3">
+            <button onClick={() => navigate(`/product/${product.id}`)} className="flex-1 bg-[#00388D] text-white py-3 rounded-lg font-bold hover:bg-[#002b6e] transition-all flex items-center justify-center gap-2">
+              Xem chi tiết <ArrowRight size={18}/>
+            </button>
+            <button className="px-4 py-3 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors text-gray-600"><Heart size={20}/></button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+// --- Product Card ---
+const ProductCard = ({ product, viewMode, onQuickView }: { product: Product, viewMode: 'grid' | 'list', onQuickView: (p: Product) => void }) => {
   const navigate = useNavigate();
   const { addToast } = useToast();
   const { user } = useAuth();
@@ -91,12 +184,18 @@ const ProductCard = ({ product }: { product: Product }) => {
     e.stopPropagation();
     if (!user) return addToast("Vui lòng đăng nhập", "info");
     addToast("Đã lưu tin", "success");
-    // TODO: Call API save product
   };
 
+  const handleQuickView = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    onQuickView(product);
+  };
+
+  const isGrid = viewMode === 'grid';
+
   return (
-    <div onClick={() => navigate(`/product/${product.id}`)} className="product-card group cursor-pointer flex flex-col h-full">
-      <div className="relative aspect-[4/3] bg-gray-100 overflow-hidden border-b border-gray-100">
+    <div onClick={() => navigate(`/product/${product.id}`)} className={isGrid ? "card-grid group cursor-pointer" : "card-list group cursor-pointer"}>
+      <div className="img-wrapper">
         <img 
           src={product.images?.[0] || 'https://via.placeholder.com/300'} 
           alt={product.title} 
@@ -104,35 +203,46 @@ const ProductCard = ({ product }: { product: Product }) => {
           loading="lazy"
         />
         {product.condition === 'new' && (
-          <span className="absolute top-2 left-2 bg-[#00388D] text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm">MỚI 100%</span>
+          <span className="absolute top-2 left-2 bg-[#00388D] text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm">MỚI</span>
         )}
-        <button 
-          onClick={handleLike}
-          className="absolute top-2 right-2 p-2 bg-white/90 rounded-full text-gray-400 hover:text-red-500 hover:bg-white shadow-sm transition-colors opacity-0 group-hover:opacity-100"
-        >
-          <Heart size={16}/>
-        </button>
+        <div className={`absolute top-2 right-2 flex-col gap-2 ${isGrid ? 'flex opacity-0 group-hover:opacity-100 transition-opacity' : 'flex'}`}>
+           <button onClick={handleLike} className="p-1.5 bg-white/90 rounded-full text-gray-500 hover:text-red-500 hover:bg-white shadow-sm"><Heart size={16}/></button>
+           <button onClick={handleQuickView} className="p-1.5 bg-white/90 rounded-full text-gray-500 hover:text-blue-500 hover:bg-white shadow-sm"><Eye size={16}/></button>
+        </div>
       </div>
       
-      <div className="p-4 flex flex-col flex-1">
-        <div className="flex justify-between items-start mb-2">
-          <span className="text-xs font-bold text-blue-600 uppercase tracking-wide bg-blue-50 px-2 py-0.5 rounded">{product.category}</span>
-          <span className="text-xs text-gray-400">{new Date(product.created_at).toLocaleDateString('vi-VN')}</span>
+      <div className={`p-4 flex flex-col flex-1 ${!isGrid && 'justify-between'}`}>
+        <div>
+          <div className="flex justify-between items-start mb-1">
+            <span className="text-[10px] font-bold text-gray-500 uppercase tracking-wide">{product.category}</span>
+            <span className="text-[10px] text-gray-400">{Utils.timeAgo(product.created_at)}</span>
+          </div>
+          
+          <h3 className={`font-bold text-gray-900 group-hover:text-[#00388D] transition-colors ${isGrid ? 'text-sm line-clamp-2 min-h-[40px]' : 'text-lg mb-2'}`}>
+            {product.title}
+          </h3>
+          
+          {!isGrid && (
+            <p className="text-sm text-gray-500 line-clamp-2 mb-4">{product.description || "Không có mô tả..."}</p>
+          )}
         </div>
         
-        <h3 className="text-sm font-bold text-gray-900 line-clamp-2 mb-auto group-hover:text-[#00388D] transition-colors min-h-[40px]">
-          {product.title}
-        </h3>
-        
-        <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
+        <div className={`pt-3 border-t border-gray-100 flex items-center justify-between ${isGrid ? 'mt-auto' : ''}`}>
           <span className="text-base font-bold text-[#00388D]">
-            {product.price === 0 ? "Thỏa thuận" : new Intl.NumberFormat('vi-VN', {style: 'currency', currency: 'VND'}).format(product.price)}
+            {product.price === 0 ? "Thỏa thuận" : Utils.formatCurrency(product.price)}
           </span>
-          {product.location_name && (
-            <div className="flex items-center gap-1 text-xs text-gray-500">
-              <MapPin size={12} /> <span className="truncate max-w-[80px]">{product.location_name}</span>
-            </div>
-          )}
+          <div className="flex items-center gap-3">
+             {product.location_name && (
+              <div className="flex items-center gap-1 text-xs text-gray-500">
+                <MapPin size={12} /> <span className="truncate max-w-[80px]">{product.location_name}</span>
+              </div>
+            )}
+            {!isGrid && (
+               <div className="flex items-center gap-1 text-xs text-gray-500">
+                 <Eye size={12}/> {product.view_count || 0}
+               </div>
+            )}
+          </div>
         </div>
       </div>
     </div>
@@ -140,28 +250,31 @@ const ProductCard = ({ product }: { product: Product }) => {
 };
 
 // ============================================================================
-// 3. MAIN PAGE
+// 5. MAIN PAGE
 // ============================================================================
 const MarketPage = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const { addToast } = useToast();
   
-  // State
+  // States
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [hasMore, setHasMore] = useState(true);
   const [page, setPage] = useState(0);
   const [showMobileFilter, setShowMobileFilter] = useState(false);
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>('grid');
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
   // Filter State
-  const [filters, setFilters] = useState({
+  const [filters, setFilters] = useState<FilterState>({
     search: searchParams.get("search") || "",
     category: searchParams.get("category") || "",
     minPrice: "",
     maxPrice: "",
     condition: "",
     location: "",
-    sort: "newest"
+    sort: SortOption.NEWEST
   });
 
   // Debounce Search
@@ -171,14 +284,13 @@ const MarketPage = () => {
       fetchProducts(0, true);
     }, 500);
     return () => clearTimeout(timer);
-  }, [filters]); // Re-fetch when any filter changes
+  }, [filters]);
 
   const fetchProducts = async (pageIdx: number, isReset = false) => {
     setLoading(true);
     try {
       let query = supabase.from("products").select("*", { count: 'exact' }).eq("status", "available");
 
-      // Apply Filters
       if (filters.search) query = query.ilike("title", `%${filters.search}%`);
       if (filters.category) query = query.eq("category", filters.category);
       if (filters.minPrice) query = query.gte("price", Number(filters.minPrice));
@@ -186,95 +298,89 @@ const MarketPage = () => {
       if (filters.condition) query = query.eq("condition", filters.condition);
       if (filters.location) query = query.ilike("location_name", `%${filters.location}%`);
 
-      // Sorting
       switch (filters.sort) {
-        case "price_asc": query = query.order("price", { ascending: true }); break;
-        case "price_desc": query = query.order("price", { ascending: false }); break;
-        case "oldest": query = query.order("created_at", { ascending: true }); break;
-        default: query = query.order("created_at", { ascending: false }); // Newest
+        case SortOption.PRICE_ASC: query = query.order("price", { ascending: true }); break;
+        case SortOption.PRICE_DESC: query = query.order("price", { ascending: false }); break;
+        case SortOption.MOST_VIEWED: query = query.order("view_count", { ascending: false }); break;
+        default: query = query.order("created_at", { ascending: false });
       }
 
-      // Pagination
-      const from = pageIdx * ITEMS_PER_PAGE;
-      const to = from + ITEMS_PER_PAGE - 1;
-      const { data, error } = await query.range(from, to);
-
+      const { data, error } = await query.range(pageIdx * ITEMS_PER_PAGE, (pageIdx * ITEMS_PER_PAGE) + ITEMS_PER_PAGE - 1);
       if (error) throw error;
 
       if (data.length < ITEMS_PER_PAGE) setHasMore(false);
       else setHasMore(true);
 
       setProducts(prev => isReset ? data : [...prev, ...data]);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
+    } catch (err) { console.error(err); } 
+    finally { setLoading(false); }
   };
 
-  const loadMore = () => {
-    const nextPage = page + 1;
-    setPage(nextPage);
-    fetchProducts(nextPage);
-  };
-
+  const loadMore = () => { const nextPage = page + 1; setPage(nextPage); fetchProducts(nextPage); };
   const clearFilters = () => {
-    setFilters({ search: "", category: "", minPrice: "", maxPrice: "", condition: "", location: "", sort: "newest" });
+    setFilters({ search: "", category: "", minPrice: "", maxPrice: "", condition: "", location: "", sort: SortOption.NEWEST });
     setSearchParams({});
   };
+  const saveSearch = () => addToast("Đã lưu bộ lọc tìm kiếm này!", "success");
 
-  // Render Filter Sidebar Content
-  const FilterContent = () => (
-    <div className="space-y-8">
-      {/* Search */}
-      <div>
-        <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2"><Search size={16}/> Từ khóa</h3>
-        <input 
-          placeholder="Tìm tên sản phẩm..." 
-          className="price-input"
-          value={filters.search}
-          onChange={e => setFilters({...filters, search: e.target.value})}
-        />
+  // Filter Sidebar Content
+  const FilterSidebar = () => (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between pb-4 border-b border-gray-100">
+        <h3 className="font-bold text-gray-900 flex items-center gap-2"><Filter size={18}/> Bộ lọc</h3>
+        <button onClick={clearFilters} className="text-xs font-bold text-blue-600 hover:underline">Đặt lại</button>
       </div>
 
-      {/* Category */}
       <div>
-        <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2"><Package size={16}/> Danh mục</h3>
+        <h4 className="text-sm font-bold text-gray-700 mb-3">Từ khóa</h4>
+        <div className="relative">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400"/>
+          <input className="input-field pl-9" placeholder="Tìm kiếm..." value={filters.search} onChange={e => setFilters({...filters, search: e.target.value})}/>
+        </div>
+      </div>
+
+      <div>
+        <h4 className="text-sm font-bold text-gray-700 mb-3">Danh mục</h4>
         <div className="space-y-2">
           <label className="flex items-center gap-2 text-sm text-gray-600 hover:text-[#00388D] cursor-pointer">
-            <input type="radio" name="category" className="custom-checkbox" checked={!filters.category} onChange={() => setFilters({...filters, category: ""})}/>
-            Tất cả
+            <input type="radio" name="cat" className="accent-[#00388D]" checked={!filters.category} onChange={() => setFilters({...filters, category: ""})}/> Tất cả
           </label>
           {CATEGORIES.map(cat => (
             <label key={cat.id} className="flex items-center gap-2 text-sm text-gray-600 hover:text-[#00388D] cursor-pointer">
-              <input type="radio" name="category" className="custom-checkbox" checked={filters.category === cat.id} onChange={() => setFilters({...filters, category: cat.id})}/>
-              {cat.label}
+              <input type="radio" name="cat" className="accent-[#00388D]" checked={filters.category === cat.id} onChange={() => setFilters({...filters, category: cat.id})}/> {cat.label}
             </label>
           ))}
         </div>
       </div>
 
-      {/* Price Range */}
       <div>
-        <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2"><span className="text-lg">₫</span> Khoảng giá</h3>
+        <h4 className="text-sm font-bold text-gray-700 mb-3">Khoảng giá</h4>
         <div className="flex gap-2 items-center">
-          <input type="number" placeholder="Từ" className="price-input" value={filters.minPrice} onChange={e => setFilters({...filters, minPrice: e.target.value})}/>
+          <input type="number" placeholder="Từ" className="input-field text-xs" value={filters.minPrice} onChange={e => setFilters({...filters, minPrice: e.target.value})}/>
           <span className="text-gray-400">-</span>
-          <input type="number" placeholder="Đến" className="price-input" value={filters.maxPrice} onChange={e => setFilters({...filters, maxPrice: e.target.value})}/>
+          <input type="number" placeholder="Đến" className="input-field text-xs" value={filters.maxPrice} onChange={e => setFilters({...filters, maxPrice: e.target.value})}/>
         </div>
       </div>
 
-      {/* Location */}
       <div>
-        <h3 className="font-bold text-gray-900 mb-3 flex items-center gap-2"><MapPin size={16}/> Khu vực</h3>
-        <select className="price-input cursor-pointer" value={filters.location} onChange={e => setFilters({...filters, location: e.target.value})}>
+        <h4 className="text-sm font-bold text-gray-700 mb-3">Tình trạng</h4>
+        <select className="input-field cursor-pointer" value={filters.condition} onChange={e => setFilters({...filters, condition: e.target.value})}>
+          <option value="">Tất cả</option>
+          <option value="new">Mới 100%</option>
+          <option value="used">Đã qua sử dụng</option>
+        </select>
+      </div>
+
+      <div>
+        <h4 className="text-sm font-bold text-gray-700 mb-3">Khu vực</h4>
+        <select className="input-field cursor-pointer" value={filters.location} onChange={e => setFilters({...filters, location: e.target.value})}>
           <option value="">Toàn quốc</option>
           {LOCATIONS.map(loc => <option key={loc} value={loc}>{loc}</option>)}
         </select>
       </div>
 
-      <button onClick={clearFilters} className="w-full py-2 border border-gray-300 rounded-lg text-sm font-bold text-gray-600 hover:bg-gray-50 transition-colors">
-        Xóa tất cả bộ lọc
+      <button onClick={saveSearch} className="w-full py-2 bg-blue-50 text-[#00388D] font-bold rounded-lg text-sm hover:bg-blue-100 flex items-center justify-center gap-2 transition-colors">
+        <Bell size={16}/> Lưu tìm kiếm này
       </button>
     </div>
   );
@@ -282,98 +388,96 @@ const MarketPage = () => {
   return (
     <div className="min-h-screen">
       <VisualEngine />
+      {selectedProduct && <QuickViewModal product={selectedProduct} onClose={() => setSelectedProduct(null)} />}
 
-      {/* Mobile Filter Drawer */}
-      <div className={`mobile-drawer lg:hidden ${showMobileFilter ? 'open' : ''}`}>
-        <div className="drawer-backdrop" onClick={() => setShowMobileFilter(false)}></div>
-        <div className="drawer-content">
+      {/* Mobile Drawer */}
+      <div className={`fixed inset-0 z-50 transform transition-transform duration-300 lg:hidden ${showMobileFilter ? 'translate-x-0' : 'translate-x-full'}`}>
+        <div className="absolute inset-0 bg-black/50" onClick={() => setShowMobileFilter(false)}></div>
+        <div className="absolute right-0 top-0 bottom-0 w-80 bg-white p-6 overflow-y-auto">
           <div className="flex justify-between items-center mb-6">
             <h2 className="text-xl font-bold text-[#00388D]">Bộ lọc</h2>
             <button onClick={() => setShowMobileFilter(false)}><X size={24}/></button>
           </div>
-          <FilterContent />
+          <FilterSidebar />
         </div>
       </div>
 
-      {/* --- PAGE HEADER --- */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-30 shadow-sm">
-        <div className="max-w-[1280px] mx-auto px-6 py-4">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-4">
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
-              <ShoppingBag className="text-[#00388D]"/> Thị trường
-            </h1>
+      {/* --- BREADCRUMBS & HEADER --- */}
+      <div className="bg-white border-b border-gray-200">
+        <div className="max-w-[1280px] mx-auto px-6 py-3">
+          <div className="text-xs text-gray-500 flex items-center gap-2 mb-4">
+            <Link to="/" className="hover:text-[#00388D]">Trang chủ</Link> <ChevronRight size={12}/> <span className="font-bold text-gray-700">Thị trường</span>
+          </div>
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <h1 className="text-2xl font-bold text-gray-900">Sàn giao dịch</h1>
+              <p className="text-sm text-gray-500 mt-1">Tìm thấy <strong className="text-[#00388D]">{products.length}</strong> kết quả phù hợp</p>
+            </div>
             
             <div className="flex items-center gap-3 w-full md:w-auto">
-              <button 
-                onClick={() => setShowMobileFilter(true)}
-                className="lg:hidden flex-1 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-bold flex items-center justify-center gap-2 hover:bg-gray-50"
-              >
-                <Filter size={16}/> Bộ lọc
+              <button onClick={() => setShowMobileFilter(true)} className="lg:hidden flex-1 px-4 py-2 bg-white border border-gray-300 rounded-lg text-sm font-bold flex items-center justify-center gap-2 hover:bg-gray-50">
+                <SlidersHorizontal size={16}/> Bộ lọc
               </button>
               
-              <div className="relative group flex-1 md:flex-none">
-                <select 
-                  className="appearance-none bg-white border border-gray-300 text-gray-700 py-2 pl-4 pr-10 rounded-lg text-sm font-bold cursor-pointer focus:outline-none focus:border-[#00388D] w-full md:w-48"
-                  value={filters.sort}
-                  onChange={e => setFilters({...filters, sort: e.target.value as any})}
-                >
-                  <option value="newest">Mới nhất</option>
-                  <option value="price_asc">Giá thấp đến cao</option>
-                  <option value="price_desc">Giá cao đến thấp</option>
-                  <option value="oldest">Cũ nhất</option>
+              <div className="flex items-center bg-gray-100 p-1 rounded-lg border border-gray-200">
+                <button onClick={() => setViewMode('grid')} className={`p-2 rounded-md transition-all ${viewMode === 'grid' ? 'bg-white shadow-sm text-[#00388D]' : 'text-gray-500 hover:text-gray-700'}`}><LayoutGrid size={18}/></button>
+                <button onClick={() => setViewMode('list')} className={`p-2 rounded-md transition-all ${viewMode === 'list' ? 'bg-white shadow-sm text-[#00388D]' : 'text-gray-500 hover:text-gray-700'}`}><List size={18}/></button>
+              </div>
+
+              <div className="relative group flex-1 md:flex-none w-48">
+                <select className="appearance-none bg-white border border-gray-300 text-gray-700 py-2 pl-4 pr-10 rounded-lg text-sm font-bold cursor-pointer focus:outline-none focus:border-[#00388D] w-full" value={filters.sort} onChange={e => setFilters({...filters, sort: e.target.value as any})}>
+                  <option value={SortOption.NEWEST}>Mới nhất</option>
+                  <option value={SortOption.PRICE_ASC}>Giá thấp đến cao</option>
+                  <option value={SortOption.PRICE_DESC}>Giá cao đến thấp</option>
+                  <option value={SortOption.MOST_VIEWED}>Xem nhiều nhất</option>
                 </select>
                 <ArrowUpDown size={14} className="absolute right-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none"/>
               </div>
             </div>
           </div>
-
-          {/* Active Filters Tag */}
-          {(filters.category || filters.minPrice || filters.maxPrice || filters.search) && (
-            <div className="flex flex-wrap gap-2 mt-4 pt-4 border-t border-gray-100">
-              <span className="text-xs font-bold text-gray-500 uppercase tracking-wider py-1">Đang lọc:</span>
-              {filters.search && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-200 flex items-center gap-1">"{filters.search}" <X size={12} className="cursor-pointer" onClick={()=>setFilters({...filters, search:""})}/></span>}
-              {filters.category && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-200 flex items-center gap-1">{CATEGORIES.find(c=>c.id===filters.category)?.label} <X size={12} className="cursor-pointer" onClick={()=>setFilters({...filters, category:""})}/></span>}
-              {(filters.minPrice || filters.maxPrice) && <span className="text-xs bg-blue-50 text-blue-700 px-2 py-1 rounded border border-blue-200 flex items-center gap-1">{filters.minPrice || 0} - {filters.maxPrice || '∞'} <X size={12} className="cursor-pointer" onClick={()=>setFilters({...filters, minPrice:"", maxPrice:""})}/></span>}
-            </div>
-          )}
         </div>
       </div>
 
       {/* --- MAIN LAYOUT --- */}
       <div className="market-layout">
-        
-        {/* LEFT: DESKTOP SIDEBAR */}
         <aside className="hidden lg:block">
-          <div className="filter-sidebar shadow-sm">
-            <FilterContent />
+          <div className="filter-sidebar">
+            <FilterSidebar />
           </div>
         </aside>
 
-        {/* RIGHT: PRODUCTS GRID */}
         <main className="min-h-[500px]">
+          {/* Active Filters */}
+          {(filters.search || filters.category || filters.minPrice || filters.location) && (
+            <div className="flex flex-wrap gap-2 mb-6">
+              {filters.search && <span className="text-xs bg-white border border-blue-200 text-blue-700 px-3 py-1.5 rounded-full flex items-center gap-1 font-medium shadow-sm">Từ khóa: "{filters.search}" <X size={12} className="cursor-pointer hover:text-red-500" onClick={()=>setFilters({...filters, search:""})}/></span>}
+              {filters.category && <span className="text-xs bg-white border border-blue-200 text-blue-700 px-3 py-1.5 rounded-full flex items-center gap-1 font-medium shadow-sm">{CATEGORIES.find(c=>c.id===filters.category)?.label} <X size={12} className="cursor-pointer hover:text-red-500" onClick={()=>setFilters({...filters, category:""})}/></span>}
+              {filters.location && <span className="text-xs bg-white border border-blue-200 text-blue-700 px-3 py-1.5 rounded-full flex items-center gap-1 font-medium shadow-sm">{filters.location} <X size={12} className="cursor-pointer hover:text-red-500" onClick={()=>setFilters({...filters, location:""})}/></span>}
+              <button onClick={clearFilters} className="text-xs text-gray-500 hover:text-red-500 underline ml-2">Xóa tất cả</button>
+            </div>
+          )}
+
           {loading && products.length === 0 ? (
-            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
+            <div className={`grid gap-6 ${viewMode === 'grid' ? 'grid-cols-2 md:grid-cols-3 xl:grid-cols-4' : 'grid-cols-1'}`}>
               {[...Array(8)].map((_, i) => (
-                <div key={i} className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
-                  <div className="h-40 bg-gray-200 rounded animate-pulse"/>
-                  <div className="h-4 w-3/4 bg-gray-200 rounded animate-pulse"/>
-                  <div className="h-4 w-1/2 bg-gray-200 rounded animate-pulse"/>
+                <div key={i} className={`bg-white rounded-lg border border-gray-200 p-4 space-y-3 ${viewMode === 'list' ? 'flex gap-4' : ''}`}>
+                  <div className={`bg-gray-200 rounded animate-pulse ${viewMode === 'list' ? 'w-48 h-32' : 'h-40'}`}/>
+                  <div className="flex-1 space-y-2">
+                    <div className="h-4 w-3/4 bg-gray-200 rounded animate-pulse"/>
+                    <div className="h-4 w-1/2 bg-gray-200 rounded animate-pulse"/>
+                  </div>
                 </div>
               ))}
             </div>
           ) : products.length > 0 ? (
             <>
-              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-6">
-                {products.map(p => <ProductCard key={p.id} product={p} />)}
+              <div className={`grid gap-6 ${viewMode === 'grid' ? 'grid-cols-2 md:grid-cols-3 xl:grid-cols-4' : 'grid-cols-1'}`}>
+                {products.map(p => <ProductCard key={p.id} product={p} viewMode={viewMode} onQuickView={setSelectedProduct}/>)}
               </div>
               
               {hasMore && (
                 <div className="mt-12 text-center">
-                  <button 
-                    onClick={loadMore} 
-                    disabled={loading}
-                    className="px-8 py-3 bg-white border border-gray-300 text-gray-700 font-bold rounded-lg hover:bg-gray-50 hover:border-[#00388D] hover:text-[#00388D] transition-all shadow-sm disabled:opacity-50"
-                  >
+                  <button onClick={loadMore} disabled={loading} className="px-8 py-3 bg-white border border-gray-300 text-gray-700 font-bold rounded-lg hover:bg-gray-50 hover:border-[#00388D] hover:text-[#00388D] transition-all shadow-sm disabled:opacity-50">
                     {loading ? "Đang tải..." : "Xem thêm sản phẩm"}
                   </button>
                 </div>
@@ -386,9 +490,7 @@ const MarketPage = () => {
               </div>
               <h3 className="text-lg font-bold text-gray-900 mb-1">Không tìm thấy sản phẩm nào</h3>
               <p className="text-gray-500 text-sm mb-6">Thử thay đổi bộ lọc hoặc từ khóa tìm kiếm của bạn.</p>
-              <button onClick={clearFilters} className="px-6 py-2 bg-[#00388D] text-white font-bold rounded-lg hover:bg-[#002b6e] transition-colors">
-                Xóa bộ lọc
-              </button>
+              <button onClick={clearFilters} className="px-6 py-2 bg-[#00388D] text-white font-bold rounded-lg hover:bg-[#002b6e] transition-colors">Xóa bộ lọc</button>
             </div>
           )}
         </main>
