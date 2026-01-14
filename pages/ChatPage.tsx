@@ -73,22 +73,12 @@ const VisualEngine = () => (
     .dropdown-item.danger { color: #EF4444; }
     .dropdown-item.danger:hover { background: #FEF2F2; }
 
-    /* CĂN GIỮA DATE DIVIDER */
     .date-divider {
-      display: flex; 
-      justify-content: center; 
-      align-items: center; 
-      margin: 24px 0; 
-      position: relative;
+      display: flex; justify-content: center; margin: 24px 0; position: relative;
     }
     .date-divider span {
-      background-color: #E2E8F0; 
-      color: #64748B; 
-      font-size: 11px; 
-      font-weight: 600; 
-      padding: 4px 12px; 
-      border-radius: 999px; /* Pill shape */
-      z-index: 10;
+      background: #E2E8F0; color: #64748B; font-size: 11px; font-weight: 600;
+      padding: 4px 12px; border-radius: 12px; z-index: 10;
     }
   `}</style>
 );
@@ -144,7 +134,7 @@ const ChatPage: React.FC = () => {
   // Init
   useEffect(() => { if(user) fetchConversations(); }, [user]);
 
-  // Deep Link
+  // Deep Link Logic
   useEffect(() => {
     const initChat = async () => {
         if (!user || !partnerIdParam) return;
@@ -157,22 +147,44 @@ const ChatPage: React.FC = () => {
     initChat();
   }, [partnerIdParam, productIdParam, user]);
 
-  // Realtime
+  // --------------------------------------------------------
+  // 1. GLOBAL REALTIME: Lắng nghe thay đổi danh sách chat (Sidebar)
+  // --------------------------------------------------------
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase.channel('global_conversations')
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations' }, (payload) => {
+          // Khi có tin nhắn mới -> cập nhật last_message và đẩy lên đầu
+          setConversations(prev => {
+             const updated = prev.map(c => c.id === payload.new.id ? { ...c, ...payload.new } : c);
+             return updated.sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+          });
+      })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'conversations' }, () => {
+          // Có cuộc hội thoại mới -> Load lại danh sách
+          fetchConversations();
+      })
+      .subscribe();
+
+    return () => { supabase.removeChannel(channel); };
+  }, [user]);
+
+  // --------------------------------------------------------
+  // 2. CHAT ROOM REALTIME: Lắng nghe tin nhắn trong phòng
+  // --------------------------------------------------------
   useEffect(() => {
     if (!activeConversation) return;
     fetchMessages(activeConversation);
     if (!targetProduct) fetchPinnedProduct(activeConversation);
 
-    console.log("Connecting Realtime to:", activeConversation);
-
     const channel = supabase.channel(`chat_room:${activeConversation}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversation}` }, (payload) => {
-            console.log("New message received:", payload);
+            const newMsg = payload.new;
             setMessages(prev => {
-                if (prev.some(m => m.id === payload.new.id)) return prev;
-                return [...prev, payload.new];
+                if (prev.some(m => m.id === newMsg.id)) return prev;
+                return [...prev, newMsg];
             });
-            if (user && payload.new.sender_id !== user.id) playMessageSound();
+            if (user && newMsg.sender_id !== user.id) playMessageSound();
             setTimeout(scrollToBottom, 100);
         })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (payload) => {
@@ -190,14 +202,12 @@ const ChatPage: React.FC = () => {
                 typingTimeoutRef.current = setTimeout(() => setPartnerTyping(false), 2000);
             }
         })
-        .subscribe((status) => {
-            if(status === 'SUBSCRIBED') console.log("Realtime Connected!");
-        });
+        .subscribe();
 
     return () => { supabase.removeChannel(channel); };
   }, [activeConversation]);
 
-  // Handle Scroll Button Visibility
+  // UI Handlers (Scroll, Click Outside)
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
@@ -209,7 +219,6 @@ const ChatPage: React.FC = () => {
     return () => container.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // Close menus on click outside
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) setIsMenuOpen(false);
@@ -291,13 +300,10 @@ const ChatPage: React.FC = () => {
       
       const { error } = await supabase.from('messages').insert({ conversation_id: activeConversation, sender_id: user.id, content: content, type: type });
       
-      // Update last message in conversation list
+      // Update last message in conversation table (This triggers the Global Realtime Listener)
       if (!error) {
           const lastMsgText = type === 'image' ? '[Hình ảnh]' : type === 'location' ? '[Vị trí]' : content;
           await supabase.from('conversations').update({ last_message: lastMsgText, updated_at: new Date().toISOString() }).eq('id', activeConversation);
-          
-          // Local update to avoid waiting for fetch
-          setConversations(prev => prev.map(c => c.id === activeConversation ? { ...c, last_message: lastMsgText, updated_at: new Date().toISOString() } : c));
       }
   };
 
@@ -436,7 +442,7 @@ const ChatPage: React.FC = () => {
                   <img src={conv.partnerAvatar || 'https://via.placeholder.com/50'} className="w-12 h-12 rounded-full object-cover border border-slate-200 bg-white"/>
                   <div className="flex-1 min-w-0 flex flex-col justify-center">
                       <p className={`font-bold text-sm truncate ${activeConversation === conv.id ? 'text-[#00418E]' : 'text-slate-800'}`}>{conv.partnerName}</p>
-                      <p className="text-xs text-slate-500 truncate mt-0.5 font-medium">{conv.last_message || "Bắt đầu trò chuyện"}</p>
+                      <p className={`text-xs truncate mt-0.5 ${conv.last_message ? 'text-slate-600 font-medium' : 'text-slate-400 italic'}`}>{conv.last_message || "Bắt đầu trò chuyện"}</p>
                   </div>
                   <span className="text-[10px] text-slate-400 whitespace-nowrap">{conv.updated_at ? new Date(conv.updated_at).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'}) : ''}</span>
                </div>
