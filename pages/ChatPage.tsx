@@ -72,6 +72,24 @@ const VisualEngine = () => (
     .dropdown-item:hover { background: #F8FAFC; color: #00418E; }
     .dropdown-item.danger { color: #EF4444; }
     .dropdown-item.danger:hover { background: #FEF2F2; }
+
+    /* CĂN GIỮA DATE DIVIDER */
+    .date-divider {
+      display: flex; 
+      justify-content: center; 
+      align-items: center; 
+      margin: 24px 0; 
+      position: relative;
+    }
+    .date-divider span {
+      background-color: #E2E8F0; 
+      color: #64748B; 
+      font-size: 11px; 
+      font-weight: 600; 
+      padding: 4px 12px; 
+      border-radius: 999px; /* Pill shape */
+      z-index: 10;
+    }
   `}</style>
 );
 
@@ -272,7 +290,15 @@ const ChatPage: React.FC = () => {
       setShowEmojiPicker(false);
       
       const { error } = await supabase.from('messages').insert({ conversation_id: activeConversation, sender_id: user.id, content: content, type: type });
-      if (!error) await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeConversation);
+      
+      // Update last message in conversation list
+      if (!error) {
+          const lastMsgText = type === 'image' ? '[Hình ảnh]' : type === 'location' ? '[Vị trí]' : content;
+          await supabase.from('conversations').update({ last_message: lastMsgText, updated_at: new Date().toISOString() }).eq('id', activeConversation);
+          
+          // Local update to avoid waiting for fetch
+          setConversations(prev => prev.map(c => c.id === activeConversation ? { ...c, last_message: lastMsgText, updated_at: new Date().toISOString() } : c));
+      }
   };
 
   const handleTyping = (e: any) => {
@@ -317,7 +343,7 @@ const ChatPage: React.FC = () => {
       setContextMenu(null);
   };
 
-  // --- MENU ACTIONS (Đã thêm đầy đủ) ---
+  // --- MENU ACTIONS ---
   const handleUnpinProduct = async () => {
       if (!activeConversation) return;
       await supabase.from('conversations').update({ current_product_id: null }).eq('id', activeConversation);
