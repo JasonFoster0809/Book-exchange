@@ -202,7 +202,8 @@ const ProductDetailPage: React.FC = () => {
       // ===============================================
       // Nếu người comment KHÔNG PHẢI là người bán -> Gửi noti
       if (product.sellerId !== currentUser.id) {
-        const actorName = currentUser.user_metadata?.full_name || currentUser.email?.split('@')[0] || "Người dùng";
+        // --- SỬA LỖI TẠI ĐÂY: Dùng currentUser.name thay vì user_metadata ---
+        const actorName = currentUser.name || currentUser.email?.split('@')[0] || "Người dùng";
         
         await supabase.from('notifications').insert({
           user_id: product.sellerId, // Người nhận: Seller
