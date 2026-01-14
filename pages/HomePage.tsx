@@ -8,7 +8,7 @@ import {
   TrendingUp, Filter, SlidersHorizontal, X, ChevronLeft, Tag,
   Bell, Menu, Star, CheckCircle, ArrowUp, Mail, Info, Shield, 
   Award, HelpCircle, ChevronDown, Activity, Quote, Calendar,
-  ExternalLink, ThumbsUp, MessageCircle, Share2 // <--- Đã có Share2
+  ExternalLink, ThumbsUp, MessageCircle, Share2
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { Product } from "../types";
@@ -16,44 +16,9 @@ import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 
 // ============================================================================
-// 1. CẤU HÌNH & DATA MẪU
+// 1. CONFIGURATION & CONSTANTS
 // ============================================================================
 const ITEMS_PER_PAGE = 12;
-
-const TICKER_MESSAGES = [
-  "🔥 Minh Tuấn (K21) vừa đăng bán sách Giải tích 1 - 50k",
-  "💻 Lan Anh (K20) đang tìm mua Laptop Dell cũ giá < 5tr",
-  "🛍️ Chợ BK vừa đạt mốc 10.000 giao dịch thành công!",
-  "🎁 Sự kiện đổi sách cũ lấy cây xanh đang diễn ra tại H6",
-  "📢 Cảnh báo: Hãy giao dịch trực tiếp để tránh lừa đảo",
-];
-
-const TESTIMONIALS = [
-  {
-    id: 1,
-    name: "Nguyễn Văn An",
-    role: "K19 - Khoa Máy Tính",
-    avatar: "https://ui-avatars.com/api/?name=Nguyen+An&background=0D8ABC&color=fff",
-    content: "Tìm được cuốn Giải tích 1 giá siêu rẻ, lại còn được anh khóa trên hướng dẫn tận tình cách học. 10 điểm cho cộng đồng mình!",
-    rating: 5
-  },
-  {
-    id: 2,
-    name: "Trần Thị Bích",
-    role: "K20 - Khoa Hóa",
-    avatar: "https://ui-avatars.com/api/?name=Tran+Bich&background=E91E63&color=fff",
-    content: "Giao diện đẹp, dễ dùng. Thích nhất tính năng AI scan, mình đăng bán đống sách cũ chỉ mất có 1 phút là xong.",
-    rating: 5
-  },
-  {
-    id: 3,
-    name: "Lê Hoàng Nam",
-    role: "K21 - Khoa Điện",
-    avatar: "https://ui-avatars.com/api/?name=Hoang+Nam&background=FF9800&color=fff",
-    content: "Cộng đồng uy tín, toàn sinh viên trường mình nên rất yên tâm khi giao dịch. Đã mua được cái máy tính Casio ngon lành.",
-    rating: 4
-  }
-];
 
 const BLOG_POSTS = [
   {
@@ -82,19 +47,28 @@ const BLOG_POSTS = [
   }
 ];
 
+const TESTIMONIALS = [
+  { id: 1, name: "Minh Tuấn", role: "K19 - Máy Tính", content: "Tìm được cuốn Giải tích 1 giá siêu rẻ, lại còn được anh khóa trên hướng dẫn tận tình. 10 điểm!", rating: 5 },
+  { id: 2, name: "Lan Anh", role: "K20 - Hóa", content: "Giao diện đẹp, dễ dùng. Thích nhất tính năng AI scan, đăng bán sách cũ cực nhanh.", rating: 5 },
+  { id: 3, name: "Hoàng Nam", role: "K21 - Điện", content: "Cộng đồng uy tín, toàn sinh viên trường mình nên rất yên tâm khi giao dịch.", rating: 4 }
+];
+
+// ============================================================================
+// 2. TYPES
+// ============================================================================
+enum SortOption {
+  NEWEST = "newest",
+  PRICE_ASC = "price_asc",
+  PRICE_DESC = "price_desc",
+  MOST_VIEWED = "most_viewed",
+}
+
 enum ProductCategory {
   TEXTBOOK = "textbook",
   ELECTRONICS = "electronics",
   SUPPLIES = "supplies",
   CLOTHING = "clothing",
   OTHER = "other",
-}
-
-enum SortOption {
-  NEWEST = "newest",
-  PRICE_ASC = "price_asc",
-  PRICE_DESC = "price_desc",
-  MOST_VIEWED = "most_viewed",
 }
 
 interface FilterState {
@@ -107,7 +81,7 @@ interface FilterState {
 }
 
 // ============================================================================
-// 2. UTILS
+// 3. UTILS
 // ============================================================================
 const Utils = {
   formatCurrency: (amount: number) => new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount),
@@ -119,51 +93,59 @@ const Utils = {
     if (diff < 86400) return Math.floor(diff / 3600) + " giờ trước";
     return Math.floor(diff / 86400) + " ngày trước";
   },
-  cn: (...classes: (string | undefined | false)[]) => classes.filter(Boolean).join(" "),
+  cn: (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ")
 };
 
 // ============================================================================
-// 3. VISUAL ENGINE (HIỆU ỨNG ĐẸP)
+// 4. VISUAL ENGINE (CSS + NEW ANIMATIONS)
 // ============================================================================
-const GlobalStyles = () => (
+const VisualEngine = () => (
   <style>{`
     :root {
-      --cobalt-900: #002147; --cobalt-600: #0047AB; --cyan-400: #00E5FF;
-      --light-bg: #F8FAFC;
+      --cobalt-900: #002147; --cobalt-800: #003366; --cobalt-600: #0047AB;
+      --cyan-400: #00E5FF; --light-bg: #F8FAFC;
     }
     body { background-color: var(--light-bg); color: var(--cobalt-900); font-family: 'Inter', sans-serif; overflow-x: hidden; }
 
-    /* Grain Texture */
-    .grain-overlay {
-      position: fixed; inset: 0; pointer-events: none; z-index: 50; opacity: 0.03;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    /* --- New: Cyber Grid Animation --- */
+    .cyber-grid {
+      position: absolute; width: 200%; height: 200%; top: -50%; left: -50%; z-index: -1;
+      background-image: 
+        linear-gradient(rgba(0, 71, 171, 0.1) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(0, 71, 171, 0.1) 1px, transparent 1px);
+      background-size: 40px 40px;
+      transform: perspective(500px) rotateX(60deg);
+      animation: cyber-move 20s linear infinite;
+      pointer-events: none;
+    }
+    @keyframes cyber-move {
+      0% { transform: perspective(500px) rotateX(60deg) translateY(0); }
+      100% { transform: perspective(500px) rotateX(60deg) translateY(40px); }
     }
 
     /* Aurora Background */
     .aurora-bg {
-      position: fixed; top: 0; left: 0; right: 0; height: 120vh; z-index: -1;
+      position: fixed; top: 0; left: 0; right: 0; height: 120vh; z-index: -2;
       background: 
-        radial-gradient(at 0% 0%, rgba(0, 71, 171, 0.15) 0px, transparent 50%),
-        radial-gradient(at 100% 0%, rgba(0, 229, 255, 0.1) 0px, transparent 50%),
-        radial-gradient(at 50% 50%, rgba(255, 255, 255, 0.8) 0px, transparent 50%);
-      filter: blur(80px); animation: aurora 15s ease-in-out infinite alternate;
+        radial-gradient(at 0% 0%, rgba(0, 71, 171, 0.08) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(0, 229, 255, 0.08) 0px, transparent 50%);
+      filter: blur(60px);
     }
-    @keyframes aurora { from { transform: scale(1); } to { transform: scale(1.1); } }
 
     /* Floating Animation */
     .animate-float { animation: float 6s ease-in-out infinite; }
     @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-20px); } }
-    .delay-100 { animation-delay: 1s; } .delay-200 { animation-delay: 2s; } .delay-300 { animation-delay: 3s; }
+    .delay-100 { animation-delay: 1s; } .delay-200 { animation-delay: 2s; }
 
     /* Glass Cards */
     .glass-card {
-      background: rgba(255, 255, 255, 0.65); backdrop-filter: blur(16px);
+      background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(16px);
       border: 1px solid rgba(255, 255, 255, 0.8); box-shadow: 0 4px 20px rgba(0, 71, 171, 0.05);
     }
     .hover-lift { transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
     .hover-lift:hover { transform: translateY(-8px); box-shadow: 0 20px 40px -10px rgba(0, 71, 171, 0.1); border-color: #BFDBFE; }
 
-    /* Shimmer Loading */
+    /* Shimmer */
     .shimmer { position: relative; overflow: hidden; }
     .shimmer::after {
       content: ''; position: absolute; inset: 0; transform: translateX(-100%);
@@ -171,11 +153,6 @@ const GlobalStyles = () => (
       animation: sh 1.5s infinite;
     }
     @keyframes sh { to { transform: translateX(100%); } }
-
-    /* Ticker Text */
-    .ticker-wrap { overflow: hidden; white-space: nowrap; }
-    .ticker-move { display: inline-block; padding-left: 100%; animation: ticker 40s linear infinite; }
-    @keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-100%); } }
 
     /* Modal Animation */
     .modal-backdrop {
@@ -194,7 +171,7 @@ const GlobalStyles = () => (
 );
 
 // ============================================================================
-// 4. DATA HOOKS
+// 5. DATA HOOKS
 // ============================================================================
 function useProducts(filter: FilterState) {
   const [products, setProducts] = useState<Product[]>([]);
@@ -248,23 +225,8 @@ function useCounter(end: number, duration = 2000) {
 }
 
 // ============================================================================
-// 5. COMPONENT CON
+// 6. COMPONENTS
 // ============================================================================
-
-const LiveTicker = () => (
-  <div className="bg-[#002147] text-white h-9 flex items-center overflow-hidden sticky top-0 z-[60] border-b border-white/10">
-    <div className="bg-[#0047AB] h-full px-4 flex items-center z-20 font-black text-[10px] uppercase tracking-wider shadow-lg">
-      <Activity size={14} className="mr-2 animate-pulse text-[#00E5FF]"/> Live
-    </div>
-    <div className="ticker-wrap flex-1">
-      <div className="ticker-move">
-        {[...TICKER_MESSAGES, ...TICKER_MESSAGES].map((msg, i) => (
-          <span key={i} className="inline-block px-8 text-xs font-medium opacity-90"><span className="text-[#00E5FF] mr-2">✦</span> {msg}</span>
-        ))}
-      </div>
-    </div>
-  </div>
-);
 
 const HeroSlider = () => {
   const [cur, setCur] = useState(0);
@@ -275,14 +237,14 @@ const HeroSlider = () => {
   ];
   useEffect(() => { const i = setInterval(() => setCur(p => (p+1)%3), 5000); return () => clearInterval(i); }, []);
   return (
-    <div className="relative z-10 mx-auto max-w-5xl mb-16 pt-10">
+    <div className="relative z-10 mx-auto max-w-5xl mb-12">
       <div className="flex justify-center mb-6">
         <div className="inline-flex items-center gap-2 rounded-full border border-white/60 bg-white/40 px-5 py-2 shadow-sm backdrop-blur-md animate-bounce">
           <Sparkles size={16} className="text-yellow-500 fill-yellow-500" />
           <span className="text-xs font-bold uppercase tracking-widest text-[#002147]">Cổng thông tin Sinh viên</span>
         </div>
       </div>
-      <div className="grid grid-cols-1 relative min-h-[250px]">
+      <div className="grid grid-cols-1 relative min-h-[200px]">
         {slides.map((s, i) => (
           <div key={i} className={`col-start-1 row-start-1 transition-all duration-1000 flex flex-col items-center ${i === cur ? 'opacity-100' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
             <h1 className="text-5xl md:text-7xl font-black text-[#002147] text-center leading-[1.1] mb-6">
@@ -368,7 +330,7 @@ const FilterModal = ({ filter, setFilter, onClose }: { filter: FilterState, setF
 );
 
 // ============================================================================
-// 6. MAIN PAGE
+// 7. MAIN PAGE
 // ============================================================================
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
@@ -387,12 +349,9 @@ const HomePage: React.FC = () => {
 
   return (
     <div className="relative min-h-screen selection:bg-[#0047AB] selection:text-white pb-20 font-sans">
-      <GlobalStyles />
-      <div className="grain-overlay"></div>
+      <VisualEngine />
       <div className="aurora-bg"></div>
       
-      <LiveTicker />
-
       {showFilterModal && <FilterModal filter={filter} setFilter={setFilter} onClose={() => setShowFilterModal(false)} />}
       
       {/* Quick View Modal */}
@@ -417,13 +376,10 @@ const HomePage: React.FC = () => {
       )}
 
       {/* Hero Section */}
-      <section className="relative px-4 pb-24 text-center overflow-hidden">
-        <div className="absolute inset-0 pointer-events-none opacity-20 overflow-hidden">
-           <BookOpen size={100} className="animate-float absolute left-[5%] top-[10%] text-[#0047AB]"/>
-           <Monitor size={120} className="animate-float delay-100 absolute right-[10%] top-[20%] text-[#00E5FF]"/>
-           <Smartphone size={80} className="animate-float delay-200 absolute left-[15%] bottom-[20%] text-indigo-400"/>
-           <Rocket size={150} className="animate-float delay-300 absolute right-[5%] bottom-[10%] text-purple-400 opacity-50"/>
-        </div>
+      <section className="relative px-4 pb-24 pt-24 text-center overflow-hidden">
+        {/* NEW: CYBER GRID ANIMATION REPLACING OLD FLOATERS */}
+        <div className="cyber-grid"></div>
+
         <HeroSlider />
         <div className="max-w-2xl mx-auto relative z-20 mb-16 animate-enter" style={{animationDelay: "400ms"}}>
           <div className="absolute -inset-2 bg-gradient-to-r from-[#0047AB] to-[#00E5FF] rounded-full opacity-20 blur-2xl animate-pulse"></div>
@@ -464,33 +420,9 @@ const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* Top Sellers */}
-      <section className="mb-20">
-        <div className="flex items-center justify-between mb-8 px-4 max-w-7xl mx-auto">
-          <h2 className="text-2xl font-black text-[#002147] flex items-center gap-2"><Award className="text-yellow-500 fill-yellow-500"/> Top Sinh viên năng động</h2>
-          <Link to="/rankings" className="text-[#0047AB] font-bold text-sm hover:underline flex items-center gap-1">Xem tất cả <ChevronRight size={16}/></Link>
-        </div>
-        <div className="flex gap-4 overflow-x-auto px-4 pb-4 hide-scrollbar snap-x max-w-7xl mx-auto">
-          {[1,2,3,4,5,6].map(i => (
-            <div key={i} className="min-w-[220px] glass-card p-5 rounded-2xl flex flex-col items-center text-center snap-start hover:bg-white transition-colors cursor-pointer group">
-              <div className="relative">
-                <img src={`https://ui-avatars.com/api/?name=User+${i}&background=random`} className="w-20 h-20 rounded-full border-4 border-white shadow-md mb-3 group-hover:scale-110 transition-transform"/>
-                <div className="absolute -bottom-2 -right-2 bg-yellow-400 text-[#002147] text-[10px] font-black px-2 py-1 rounded-full border-2 border-white shadow-sm flex items-center gap-1"><Star size={8} className="fill-[#002147]"/> TOP {i}</div>
-              </div>
-              <h4 className="font-bold text-[#002147] mt-2">Nguyễn Văn {String.fromCharCode(64+i)}</h4>
-              <p className="text-xs text-slate-500 mb-3 font-medium">Khoa KH & KT Máy Tính</p>
-              <div className="flex gap-2 w-full">
-                 <div className="flex-1 bg-blue-50 rounded-lg py-1"><p className="text-[10px] text-slate-400 uppercase font-bold">Đã bán</p><p className="text-sm font-black text-[#0047AB]">{100 - i * 5}</p></div>
-                 <div className="flex-1 bg-green-50 rounded-lg py-1"><p className="text-[10px] text-slate-400 uppercase font-bold">Đánh giá</p><p className="text-sm font-black text-green-600">4.{9-i}</p></div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
       {/* Main Feed */}
       <section className="max-w-7xl mx-auto px-4 mb-32 min-h-[800px]">
-        <div className="sticky top-10 z-40 bg-white/95 backdrop-blur-2xl border-y border-white/20 py-5 mb-12 -mx-4 px-6 shadow-xl rounded-full flex items-center justify-between overflow-x-auto hide-scrollbar border border-slate-100">
+        <div className="sticky top-0 z-40 bg-white/95 backdrop-blur-2xl border-y border-white/20 py-5 mb-12 -mx-4 px-6 shadow-xl rounded-full flex items-center justify-between overflow-x-auto hide-scrollbar border border-slate-100">
           <div className="flex gap-3">
             {[
               { id: "all", l: "Tất cả", i: <Grid size={18}/> },
@@ -591,7 +523,7 @@ const HomePage: React.FC = () => {
           {TESTIMONIALS.map((t) => (
             <div key={t.id} className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 italic relative hover:shadow-lg transition-shadow">
               <div className="flex items-center gap-4 mb-6">
-                <img src={t.avatar} className="w-12 h-12 rounded-full border-2 border-blue-100"/>
+                <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center font-bold text-[#0047AB]">{t.name.charAt(0)}</div>
                 <div><h4 className="font-bold text-[#002147]">{t.name}</h4><p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{t.role}</p></div>
               </div>
               <p className="text-slate-600 mb-6 text-sm leading-relaxed relative z-10">"{t.content}"</p>
