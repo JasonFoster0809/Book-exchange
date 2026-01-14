@@ -1,25 +1,14 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { 
-  LogIn, Bell, MessageCircle, PlusCircle, Home, ShoppingBag, 
-  User, LogOut, ShieldCheck, Heart, Package, Info 
+  LogIn, PlusCircle, Home, ShoppingBag, 
+  User, LogOut, ShieldCheck, Heart, Package 
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../services/supabase';
 import { useTranslation } from 'react-i18next';
 import LanguageSwitcher from './LanguageSwitcher'; 
-import { playNotificationSound } from '../utils/audio';
-// --- IMPORT LOGO BK ---
+import NotificationMenu from './NotificationMenu'; // <--- IMPORT COMPONENT MỚI
 import bkLogo from '../assets/logo.jpg'; 
-
-interface Notification {
-  id: string;
-  content: string;
-  link: string;
-  is_read: boolean;
-  type?: 'system' | 'comment' | 'offer' | 'verification';
-  created_at: string;
-}
 
 const Navbar: React.FC = () => {
   const { user, signOut, isAdmin } = useAuth();
@@ -28,82 +17,23 @@ const Navbar: React.FC = () => {
   const { t } = useTranslation();
 
   const userMenuRef = useRef<HTMLDivElement>(null);
-  const notiMenuRef = useRef<HTMLDivElement>(null);
-  
   const [showUserMenu, setShowUserMenu] = useState(false);
-  const [showNotiMenu, setShowNotiMenu] = useState(false);
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  
-  const unreadCount = notifications.filter(n => !n.is_read).length;
 
   const isActive = (path: string) => location.pathname === path 
-    ? 'text-[#034EA2] border-[#034EA2] font-bold' // Đổi màu active sang xanh BK
+    ? 'text-[#034EA2] border-[#034EA2] font-bold' 
     : 'text-gray-500 border-transparent hover:text-gray-900 hover:border-gray-300';
 
+  // Xử lý đóng User Menu khi click ra ngoài
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       const target = event.target as Node;
       if (userMenuRef.current && !userMenuRef.current.contains(target)) {
         setShowUserMenu(false);
       }
-      if (notiMenuRef.current && !notiMenuRef.current.contains(target)) {
-        setShowNotiMenu(false);
-      }
     };
-
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
-
-  useEffect(() => {
-    if (!user) {
-      setNotifications([]);
-      return;
-    }
-
-    const fetchNotifications = async () => {
-      const { data } = await supabase
-        .from('notifications')
-        .select('*')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(10);
-      if (data) setNotifications(data);
-    };
-
-    fetchNotifications();
-
-    const channel = supabase.channel(`noti-${user.id}`)
-      .on('postgres_changes', { 
-        event: 'INSERT', 
-        schema: 'public', 
-        table: 'notifications', 
-        filter: `user_id=eq.${user.id}` 
-      }, (payload) => {
-        setNotifications(prev => [payload.new as Notification, ...prev]);
-        playNotificationSound(); 
-      })
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user]);
-
-  const handleRead = async (noti: Notification) => {
-    if (!noti.is_read) {
-      await supabase.from('notifications').update({ is_read: true }).eq('id', noti.id);
-      setNotifications(prev => prev.map(n => n.id === noti.id ? { ...n, is_read: true } : n));
-    }
-    setShowNotiMenu(false);
-    if (noti.link) navigate(noti.link);
-  };
-
-  const handleMarkAllRead = async () => {
-    if (!user) return;
-    await supabase.from('notifications').update({ is_read: true }).eq('user_id', user.id).eq('is_read', false);
-    setNotifications(prev => prev.map(n => ({ ...n, is_read: true })));
-  };
 
   const handleLogout = async () => {
     await signOut();
@@ -111,22 +41,13 @@ const Navbar: React.FC = () => {
     navigate('/auth');
   };
 
-  const getNotiIcon = (type?: string) => {
-    switch(type) {
-      case 'verification': return <ShieldCheck className="w-5 h-5 text-green-600" />;
-      case 'comment': return <MessageCircle className="w-5 h-5 text-blue-600" />;
-      case 'offer': return <ShoppingBag className="w-5 h-5 text-yellow-600" />;
-      default: return <Info className="w-5 h-5 text-gray-500" />;
-    }
-  };
-
   return (
     <nav className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm transition-all duration-300">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex justify-between h-16">
           
+          {/* --- LEFT SIDE: LOGO & LINKS --- */}
           <div className="flex">
-            {/* --- LOGO BÁCH KHOA --- */}
             <Link to="/" className="flex-shrink-0 flex items-center group">
               <img 
                 src={bkLogo} 
@@ -152,6 +73,7 @@ const Navbar: React.FC = () => {
             </div>
           </div>
           
+          {/* --- RIGHT SIDE: ACTIONS --- */}
           <div className="flex items-center gap-2 sm:gap-4">
             <div className="hidden sm:block">
               <LanguageSwitcher />
@@ -164,7 +86,7 @@ const Navbar: React.FC = () => {
             {user ? (
               <div className="flex items-center gap-1 sm:gap-3">
                 
-                {/* Saved Button */}
+                {/* Saved Items */}
                 <Link 
                   to={location.pathname === '/saved' ? '/market' : '/saved'} 
                   className="hidden sm:block p-2 rounded-full text-gray-500 hover:bg-gray-100 transition-colors" 
@@ -173,59 +95,16 @@ const Navbar: React.FC = () => {
                   <Heart className={`h-6 w-6 ${location.pathname === '/saved' ? 'text-red-500 fill-red-500' : ''}`} />
                 </Link>
 
-                {/* Notifications */}
-                <div className="relative" ref={notiMenuRef}>
-                  <button 
-                    onClick={() => {
-                      setShowNotiMenu(!showNotiMenu);
-                      setShowUserMenu(false);
-                    }} 
-                    className="p-2 rounded-full text-gray-500 hover:bg-gray-100 focus:outline-none relative transition-colors"
-                  >
-                    <Bell className={`h-6 w-6 ${unreadCount > 0 ? 'text-[#034EA2] fill-current' : ''}`} />
-                    {unreadCount > 0 && (
-                      <span className="absolute top-1.5 right-1.5 h-2.5 w-2.5 bg-red-500 rounded-full ring-2 ring-white animate-pulse"></span>
-                    )}
-                  </button>
+                {/* ========================================= */}
+                {/* 🔥 THAY THẾ TOÀN BỘ LOGIC NOTI CŨ Ở ĐÂY 🔥 */}
+                {/* ========================================= */}
+                <NotificationMenu />
+                {/* ========================================= */}
 
-                  {showNotiMenu && (
-                    <div className="absolute right-0 mt-2 w-80 bg-white rounded-xl shadow-2xl py-2 ring-1 ring-black ring-opacity-5 max-h-[450px] overflow-y-auto z-50 border border-gray-100 animate-in fade-in slide-in-from-top-2">
-                      <div className="px-4 py-2 border-b border-gray-50 flex justify-between items-center bg-gray-50/50">
-                        <span className="font-bold text-gray-900">Thông báo</span>
-                        {unreadCount > 0 && (
-                            <div className="flex gap-2">
-                                <span className="text-[10px] bg-blue-100 text-[#034EA2] px-2 py-0.5 rounded-full font-bold">{unreadCount} mới</span>
-                                <button onClick={handleMarkAllRead} className="text-[10px] text-gray-500 hover:text-[#034EA2] underline">Đọc hết</button>
-                            </div>
-                        )}
-                      </div>
-                      {notifications.length === 0 ? (
-                        <div className="px-4 py-8 text-center text-sm text-gray-400">Chưa có thông báo nào</div>
-                      ) : (
-                        notifications.map(n => (
-                          <div key={n.id} onClick={() => handleRead(n)} className={`px-4 py-3 hover:bg-gray-50 cursor-pointer border-b border-gray-50 last:border-0 transition-colors flex gap-3 ${!n.is_read ? 'bg-blue-50/30' : ''}`}>
-                            <div className="mt-0.5 flex-shrink-0">
-                                {getNotiIcon(n.type)}
-                            </div>
-                            <div>
-                                <p className={`text-sm ${!n.is_read ? 'text-gray-900 font-bold' : 'text-gray-600'}`}>{n.content}</p>
-                                <p className="text-[10px] text-gray-400 mt-1">{new Date(n.created_at).toLocaleString('vi-VN')}</p>
-                            </div>
-                            {!n.is_read && <div className="w-2 h-2 bg-[#034EA2] rounded-full mt-2 flex-shrink-0 ml-auto"></div>}
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* User Menu */}
+                {/* User Menu Dropdown */}
                 <div className="relative" ref={userMenuRef}>
                   <button 
-                    onClick={() => {
-                      setShowUserMenu(!showUserMenu);
-                      setShowNotiMenu(false);
-                    }} 
+                    onClick={() => setShowUserMenu(!showUserMenu)} 
                     className="flex items-center p-0.5 rounded-full border-2 border-transparent hover:border-blue-200 transition-all focus:outline-none ml-1"
                   >
                     <img 
