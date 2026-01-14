@@ -2,9 +2,10 @@ import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Users, Package, AlertTriangle, 
-  Search, LogOut, CheckCircle, Trash2,XCircle,TrendingUp,
+  Search, LogOut, CheckCircle, Trash2, 
   Shield, Ban, Eye, ChevronLeft, ChevronRight,
-  Activity, Calendar, ArrowUpRight
+  Activity, Calendar, ArrowUpRight, 
+  TrendingUp, XCircle // <--- ĐÃ BỔ SUNG IMPORT TẠI ĐÂY
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -35,7 +36,7 @@ interface ActivityLog {
   time: string;
 }
 
-// Helper để lấy tên người bán an toàn (Fix lỗi Array/Object)
+// Helper để lấy tên người bán an toàn
 const getSellerName = (seller: any) => {
   if (Array.isArray(seller)) return seller[0]?.name || 'Ẩn danh';
   return seller?.name || 'Ẩn danh';
@@ -218,7 +219,7 @@ const AdminPage = () => {
 
       setChartData(Array.from(chartMap.entries()).map(([date, val]) => ({ date, ...val })).reverse());
 
-      // 4. Activity Feed (Merged Stream) - FIX LỖI TẠI ĐÂY
+      // 4. Activity Feed (Merged Stream)
       const { data: uLogs } = await supabase.from('profiles').select('id, name, created_at').order('created_at', { ascending: false }).limit(5);
       const { data: pLogs } = await supabase.from('products').select('id, title, created_at, seller:profiles(name)').order('created_at', { ascending: false }).limit(5);
 
@@ -227,7 +228,7 @@ const AdminPage = () => {
         ...(pLogs?.map(p => ({ 
             id: p.id, 
             type: 'new_product', 
-            message: `${getSellerName(p.seller)} đăng bán "${p.title}"`, // <-- FIX HERE
+            message: `${getSellerName(p.seller)} đăng bán "${p.title}"`,
             time: p.created_at 
         } as ActivityLog)) || [])
       ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 10);
@@ -446,7 +447,7 @@ const AdminPage = () => {
                       <tr key={p.id}>
                         <td className="font-bold text-slate-700 max-w-xs truncate">{p.title}</td>
                         <td className="font-mono text-blue-600 font-bold">{new Intl.NumberFormat('vi-VN').format(p.price)}₫</td>
-                        <td>{getSellerName(p.seller)}</td> {/* <-- DÙNG HÀM GET SELLER NAME */}
+                        <td>{getSellerName(p.seller)}</td>
                         <td>{new Date(p.created_at).toLocaleDateString('vi-VN')}</td>
                         <td className="text-right">
                           <button onClick={() => window.open(`/product/${p.id}`, '_blank')} className="p-2 text-blue-500 hover:bg-blue-50 rounded"><Eye size={18}/></button>
@@ -485,4 +486,3 @@ const AdminPage = () => {
 };
 
 export default AdminPage;
-
