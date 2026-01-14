@@ -6,7 +6,7 @@ import { useToast } from '../contexts/ToastContext';
 import { 
   Send, Image as ImageIcon, Phone, ArrowLeft, Loader2, ShoppingBag, 
   CheckCircle2, Search, MessageCircle, MoreVertical, X, AlertCircle,
-  Truck, DollarSign, XCircle, Store, User, Flag, Trash
+  Truck, DollarSign, XCircle, Store, User, Flag, Trash, CheckCheck 
 } from 'lucide-react'; 
 import { playMessageSound } from '../utils/audio';
 
@@ -40,6 +40,12 @@ const VisualEngine = () => (
     
     .animate-slide-in { animation: slideIn 0.3s ease-out forwards; }
     @keyframes slideIn { from { opacity: 0; transform: translateY(-10px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* Typing Dots Animation */
+    .typing-dot { width: 6px; height: 6px; background: #94a3b8; border-radius: 50%; animation: typing 1.4s infinite ease-in-out both; }
+    .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+    .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+    @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 
     /* Dropdown Menu */
     .dropdown-menu {
@@ -84,9 +90,14 @@ const ChatPage: React.FC = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [loadingConv, setLoadingConv] = useState(true);
-  const [isMenuOpen, setIsMenuOpen] = useState(false); // State cho menu ba chấm
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
+  const [uploading, setUploading] = useState(false); // State upload ảnh
+  const [partnerTyping, setPartnerTyping] = useState(false); // State typing
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const typingTimeoutRef = useRef<any>(null);
 
   // 1. Init
   useEffect(() => { if(user) fetchConversations(); }, [user]);
@@ -104,7 +115,7 @@ const ChatPage: React.FC = () => {
     initChat();
   }, [partnerIdParam, productIdParam, user]);
 
-  // 3. Realtime
+  // 3. Realtime & Typing
   useEffect(() => {
     if (!activeConversation) return;
     fetchMessages(activeConversation);
@@ -112,21 +123,21 @@ const ChatPage: React.FC = () => {
 
     const channel = supabase.channel(`chat_room:${activeConversation}`)
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversation}` }, (payload) => {
+            const newMsg = payload.new;
             setMessages(prev => {
-                if (prev.some(m => m.id === payload.new.id)) return prev;
-                return [...prev, payload.new];
+                if (prev.some(m => m.id === newMsg.id)) return prev;
+                return [...prev, newMsg];
             });
-            if (user && payload.new.sender_id !== user.id) playMessageSound();
+            if (user && newMsg.sender_id !== user.id) {
+                playMessageSound();
+            }
             setTimeout(scrollToBottom, 100);
         })
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, (payload) => {
-            if (targetProduct && payload.new.id === targetProduct.id) {
-                setTargetProduct({ ...targetProduct, ...payload.new });
-            }
-        })
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `id=eq.${activeConversation}` }, (payload) => {
-            if (payload.new.current_product_id !== payload.old.current_product_id) {
-                fetchPinnedProduct(activeConversation);
+        .on('broadcast', { event: 'typing' }, (payload) => {
+            if (payload.payload.userId !== user?.id) {
+                setPartnerTyping(true);
+                clearTimeout(typingTimeoutRef.current);
+                typingTimeoutRef.current = setTimeout(() => setPartnerTyping(false), 2000);
             }
         })
         .subscribe();
@@ -207,16 +218,51 @@ const ChatPage: React.FC = () => {
       if (data) setPartnerProfile(data);
   };
 
-  // --- LOGIC GIAO DỊCH ---
+  // --- LOGIC GIAO DỊCH & CHAT ---
   const isSeller = user && targetProduct && user.id === targetProduct.seller_id;
   const isBuyer = user && targetProduct && user.id !== targetProduct.seller_id;
 
-  const handleSendMessage = async (e?: React.FormEvent, content: string = newMessage) => {
+  const handleSendMessage = async (e?: React.FormEvent, content: string = newMessage, type: 'text' | 'image' = 'text') => {
       e?.preventDefault();
-      if (!content.trim() || !activeConversation || !user) return;
+      if ((!content.trim() && type === 'text') || !activeConversation || !user) return;
       setNewMessage('');
-      const { error } = await supabase.from('messages').insert({ conversation_id: activeConversation, sender_id: user.id, content: content, type: 'text' });
+      
+      const { error } = await supabase.from('messages').insert({ 
+          conversation_id: activeConversation, 
+          sender_id: user.id, 
+          content: content, 
+          type: type 
+      });
+      
       if (!error) await supabase.from('conversations').update({ updated_at: new Date().toISOString() }).eq('id', activeConversation);
+  };
+
+  const handleTyping = (e: any) => {
+      setNewMessage(e.target.value);
+      if (activeConversation) {
+          supabase.channel(`chat_room:${activeConversation}`).send({
+              type: 'broadcast', event: 'typing', payload: { userId: user?.id }
+          });
+      }
+  };
+
+  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+      if (!e.target.files || !e.target.files.length || !user || !activeConversation) return;
+      setUploading(true);
+      const file = e.target.files[0];
+      const fileName = `${activeConversation}/${Date.now()}_${file.name}`; // Organize by conversation
+
+      try {
+          const { error: uploadError } = await supabase.storage.from('chat-images').upload(fileName, file);
+          if (uploadError) throw uploadError;
+          
+          const { data } = supabase.storage.from('chat-images').getPublicUrl(fileName);
+          await handleSendMessage(undefined, data.publicUrl, 'image');
+      } catch (err) {
+          addToast("Lỗi gửi ảnh: Cần tạo bucket 'chat-images' public", "error");
+      } finally {
+          setUploading(false);
+      }
   };
 
   const handleRequestDeal = async () => {
@@ -309,33 +355,33 @@ const ChatPage: React.FC = () => {
                {/* HEADER */}
                <div className="h-16 border-b border-slate-200 bg-white/80 backdrop-blur-md flex items-center px-4 justify-between shadow-sm z-30 sticky top-0">
                   <div className="flex items-center gap-3">
-                     <button onClick={() => setActiveConversation(null)} className="md:hidden p-2 hover:bg-slate-100 rounded-full text-slate-600"><ArrowLeft size={20}/></button>
-                     {partnerProfile && (
-                        <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate(`/profile/${partnerProfile.id}`)}>
-                           <div className="relative">
-                               <img src={partnerProfile.avatar_url || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full border border-slate-200 object-cover"/>
-                               <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
-                           </div>
-                           <div>
-                              <div className="flex items-center gap-2">
-                                <h3 className="font-bold text-sm text-slate-800">{partnerProfile.name}</h3>
-                                {/* --- TAG PHÂN BIỆT NGƯỜI MUA / BÁN --- */}
-                                {targetProduct && (
-                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isBuyer ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'}`}>
-                                        {isBuyer ? 'Người bán' : 'Người mua'}
-                                    </span>
-                                )}
-                              </div>
-                              <span className="text-xs text-green-600 font-medium">Đang hoạt động</span>
-                           </div>
-                        </div>
-                     )}
+                      <button onClick={() => setActiveConversation(null)} className="md:hidden p-2 -ml-2 text-slate-600"><ArrowLeft size={20}/></button>
+                      {partnerProfile && (
+                         <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate(`/profile/${partnerProfile.id}`)}>
+                            <div className="relative">
+                                <img src={partnerProfile.avatar_url || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full border border-slate-200 object-cover"/>
+                                <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
+                            </div>
+                            <div>
+                               <div className="flex items-center gap-2">
+                                 <h3 className="font-bold text-sm text-slate-800">{partnerProfile.name}</h3>
+                                 {targetProduct && (
+                                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isBuyer ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'}`}>
+                                         {isBuyer ? 'Người bán' : 'Người mua'}
+                                     </span>
+                                 )}
+                               </div>
+                               <span className="text-xs text-green-600 font-medium flex items-center gap-1">
+                                  {partnerTyping ? 'Đang soạn tin...' : 'Đang hoạt động'}
+                               </span>
+                            </div>
+                         </div>
+                      )}
                   </div>
                   <div className="flex gap-2 relative" ref={menuRef}>
                       <button className="p-2 text-slate-500 hover:bg-slate-100 rounded-full"><Phone size={20}/></button>
                       <button onClick={() => setIsMenuOpen(!isMenuOpen)} className="p-2 text-slate-500 hover:bg-slate-100 rounded-full"><MoreVertical size={20}/></button>
                       
-                      {/* --- MENU BA CHẤM --- */}
                       {isMenuOpen && (
                           <div className="dropdown-menu">
                               <button onClick={handleViewProfile} className="dropdown-item"><User size={16}/> Xem trang cá nhân</button>
@@ -351,84 +397,98 @@ const ChatPage: React.FC = () => {
                {/* TRANSACTION DASHBOARD */}
                {targetProduct && (
                   <div className="transaction-card p-4 animate-slide-in">
-                     <div className="flex gap-4 items-start bg-white p-3 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
-                        <div className={`absolute top-0 left-0 bottom-0 w-1.5 ${targetProduct.status === 'sold' ? 'bg-slate-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}></div>
-                        <img src={targetProduct.images?.[0] || 'https://via.placeholder.com/80'} className="w-16 h-16 rounded-lg object-cover border border-slate-100 bg-slate-50 ml-2"/>
-                        <div className="flex-1 min-w-0">
-                           <div className="flex items-center gap-2 mb-1">
-                              <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md text-white uppercase tracking-wider ${targetProduct.status === 'sold' ? 'bg-slate-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}>
-                                 {targetProduct.status === 'available' ? 'ĐANG BÁN' : targetProduct.status === 'pending' ? 'ĐANG GIAO DỊCH' : 'ĐÃ BÁN'}
-                              </span>
-                              <h4 className="font-bold text-slate-800 text-sm truncate">{targetProduct.title}</h4>
-                           </div>
-                           <p className="text-[#00418E] font-black text-lg">{targetProduct.price === 0 ? 'Miễn phí' : `${targetProduct.price.toLocaleString()}đ`}</p>
-                        </div>
-                     </div>
+                      <div className="flex gap-4 items-start bg-white p-3 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
+                         <div className={`absolute top-0 left-0 bottom-0 w-1.5 ${targetProduct.status === 'sold' ? 'bg-slate-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}></div>
+                         <img src={targetProduct.images?.[0] || 'https://via.placeholder.com/80'} className="w-16 h-16 rounded-lg object-cover border border-slate-100 bg-slate-50 ml-2"/>
+                         <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1">
+                               <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md text-white uppercase tracking-wider ${targetProduct.status === 'sold' ? 'bg-slate-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}>
+                                  {targetProduct.status === 'available' ? 'ĐANG BÁN' : targetProduct.status === 'pending' ? 'ĐANG GIAO DỊCH' : 'ĐÃ BÁN'}
+                               </span>
+                               <h4 className="font-bold text-slate-800 text-sm truncate">{targetProduct.title}</h4>
+                            </div>
+                            <p className="text-[#00418E] font-black text-lg">{targetProduct.price === 0 ? 'Miễn phí' : `${targetProduct.price.toLocaleString()}đ`}</p>
+                         </div>
+                      </div>
 
-                     {/* ACTIONS */}
-                     <div className="flex gap-2 mt-3">
-                        {isBuyer && targetProduct.status === 'available' && (
-                           <button onClick={handleRequestDeal} disabled={isProcessing} className="flex-1 bg-[#00418E] hover:bg-[#00306b] text-white py-3 rounded-xl font-bold text-sm shadow-sm transition-all flex justify-center items-center gap-2 active:scale-95">
-                              {isProcessing ? <Loader2 size={16} className="animate-spin"/> : <ShoppingBag size={16}/>} Yêu cầu mua
-                           </button>
-                        )}
-                        
-                        {/* NÚT XÁC NHẬN BÁN (DÀNH CHO NGƯỜI BÁN) */}
-                        {isSeller && targetProduct.status === 'available' && (
-                           <button onClick={handleConfirmSell} disabled={isProcessing} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-bold text-sm shadow-sm transition-all flex justify-center items-center gap-2 active:scale-95">
-                              <CheckCircle2 size={18}/> Xác nhận bán cho người này
-                           </button>
-                        )}
+                      {/* ACTIONS */}
+                      <div className="flex gap-2 mt-3">
+                         {isBuyer && targetProduct.status === 'available' && (
+                            <button onClick={handleRequestDeal} disabled={isProcessing} className="flex-1 bg-[#00418E] hover:bg-[#00306b] text-white py-3 rounded-xl font-bold text-sm shadow-sm transition-all flex justify-center items-center gap-2 active:scale-95">
+                               {isProcessing ? <Loader2 size={16} className="animate-spin"/> : <ShoppingBag size={16}/>} Yêu cầu mua
+                            </button>
+                         )}
+                         
+                         {isSeller && targetProduct.status === 'available' && (
+                            <button onClick={handleConfirmSell} disabled={isProcessing} className="flex-1 bg-green-600 hover:bg-green-700 text-white py-3 rounded-xl font-bold text-sm shadow-sm transition-all flex justify-center items-center gap-2 active:scale-95">
+                               <CheckCircle2 size={18}/> Xác nhận bán cho người này
+                            </button>
+                         )}
 
-                        {isSeller && targetProduct.status === 'pending' && (
-                           <>
-                              <button onClick={handleFinishDeal} disabled={isProcessing} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-sm shadow-sm flex justify-center items-center gap-2"><DollarSign size={16}/> Đã giao xong</button>
-                              <button onClick={handleCancelDeal} disabled={isProcessing} className="px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-sm flex items-center gap-1"><XCircle size={16}/> Hủy</button>
-                           </>
-                        )}
+                         {isSeller && targetProduct.status === 'pending' && (
+                            <>
+                               <button onClick={handleFinishDeal} disabled={isProcessing} className="flex-1 bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-bold text-sm shadow-sm flex justify-center items-center gap-2"><DollarSign size={16}/> Đã giao xong</button>
+                               <button onClick={handleCancelDeal} disabled={isProcessing} className="px-4 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-xl font-bold text-sm flex items-center gap-1"><XCircle size={16}/> Hủy</button>
+                            </>
+                         )}
 
-                        {isBuyer && targetProduct.status === 'pending' && (
-                           <div className="flex-1 bg-orange-50 text-orange-700 py-3 rounded-xl font-bold text-xs text-center border border-orange-200 flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin"/> Đang chờ người bán xác nhận hoàn tất...</div>
-                        )}
+                         {isBuyer && targetProduct.status === 'pending' && (
+                            <div className="flex-1 bg-orange-50 text-orange-700 py-3 rounded-xl font-bold text-xs text-center border border-orange-200 flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin"/> Đang chờ người bán xác nhận hoàn tất...</div>
+                         )}
 
-                        {targetProduct.status === 'sold' && (
-                           <div className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-xl font-bold text-xs text-center border border-slate-200 flex justify-center items-center gap-2"><Truck size={16}/> Giao dịch đã hoàn tất</div>
-                        )}
-                     </div>
+                         {targetProduct.status === 'sold' && (
+                            <div className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-xl font-bold text-xs text-center border border-slate-200 flex justify-center items-center gap-2"><Truck size={16}/> Giao dịch đã hoàn tất</div>
+                         )}
+                      </div>
                   </div>
                )}
 
                {/* MESSAGES */}
                <div className="flex-1 overflow-y-auto p-4 space-y-3 chat-scrollbar bg-[#F8FAFC]">
                   {messages.map((msg, idx) => {
-                     const isMe = msg.sender_id === user?.id;
-                     const isSystem = msg.content?.includes("TÔI MUỐN MUA") || msg.content?.includes("ĐÃ XÁC NHẬN") || msg.content?.includes("GIAO DỊCH") || msg.content?.includes("ĐÃ HỦY");
-                     if (isSystem) return (<div key={idx} className="flex justify-center my-6"><div className="bg-slate-100 border border-slate-200 text-slate-600 px-4 py-2 rounded-full text-xs font-bold shadow-sm flex items-center gap-2"><AlertCircle size={12} className="text-[#00418E]"/><span className="whitespace-pre-wrap text-center">{msg.content}</span></div></div>);
-                     return (
-                        <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-slide-in`}>
-                           {!isMe && <img src={partnerProfile?.avatar_url} className="w-8 h-8 rounded-full mr-2 self-end border border-slate-200 bg-white"/>}
-                           <div className={`msg-bubble ${isMe ? 'msg-me' : 'msg-you'}`}>
-                              {msg.type === 'image' ? <img src={msg.image_url} className="rounded-lg max-w-[200px] border border-white/20"/> : <p>{msg.content}</p>}
-                           </div>
-                        </div>
-                     );
+                      const isMe = msg.sender_id === user?.id;
+                      const isSystem = msg.content?.includes("TÔI MUỐN MUA") || msg.content?.includes("ĐÃ XÁC NHẬN") || msg.content?.includes("GIAO DỊCH") || msg.content?.includes("ĐÃ HỦY");
+                      if (isSystem) return (<div key={idx} className="flex justify-center my-6"><div className="bg-slate-100 border border-slate-200 text-slate-600 px-4 py-2 rounded-full text-xs font-bold shadow-sm flex items-center gap-2"><AlertCircle size={12} className="text-[#00418E]"/><span className="whitespace-pre-wrap text-center">{msg.content}</span></div></div>);
+                      return (
+                         <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-slide-in`}>
+                            {!isMe && <img src={partnerProfile?.avatar_url} className="w-8 h-8 rounded-full mr-2 self-end border border-slate-200 bg-white"/>}
+                            <div className={`msg-bubble ${isMe ? 'msg-me' : 'msg-you'}`}>
+                               {msg.type === 'image' ? <img src={msg.content} className="rounded-lg max-w-[200px] border border-white/20 cursor-pointer" onClick={() => window.open(msg.content, '_blank')} /> : <p>{msg.content}</p>}
+                               <div className={`flex items-center justify-end gap-1 mt-1 ${isMe ? 'text-blue-100' : 'text-slate-400'}`}>
+                                  <span className="text-[10px]">{new Date(msg.created_at).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'})}</span>
+                                  {isMe && <CheckCheck size={12} />}
+                               </div>
+                            </div>
+                         </div>
+                      );
                   })}
+                  {partnerTyping && (
+                     <div className="flex gap-2 items-end">
+                        <img src={partnerProfile?.avatar_url} className="w-6 h-6 rounded-full" />
+                        <div className="bg-white border border-slate-100 px-4 py-3 rounded-2xl rounded-bl-sm flex gap-1 items-center shadow-sm">
+                           <div className="typing-dot"></div><div className="typing-dot"></div><div className="typing-dot"></div>
+                        </div>
+                     </div>
+                  )}
                   <div ref={scrollRef} className="h-2"/>
                </div>
 
                {/* INPUT */}
                <div className="p-3 bg-white border-t border-slate-200">
                   <div className="flex gap-2 overflow-x-auto pb-3 chat-scrollbar">
-                     {QUICK_REPLIES.map((t, i) => (
-                        <button key={i} onClick={() => handleSendMessage(undefined, t)} className="whitespace-nowrap px-3 py-1.5 bg-slate-50 border border-slate-200 text-xs rounded-full hover:bg-[#00418E] hover:text-white hover:border-[#00418E] text-slate-600 font-bold transition-all">{t}</button>
-                     ))}
+                      {QUICK_REPLIES.map((t, i) => (
+                         <button key={i} onClick={() => handleSendMessage(undefined, t)} className="whitespace-nowrap px-3 py-1.5 bg-slate-50 border border-slate-200 text-xs rounded-full hover:bg-[#00418E] hover:text-white hover:border-[#00418E] text-slate-600 font-bold transition-all">{t}</button>
+                      ))}
                   </div>
                   <form onSubmit={(e) => handleSendMessage(e)} className="flex items-center gap-2">
-                     <button type="button" className="p-2.5 text-slate-400 hover:text-[#00418E] hover:bg-blue-50 rounded-full transition-colors"><ImageIcon size={22}/></button>
-                     <div className="flex-1 bg-slate-100 rounded-full px-5 py-3 focus-within:ring-2 focus-within:ring-[#00418E]/20 transition-all">
-                        <input value={newMessage} onChange={e => setNewMessage(e.target.value)} placeholder="Nhập tin nhắn..." className="w-full bg-transparent outline-none text-sm text-slate-800 placeholder:text-slate-400"/>
-                     </div>
-                     <button type="submit" disabled={!newMessage.trim()} className="p-3 bg-[#00418E] hover:bg-[#00306b] text-white rounded-full disabled:opacity-50 shadow-md transition-all active:scale-95"><Send size={20}/></button>
+                      <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleImageUpload} />
+                      <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2.5 text-slate-400 hover:text-[#00418E] hover:bg-blue-50 rounded-full transition-colors" disabled={uploading}>
+                          {uploading ? <Loader2 size={22} className="animate-spin"/> : <ImageIcon size={22}/>}
+                      </button>
+                      <div className="flex-1 bg-slate-100 rounded-full px-5 py-3 focus-within:ring-2 focus-within:ring-[#00418E]/20 transition-all">
+                         <input value={newMessage} onChange={handleTyping} placeholder="Nhập tin nhắn..." className="w-full bg-transparent outline-none text-sm text-slate-800 placeholder:text-slate-400"/>
+                      </div>
+                      <button type="submit" disabled={!newMessage.trim()} className="p-3 bg-[#00418E] hover:bg-[#00306b] text-white rounded-full disabled:opacity-50 shadow-md transition-all active:scale-95"><Send size={20}/></button>
                   </form>
                </div>
             </>
