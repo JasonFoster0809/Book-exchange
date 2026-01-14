@@ -4,7 +4,7 @@ import {
   Heart, MessageCircle, Share2, ArrowLeft, Eye, MapPin,
   Clock, Star, Box, ShieldCheck, Calendar, ArrowRight,
   Loader2, AlertTriangle, User, CheckCircle2, Flag, Edit3,
-  MessageSquare, Send, Trash2
+  MessageSquare, Send, Trash2, Trash
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -12,7 +12,9 @@ import { useToast } from "../contexts/ToastContext";
 import { useTranslation } from 'react-i18next';
 import { Product } from "../types";
 
-// --- STYLES & VISUALS ---
+// ============================================================================
+// 1. VISUAL ENGINE & STYLES (Giao diện đẹp)
+// ============================================================================
 const VisualEngine = () => (
   <style>{`
     :root { --primary: #00418E; }
@@ -53,7 +55,9 @@ const VisualEngine = () => (
   `}</style>
 );
 
-// --- INTERFACES ---
+// ============================================================================
+// 2. INTERFACES & UTILS
+// ============================================================================
 interface ProductDetail extends Product {
   seller?: {
     id: string;
@@ -73,9 +77,9 @@ interface Comment {
     name: string;
     avatar_url: string;
   };
+  parent_id?: string | null; // Hỗ trợ reply (optional)
 }
 
-// --- UTILS ---
 const timeAgo = (dateString: string) => {
   const date = new Date(dateString);
   const now = new Date();
@@ -89,6 +93,9 @@ const timeAgo = (dateString: string) => {
   return `${days} ngày trước`;
 };
 
+// ============================================================================
+// 3. MAIN COMPONENT
+// ============================================================================
 const ProductDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -96,22 +103,25 @@ const ProductDetailPage: React.FC = () => {
   const { addToast } = useToast();
   const { t } = useTranslation();
 
+  // --- STATE ---
   const [product, setProduct] = useState<ProductDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeImg, setActiveImg] = useState(0);
   const [isLiked, setIsLiked] = useState(false);
   
-  // Comment States
+  // Comment State
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState("");
   const [isPostingComment, setIsPostingComment] = useState(false);
+  const [replyTo, setReplyTo] = useState<Comment | null>(null); // Trả lời ai đó
 
-  // --- FETCH PRODUCT ---
+  // --- 1. FETCH PRODUCT & REALTIME VIEW ---
   useEffect(() => {
-    const fetchData = async () => {
+    const fetchProduct = async () => {
       if (!id) return;
       setLoading(true);
       try {
+        // A. Lấy thông tin sản phẩm
         const { data: pData, error } = await supabase
           .from("products")
           .select(`*, profiles:seller_id(id, name, avatar_url, verified_status, student_code)`)
@@ -132,9 +142,13 @@ const ProductDetailPage: React.FC = () => {
 
         setProduct(mappedProduct);
         
-        // Tăng view count
-        supabase.rpc("increment_view_count", { product_id: id });
+        // B. Tăng lượt xem (gọi RPC)
+        supabase.rpc("increment_view_count", { product_id: id }).then(() => {
+             // Cập nhật local state ngay để mượt mà
+             setProduct(prev => prev ? ({...prev, view_count: (prev.view_count || 0) + 1}) : null);
+        });
 
+        // C. Kiểm tra đã Like chưa
         if (currentUser) {
           const { data: sData } = await supabase
             .from("saved_products")
@@ -151,10 +165,20 @@ const ProductDetailPage: React.FC = () => {
         setLoading(false);
       }
     };
-    fetchData();
+    fetchProduct();
+
+    // D. Realtime View Count (Lắng nghe thay đổi của sản phẩm)
+    if (id) {
+        const productChannel = supabase.channel(`product_view_${id}`)
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products', filter: `id=eq.${id}` }, (payload) => {
+             setProduct(prev => prev ? { ...prev, ...payload.new } : null);
+          })
+          .subscribe();
+        return () => { supabase.removeChannel(productChannel); }
+    }
   }, [id, currentUser]);
 
-  // --- FETCH COMMENTS ---
+  // --- 2. FETCH COMMENTS & REALTIME COMMENTS ---
   useEffect(() => {
     if (!id) return;
     
@@ -170,17 +194,21 @@ const ProductDetailPage: React.FC = () => {
     
     fetchComments();
 
-    // Realtime Comments Listener
-    const channel = supabase.channel(`comments-${id}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'comments', filter: `product_id=eq.${id}` }, () => {
-        fetchComments(); 
-      })
+    // 🔥 Realtime: Nghe tất cả sự kiện (INSERT, UPDATE, DELETE)
+    const commentChannel = supabase.channel(`comments_room_${id}`)
+      .on(
+        'postgres_changes', 
+        { event: '*', schema: 'public', table: 'comments', filter: `product_id=eq.${id}` }, 
+        () => {
+          fetchComments(); // Reload danh sách khi có thay đổi
+        }
+      )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => { supabase.removeChannel(commentChannel); };
   }, [id]);
 
-  // --- HANDLERS ---
+  // --- 3. HANDLERS (LOGIC QUAN TRỌNG) ---
   const handlePostComment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!currentUser) return navigate("/auth");
@@ -188,35 +216,49 @@ const ProductDetailPage: React.FC = () => {
 
     setIsPostingComment(true);
     try {
-      // 1. Insert Comment
-      const { error } = await supabase.from('comments').insert({
+      // A. Insert Comment
+      const { data: insertedComment, error } = await supabase.from('comments').insert({
         product_id: id,
         user_id: currentUser.id,
-        content: newComment.trim()
-      });
+        content: newComment.trim(),
+        parent_id: replyTo ? replyTo.id : null // Nếu đang reply
+      }).select().single();
 
       if (error) throw error;
 
       // ===============================================
-      // 🔔 2. GỬI THÔNG BÁO CHO NGƯỜI BÁN
+      // 🔔 B. GỬI THÔNG BÁO (NOTIFICATION SYSTEM)
       // ===============================================
-      // Nếu người comment KHÔNG PHẢI là người bán -> Gửi noti
+      const actorName = currentUser.name || currentUser.email?.split('@')[0] || "Người dùng";
+
+      // 1. Báo cho Người Bán (nếu người comment không phải là người bán)
       if (product.sellerId !== currentUser.id) {
-        // --- SỬA LỖI TẠI ĐÂY: Dùng currentUser.name thay vì user_metadata ---
-        const actorName = currentUser.name || currentUser.email?.split('@')[0] || "Người dùng";
-        
         await supabase.from('notifications').insert({
-          user_id: product.sellerId, // Người nhận: Seller
-          actor_id: currentUser.id,  // Người gửi: Me
+          user_id: product.sellerId,
+          actor_id: currentUser.id,
           type: 'comment',
           title: '💬 Bình luận mới',
           content: `${actorName} đã bình luận vào bài "${product.title}": "${newComment.substring(0, 30)}..."`,
           link: `/product/${product.id}`
         });
       }
+
+      // 2. Báo cho người được Reply (nếu có)
+      // Điều kiện: Có replyTo, người được reply không phải mình, và người được reply không phải người bán (để tránh spam 2 noti)
+      if (replyTo && replyTo.user_id !== currentUser.id && replyTo.user_id !== product.sellerId) {
+         await supabase.from('notifications').insert({
+            user_id: replyTo.user_id,
+            actor_id: currentUser.id,
+            type: 'comment',
+            title: '↩️ Phản hồi mới',
+            content: `${actorName} đã trả lời bình luận của bạn trong bài "${product.title}".`,
+            link: `/product/${product.id}`
+         });
+      }
       // ===============================================
 
       setNewComment("");
+      setReplyTo(null);
       addToast("Đã gửi bình luận", "success");
     } catch (err) {
       addToast("Lỗi gửi bình luận", "error");
@@ -270,6 +312,7 @@ const ProductDetailPage: React.FC = () => {
     }
   };
 
+  // Loading View
   if (loading) return (
     <div className="h-screen flex flex-col items-center justify-center bg-slate-50">
       <Loader2 className="animate-spin text-[#00418E] mb-4" size={40} />
@@ -282,6 +325,9 @@ const ProductDetailPage: React.FC = () => {
   const isOwner = currentUser?.id === product.sellerId;
   const statusBadge = getStatusBadge();
 
+  // ============================================================================
+  // 4. RENDER UI
+  // ============================================================================
   return (
     <div className="min-h-screen pb-32 font-sans text-slate-800">
       <VisualEngine />
@@ -314,8 +360,9 @@ const ProductDetailPage: React.FC = () => {
 
       <main className="mx-auto max-w-7xl px-4 py-8 grid grid-cols-1 lg:grid-cols-12 gap-8 lg:gap-12">
         
-        {/* --- LEFT COLUMN: IMAGES & DESCRIPTION --- */}
+        {/* --- LEFT COLUMN --- */}
         <div className="lg:col-span-7 space-y-8 animate-enter">
+          
           {/* Gallery */}
           <div className="space-y-4">
             <div className="aspect-[4/3] w-full rounded-[2rem] overflow-hidden bg-white shadow-xl border border-white/60 relative group">
@@ -325,18 +372,22 @@ const ProductDetailPage: React.FC = () => {
                 <div className="w-full h-full flex items-center justify-center bg-slate-100 text-slate-400">No Image</div>
               )}
               
+              {/* Badge Trạng thái */}
               {statusBadge && (
                 <div className={`absolute top-4 right-4 px-3 py-1.5 rounded-lg border font-black text-xs uppercase tracking-wider shadow-sm backdrop-blur-md ${statusBadge.bg} ${statusBadge.text} ${statusBadge.border}`}>
                   {statusBadge.label}
                 </div>
               )}
               
+              {/* Số thứ tự ảnh */}
               {product.images.length > 1 && (
                 <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/50 backdrop-blur-md px-3 py-1 rounded-full text-white text-xs font-bold">
                   {activeImg + 1} / {product.images.length}
                 </div>
               )}
             </div>
+            
+            {/* Thumbnail list */}
             {product.images.length > 1 && (
               <div className="flex gap-3 overflow-x-auto pb-2 hide-scrollbar snap-x">
                 {product.images.map((img, i) => (
@@ -364,45 +415,66 @@ const ProductDetailPage: React.FC = () => {
               <MessageSquare className="text-[#00418E]" size={20}/> Bình luận ({comments.length})
             </h3>
             
-            {/* Input */}
+            {/* Input Form */}
             <form onSubmit={handlePostComment} className="flex gap-3 mb-8">
               <div className="flex-shrink-0">
                 <img src={currentUser?.avatar || `https://ui-avatars.com/api/?name=${currentUser?.name || 'Me'}`} className="w-10 h-10 rounded-full bg-slate-200 border border-white shadow-sm"/>
               </div>
-              <div className="flex-1 relative">
-                <input 
-                  value={newComment}
-                  onChange={e => setNewComment(e.target.value)}
-                  placeholder="Viết bình luận..."
-                  className="w-full bg-white/80 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-100 focus:border-[#00418E] outline-none transition-all pr-12"
-                />
-                <button 
-                  type="submit" 
-                  disabled={!newComment.trim() || isPostingComment}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-[#00418E] text-white rounded-xl hover:bg-[#00306b] disabled:opacity-50 transition-colors"
-                >
-                  {isPostingComment ? <Loader2 size={16} className="animate-spin"/> : <Send size={16}/>}
-                </button>
+              <div className="flex-1">
+                {/* Reply Indicator */}
+                {replyTo && (
+                  <div className="flex justify-between items-center bg-blue-50 p-2 px-3 rounded-xl mb-2 text-xs text-blue-700 font-medium border border-blue-100">
+                    <span>Đang trả lời <b>{replyTo.user?.name}</b>: "{replyTo.content.substring(0, 30)}..."</span>
+                    <button type="button" onClick={() => setReplyTo(null)} className="p-1 hover:bg-blue-100 rounded"><Trash size={12}/></button>
+                  </div>
+                )}
+                
+                <div className="relative">
+                  <input 
+                    value={newComment}
+                    onChange={e => setNewComment(e.target.value)}
+                    placeholder="Viết bình luận..."
+                    className="w-full bg-white/80 border border-slate-200 rounded-2xl px-4 py-3 text-sm focus:ring-2 focus:ring-blue-100 focus:border-[#00418E] outline-none transition-all pr-12"
+                  />
+                  <button 
+                    type="submit" 
+                    disabled={!newComment.trim() || isPostingComment}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-[#00418E] text-white rounded-xl hover:bg-[#00306b] disabled:opacity-50 transition-colors"
+                  >
+                    {isPostingComment ? <Loader2 size={16} className="animate-spin"/> : <Send size={16}/>}
+                  </button>
+                </div>
               </div>
             </form>
 
-            {/* List */}
-            <div className="space-y-4">
+            {/* List Comments */}
+            <div className="space-y-6">
               {comments.length === 0 ? (
-                <p className="text-center text-slate-400 text-sm py-4">Chưa có bình luận nào. Hãy là người đầu tiên!</p>
+                <p className="text-center text-slate-400 text-sm py-4">Chưa có bình luận nào.</p>
               ) : (
                 comments.map(comment => (
-                  <div key={comment.id} className="flex gap-3 group">
-                    <div className="flex-shrink-0">
-                      <img src={comment.user?.avatar_url || `https://ui-avatars.com/api/?name=${comment.user?.name}`} className="w-9 h-9 rounded-full bg-slate-200 border border-white shadow-sm"/>
-                    </div>
-                    <div>
-                      <div className="comment-bubble px-4 py-2.5">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="font-bold text-xs text-slate-900">{comment.user?.name}</span>
-                          <span className="text-[10px] text-slate-400 font-medium">{timeAgo(comment.created_at)}</span>
+                  <div key={comment.id} className="group">
+                    <div className="flex gap-3">
+                      <div className="flex-shrink-0">
+                        <img src={comment.user?.avatar_url || `https://ui-avatars.com/api/?name=${comment.user?.name}`} className="w-9 h-9 rounded-full bg-slate-200 border border-white shadow-sm"/>
+                      </div>
+                      <div>
+                        <div className="comment-bubble px-4 py-2.5">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <span className="font-bold text-xs text-slate-900">{comment.user?.name}</span>
+                            <span className="text-[10px] text-slate-400 font-medium">{timeAgo(comment.created_at)}</span>
+                          </div>
+                          <p className="text-sm text-slate-700 leading-relaxed">{comment.content}</p>
                         </div>
-                        <p className="text-sm text-slate-700 leading-relaxed">{comment.content}</p>
+                        {/* Nút Trả lời */}
+                        {currentUser && (
+                          <button 
+                            onClick={() => setReplyTo(comment)} 
+                            className="text-[10px] font-bold text-slate-400 hover:text-[#00418E] mt-1 ml-2 transition-colors"
+                          >
+                            Trả lời
+                          </button>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -412,13 +484,16 @@ const ProductDetailPage: React.FC = () => {
           </div>
         </div>
 
-        {/* --- RIGHT COLUMN: INFO & ACTIONS --- */}
+        {/* --- RIGHT COLUMN --- */}
         <div className="lg:col-span-5 space-y-6 animate-enter" style={{animationDelay: '100ms'}}>
           <div className="glass-panel p-8 rounded-[2.5rem] lg:sticky lg:top-24 border-t-4 border-t-[#00418E]">
             {/* Meta */}
             <div className="flex justify-between items-start mb-6">
               <span className="bg-blue-50 text-[#00418E] px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider border border-blue-100">{product.category}</span>
-              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 bg-white/50 px-2 py-1 rounded-lg"><Eye size={14}/> {product.view_count || 0}</div>
+              {/* --- 👁️ REALTIME VIEW COUNT --- */}
+              <div className="flex items-center gap-1.5 text-xs font-bold text-slate-400 bg-white/50 px-2 py-1 rounded-lg">
+                <Eye size={14}/> {product.view_count || 0}
+              </div>
             </div>
             
             {/* Title & Price */}
