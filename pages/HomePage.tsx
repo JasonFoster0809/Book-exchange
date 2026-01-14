@@ -1,40 +1,18 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
-  Search,
-  ArrowRight,
-  Zap,
-  Users,
-  BookOpen,
-  Calculator,
-  Shirt,
-  Monitor,
-  Grid,
-  Flame,
-  Gift,
-  Eye,
-  ShoppingBag,
-  PlusCircle,
-  Heart,
-  Package,
-  ChevronRight,
-  Sparkles,
-  Clock,
-  Smile,
-  Rocket,
-  PlayCircle,
-  Ghost,
-  WifiOff,
-  MoreHorizontal,
-  Smartphone,
-  MapPin,
-  TrendingUp,
+  Search, ArrowRight, Zap, Users, BookOpen, Calculator, Shirt,
+  Monitor, Grid, Flame, Gift, Eye, ShoppingBag, PlusCircle,
+  Heart, Package, ChevronRight, Sparkles, Clock, Smile, Rocket,
+  PlayCircle, Ghost, WifiOff, MoreHorizontal, Smartphone, MapPin, TrendingUp,
 } from "lucide-react";
 import { supabase } from "../services/supabase";
+import { Product } from "../types";
 
-// --- TYPES & ENUMS ---
+// ============================================================================
+// 1. TYPES & ENUMS (Định nghĩa chặt chẽ)
+// ============================================================================
 type ID = string | number;
-type Timestamp = string;
 
 enum ProductCategory {
   TEXTBOOK = "textbook",
@@ -52,60 +30,40 @@ enum SortOption {
   MOST_VIEWED = "most_viewed",
 }
 
-interface Product {
-  id: ID;
-  created_at: Timestamp;
-  title: string;
-  description: string;
-  price: number;
-  images: string[];
-  category: string;
-  status: string;
-  seller_id: ID;
-  view_count: number;
-  condition: string;
-  tags: string[];
-  trade_method: string;
-  location_name?: string;
-}
-
 interface FilterState {
   category: ProductCategory | "all";
   sort: SortOption;
   search: string;
 }
 
-// --- UTILS ---
+// ============================================================================
+// 2. UTILS (Hàm hỗ trợ)
+// ============================================================================
 const Utils = {
   formatCurrency: (amount: number): string => {
-    return new Intl.NumberFormat("vi-VN", {
-      style: "currency",
-      currency: "VND",
-      maximumFractionDigits: 0,
-    }).format(amount);
+    return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount);
   },
   timeAgo: (dateString: string): string => {
     if (!dateString) return "Vừa xong";
-    const seconds = Math.floor(
-      (new Date().getTime() - new Date(dateString).getTime()) / 1000,
-    );
+    const seconds = Math.floor((new Date().getTime() - new Date(dateString).getTime()) / 1000);
     if (seconds > 86400) return Math.floor(seconds / 86400) + " ngày trước";
     if (seconds > 3600) return Math.floor(seconds / 3600) + " giờ trước";
     if (seconds > 60) return Math.floor(seconds / 60) + " phút trước";
     return "Vừa xong";
   },
-  cn: (...classes: (string | undefined | null | false)[]): string =>
-    classes.filter(Boolean).join(" "),
+  cn: (...classes: (string | undefined | null | false)[]): string => classes.filter(Boolean).join(" "),
 };
 
-// --- STYLES (COBALT THEME) ---
+// ============================================================================
+// 3. VISUAL ENGINE (CSS Styles đẹp nhất)
+// ============================================================================
 const GlobalStyles = () => (
   <style>{`
     :root {
-      --cobalt-900: #002147; /* Dark Cobalt */
-      --cobalt-600: #0047AB; /* Main Cobalt */
+      --cobalt-900: #002147; /* Màu xanh Bách Khoa đậm */
+      --cobalt-600: #0047AB; /* Màu chủ đạo */
       --cobalt-400: #2E5AAC;
-      --cyan-400: #00E5FF; /* Accent */
+      --cyan-400: #00E5FF;   /* Màu điểm nhấn */
       --light-bg: #F0F4F8;
     }
     
@@ -116,34 +74,25 @@ const GlobalStyles = () => (
       overflow-x: hidden;
     }
 
-    /* Aurora Background Animation */
+    /* --- Aurora Background Animation --- */
     .aurora-bg {
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 100vh;
+      position: absolute; top: 0; left: 0; right: 0; height: 100vh;
       background: 
-        radial-gradient(at 0% 0%, rgba(0, 71, 171, 0.3) 0px, transparent 50%),
-        radial-gradient(at 100% 0%, rgba(0, 229, 255, 0.2) 0px, transparent 50%);
+        radial-gradient(at 0% 0%, rgba(0, 71, 171, 0.25) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(0, 229, 255, 0.15) 0px, transparent 50%);
       filter: blur(80px);
       z-index: -1;
       animation: aurora 10s ease-in-out infinite alternate;
     }
-
     @keyframes aurora {
       0% { transform: scale(1); opacity: 0.8; }
       100% { transform: scale(1.1); opacity: 1; }
     }
 
-    /* Scrollbar */
-    ::-webkit-scrollbar { width: 8px; }
-    ::-webkit-scrollbar-track { background: transparent; }
-    ::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
-    ::-webkit-scrollbar-thumb:hover { background: var(--cobalt-400); }
-
-    /* Animations */
+    /* --- Animations --- */
     @keyframes float {
       0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-10px); }
+      50% { transform: translateY(-15px); }
     }
     .animate-float { animation: float 6s ease-in-out infinite; }
     
@@ -153,6 +102,7 @@ const GlobalStyles = () => (
     }
     .animate-enter { animation: fadeInUp 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
 
+    /* --- Glassmorphism Cards --- */
     .glass-card {
       background: rgba(255, 255, 255, 0.7);
       backdrop-filter: blur(12px);
@@ -160,28 +110,25 @@ const GlobalStyles = () => (
       box-shadow: 0 8px 32px 0 rgba(0, 71, 171, 0.05);
     }
 
-    .hover-lift { transition: transform 0.3s ease, box-shadow 0.3s ease; }
-    .hover-lift:hover { transform: translateY(-5px); box-shadow: 0 15px 30px -10px rgba(0, 71, 171, 0.2); }
+    .hover-lift { transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
+    .hover-lift:hover { transform: translateY(-8px); box-shadow: 0 15px 30px -10px rgba(0, 71, 171, 0.15); border-color: #BFDBFE; }
 
-    .shimmer {
-      position: relative;
-      overflow: hidden;
-    }
+    /* --- Shimmer Loading Effect --- */
+    .shimmer { position: relative; overflow: hidden; }
     .shimmer::after {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; width: 100%; height: 100%;
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.5), transparent);
+      content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.6), transparent);
       transform: translateX(-100%);
     }
-    .shimmer:hover::after {
-      transform: translateX(100%);
-      transition: transform 0.6s ease-in-out;
-    }
+    .shimmer:hover::after { transform: translateX(100%); transition: transform 0.6s ease-in-out; }
+    
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
   `}</style>
 );
 
-// --- HOOK FETCH DATA ---
+// ============================================================================
+// 4. CUSTOM HOOK (Tách logic xử lý dữ liệu)
+// ============================================================================
 function useProducts(filter: FilterState) {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -193,24 +140,20 @@ function useProducts(filter: FilterState) {
     try {
       let query = supabase.from("products").select("*").eq("status", "available");
 
+      // Filter Logic
       if (filter.category !== "all") query = query.eq("category", filter.category);
       if (filter.search) query = query.ilike("title", `%${filter.search}%`);
 
+      // Sort Logic
       if (filter.sort === SortOption.NEWEST) query = query.order("created_at", { ascending: false });
       else if (filter.sort === SortOption.PRICE_ASC) query = query.order("price", { ascending: true });
       else if (filter.sort === SortOption.PRICE_DESC) query = query.order("price", { ascending: false });
       else if (filter.sort === SortOption.MOST_VIEWED) query = query.order("view_count", { ascending: false });
 
-      const { data, error: dbError } = await query.limit(20);
+      const { data, error: dbError } = await query.limit(20); // Limit 20 items
       if (dbError) throw dbError;
 
-      setProducts(
-        (data || []).map((p: any) => ({
-          ...p,
-          images: p.images || [],
-          location_name: p.location_name || "TP.HCM",
-        })),
-      );
+      setProducts(data || []);
     } catch (err: any) {
       console.error("Fetch Error:", err);
       setError(err.message);
@@ -222,18 +165,18 @@ function useProducts(filter: FilterState) {
   useEffect(() => {
     fetchProducts();
   }, [fetchProducts]);
+
   return { products, loading, error, refetch: fetchProducts };
 }
 
-// --- COMPONENTS ---
+// ============================================================================
+// 5. SUB-COMPONENTS (Chia nhỏ để code gọn và dễ quản lý)
+// ============================================================================
 
 const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
   const navigate = useNavigate();
   const [imageLoaded, setImageLoaded] = useState(false);
-  const displayImage =
-    product.images && product.images.length > 0
-      ? product.images[0]
-      : "https://placehold.co/400x300?text=No+Image";
+  const displayImage = product.images && product.images.length > 0 ? product.images[0] : "https://via.placeholder.com/400x300?text=No+Image";
 
   return (
     <div
@@ -241,32 +184,29 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
       className="glass-card hover-lift group relative flex h-full cursor-pointer flex-col overflow-hidden rounded-2xl bg-white"
     >
       {/* Image Area */}
-      <div className="shimmer relative aspect-4/3 overflow-hidden bg-slate-100">
+      <div className="shimmer relative aspect-[4/3] overflow-hidden bg-slate-100">
         <img
           src={displayImage}
           alt={product.title}
           className={Utils.cn(
             "h-full w-full object-cover transition-transform duration-700 group-hover:scale-110",
-            imageLoaded ? "opacity-100" : "opacity-0",
+            imageLoaded ? "opacity-100" : "opacity-0"
           )}
           onLoad={() => setImageLoaded(true)}
-          onError={(e) => {
-            (e.target as HTMLImageElement).src =
-              "https://placehold.co/400x300?text=Error";
-            setImageLoaded(true);
-          }}
+          loading="lazy"
         />
         {/* Badges */}
         <div className="absolute left-3 top-3 flex flex-col gap-1">
           {product.price === 0 && (
-            <span className="flex items-center gap-1 rounded-full bg-red-500 px-2 py-1 text-[10px] font-bold text-white shadow-lg">
+            <span className="flex items-center gap-1 rounded-full bg-red-500 px-2 py-1 text-[10px] font-bold text-white shadow-lg backdrop-blur-md">
               <Gift size={10} /> FREE
             </span>
           )}
-          {product.condition === "new" && (
-            <span className="rounded-full bg-emerald-500 px-2 py-1 text-[10px] font-bold text-white shadow-lg">
-              NEW
-            </span>
+          {/* Logic check "Mới" (trong vòng 2 ngày) */}
+          {(new Date().getTime() - new Date(product.created_at || '').getTime()) < 86400000 * 2 && (
+             <span className="flex items-center gap-1 rounded-full bg-[#0047AB] px-2 py-1 text-[10px] font-bold text-white shadow-lg backdrop-blur-md">
+                <Zap size={10} className="fill-white"/> MỚI
+             </span>
           )}
         </div>
         {/* Quick View Button */}
@@ -290,19 +230,22 @@ const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
         </h3>
         <div className="mt-auto flex items-center justify-between border-t border-slate-100 pt-3">
           <span className="text-lg font-black tracking-tight text-[#002147]">
-            {product.price === 0
-              ? "Tặng miễn phí"
-              : Utils.formatCurrency(product.price)}
+            {product.price === 0 ? "Tặng miễn phí" : Utils.formatCurrency(product.price)}
           </span>
-          <div className="flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-xs text-slate-500">
-            <Eye size={12} /> {product.view_count || 0}
-          </div>
+          {product.location_name && (
+             <div className="flex items-center gap-1 rounded-full bg-slate-50 px-2 py-1 text-[10px] text-slate-500">
+                <MapPin size={10} /> {product.location_name}
+             </div>
+          )}
         </div>
       </div>
     </div>
   );
 };
 
+// ============================================================================
+// 6. MAIN HOMEPAGE COMPONENT
+// ============================================================================
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
   const [filter, setFilter] = useState<FilterState>({
@@ -310,6 +253,16 @@ const HomePage: React.FC = () => {
     sort: SortOption.NEWEST,
     search: "",
   });
+  const [searchTerm, setSearchTerm] = useState("");
+  
+  // Debounce Search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+        setFilter(prev => ({...prev, search: searchTerm}));
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [searchTerm]);
+
   const { products, loading, error, refetch } = useProducts(filter);
 
   return (
@@ -317,7 +270,7 @@ const HomePage: React.FC = () => {
       <GlobalStyles />
       <div className="aurora-bg"></div>
 
-      {/* HERO SECTION */}
+      {/* --- HERO SECTION --- */}
       <section className="relative overflow-hidden px-4 pb-24 pt-32 text-center">
         {/* Floating Icons Background */}
         <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden opacity-30">
@@ -335,10 +288,7 @@ const HomePage: React.FC = () => {
         <div className="relative z-10 mx-auto max-w-5xl">
           <div className="animate-enter mb-8 flex justify-center">
             <div className="inline-flex cursor-default items-center gap-2 rounded-full border border-white/60 bg-white/40 px-5 py-2 shadow-sm ring-1 ring-white/50 backdrop-blur-md transition-all hover:scale-105 hover:bg-white/60">
-              <Sparkles
-                size={16}
-                className="animate-pulse fill-yellow-400 text-yellow-400"
-              />
+              <Sparkles size={16} className="animate-pulse fill-yellow-400 text-yellow-400" />
               <span className="text-xs font-bold uppercase tracking-widest text-[#002147]">
                 Cổng thông tin Sinh viên Bách Khoa
               </span>
@@ -361,26 +311,17 @@ const HomePage: React.FC = () => {
           <div className="animate-enter group relative z-20 mx-auto mb-20 w-full max-w-2xl" style={{ animationDelay: "300ms" }}>
             <div className="absolute -inset-1 rounded-full bg-gradient-to-r from-[#0047AB] to-[#00E5FF] opacity-30 blur-lg transition duration-1000 group-hover:opacity-50"></div>
             <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const term = (e.target as any)[0].value;
-                if (term.trim())
-                  navigate(`/market?search=${encodeURIComponent(term)}`);
-              }}
+              onSubmit={(e) => { e.preventDefault(); navigate(`/market?search=${encodeURIComponent(searchTerm)}`); }}
               className="relative flex items-center rounded-full border border-white/50 bg-white/90 p-2 shadow-xl backdrop-blur-xl transition-all hover:bg-white hover:shadow-2xl"
             >
-              <Search
-                className="ml-4 text-slate-400 group-focus-within:text-[#0047AB]"
-                size={22}
-              />
+              <Search className="ml-4 text-slate-400 group-focus-within:text-[#0047AB]" size={22} />
               <input
                 placeholder="Bạn đang tìm gì? (VD: Giải tích 1, Casio 580...)"
                 className="h-14 w-full border-none bg-transparent px-4 text-base font-medium text-slate-900 outline-none placeholder:text-slate-400"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
               />
-              <button
-                type="submit"
-                className="flex h-12 w-32 items-center justify-center gap-2 rounded-full bg-[#0047AB] px-2 shadow-lg transition-all hover:bg-[#002147] active:scale-95"
-              >
+              <button type="submit" className="flex h-12 w-32 items-center justify-center gap-2 rounded-full bg-[#0047AB] px-2 shadow-lg transition-all hover:bg-[#002147] active:scale-95">
                 <span className="text-sm font-bold text-white">Tìm kiếm</span>
               </button>
             </form>
@@ -389,56 +330,18 @@ const HomePage: React.FC = () => {
           {/* Quick Actions */}
           <div className="animate-enter grid grid-cols-2 gap-4 px-4 md:grid-cols-4" style={{ animationDelay: "400ms" }}>
             {[
-              {
-                title: "Dạo Chợ",
-                desc: "Săn deal hời",
-                icon: <ShoppingBag size={24} />,
-                link: "/market",
-                color: "text-cyan-600",
-                bg: "bg-cyan-50",
-              },
-              {
-                title: "Đăng Tin",
-                desc: "Bán nhanh gọn",
-                icon: <PlusCircle size={24} />,
-                link: "/post-item",
-                color: "text-indigo-600",
-                bg: "bg-indigo-50",
-              },
-              {
-                title: "Đã Lưu",
-                desc: "Món yêu thích",
-                icon: <Heart size={24} />,
-                link: "/saved",
-                color: "text-pink-600",
-                bg: "bg-pink-50",
-              },
-              {
-                title: "Quản Lý",
-                desc: "Tin của tôi",
-                icon: <Package size={24} />,
-                link: "/my-items",
-                color: "text-orange-600",
-                bg: "bg-orange-50",
-              },
+              { title: "Dạo Chợ", desc: "Săn deal hời", icon: <ShoppingBag size={24} />, link: "/market", color: "text-cyan-600", bg: "bg-cyan-50" },
+              { title: "Đăng Tin", desc: "Bán nhanh gọn", icon: <PlusCircle size={24} />, link: "/post-item", color: "text-indigo-600", bg: "bg-indigo-50" },
+              { title: "Đã Lưu", desc: "Món yêu thích", icon: <Heart size={24} />, link: "/saved", color: "text-pink-600", bg: "bg-pink-50" },
+              { title: "Quản Lý", desc: "Tin của tôi", icon: <Package size={24} />, link: "/my-items", color: "text-orange-600", bg: "bg-orange-50" },
             ].map((action, i) => (
-              <Link
-                to={action.link}
-                key={i}
-                className="glass-card hover-lift group flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl p-6 text-center"
-              >
-                <div
-                  className={`flex h-14 w-14 items-center justify-center rounded-2xl ${action.bg} ${action.color} shadow-sm transition-transform group-hover:rotate-6 group-hover:scale-110`}
-                >
+              <Link to={action.link} key={i} className="glass-card hover-lift group flex cursor-pointer flex-col items-center justify-center gap-3 rounded-2xl p-6 text-center">
+                <div className={`flex h-14 w-14 items-center justify-center rounded-2xl ${action.bg} ${action.color} shadow-sm transition-transform group-hover:rotate-6 group-hover:scale-110`}>
                   {action.icon}
                 </div>
                 <div>
-                  <h3 className="text-base font-bold text-[#002147]">
-                    {action.title}
-                  </h3>
-                  <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">
-                    {action.desc}
-                  </p>
+                  <h3 className="text-base font-bold text-[#002147]">{action.title}</h3>
+                  <p className="mt-1 text-[10px] font-bold uppercase tracking-wider text-slate-500">{action.desc}</p>
                 </div>
               </Link>
             ))}
@@ -446,48 +349,26 @@ const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* CATEGORY BAR (Sticky) */}
+      {/* --- CATEGORY BAR (Sticky) --- */}
       <div className="sticky top-0 z-40 mb-12 border-y border-white/20 bg-white/80 py-4 shadow-sm backdrop-blur-xl">
         <div className="hide-scrollbar mx-auto max-w-7xl overflow-x-auto px-4">
           <div className="flex min-w-max justify-center gap-3">
             {[
               { id: "all", label: "Tất cả", icon: <Grid size={16} /> },
-              {
-                id: ProductCategory.TEXTBOOK,
-                label: "Giáo trình",
-                icon: <BookOpen size={16} />,
-              },
-              {
-                id: ProductCategory.ELECTRONICS,
-                label: "Công nghệ",
-                icon: <Monitor size={16} />,
-              },
-              {
-                id: ProductCategory.SUPPLIES,
-                label: "Dụng cụ",
-                icon: <Calculator size={16} />,
-              },
-              {
-                id: ProductCategory.CLOTHING,
-                label: "Đồng phục",
-                icon: <Shirt size={16} />,
-              },
-              {
-                id: ProductCategory.OTHER,
-                label: "Khác",
-                icon: <MoreHorizontal size={16} />,
-              },
+              { id: ProductCategory.TEXTBOOK, label: "Giáo trình", icon: <BookOpen size={16} /> },
+              { id: ProductCategory.ELECTRONICS, label: "Công nghệ", icon: <Monitor size={16} /> },
+              { id: ProductCategory.SUPPLIES, label: "Dụng cụ", icon: <Calculator size={16} /> },
+              { id: ProductCategory.CLOTHING, label: "Đồng phục", icon: <Shirt size={16} /> },
+              { id: ProductCategory.OTHER, label: "Khác", icon: <MoreHorizontal size={16} /> },
             ].map((cat) => (
               <button
                 key={cat.id}
-                onClick={() =>
-                  setFilter((prev) => ({ ...prev, category: cat.id as any }))
-                }
+                onClick={() => setFilter((prev) => ({ ...prev, category: cat.id as any }))}
                 className={Utils.cn(
                   "flex select-none items-center gap-2 rounded-full border px-5 py-2.5 text-sm font-bold transition-all active:scale-95",
                   filter.category === cat.id
                     ? "border-[#0047AB] bg-[#0047AB] text-white shadow-lg shadow-blue-500/20"
-                    : "border-slate-200 bg-white text-slate-600 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600",
+                    : "border-slate-200 bg-white text-slate-600 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-600"
                 )}
               >
                 {cat.icon}
@@ -498,7 +379,7 @@ const HomePage: React.FC = () => {
         </div>
       </div>
 
-      {/* PRODUCTS SECTION */}
+      {/* --- PRODUCTS SECTION --- */}
       <section className="mx-auto mb-24 min-h-[600px] max-w-7xl px-4">
         <div className="mb-10 flex flex-col items-center justify-between gap-6 md:flex-row">
           <div className="text-center md:text-left">
@@ -507,9 +388,7 @@ const HomePage: React.FC = () => {
               {filter.category === "all" ? "Mới lên sàn" : "Kết quả lọc"}
             </h2>
             <p className="mt-2 text-sm font-medium text-slate-500">
-              {loading
-                ? "Đang cập nhật dữ liệu..."
-                : `Hiển thị ${products.length} tin đăng mới nhất.`}
+              {loading ? "Đang cập nhật dữ liệu..." : `Hiển thị ${products.length} tin đăng mới nhất.`}
             </p>
           </div>
           <div className="flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
@@ -525,7 +404,7 @@ const HomePage: React.FC = () => {
                   "rounded-lg px-4 py-2 text-xs font-bold transition-all",
                   filter.sort === opt.id
                     ? "bg-[#002147] text-white shadow-md"
-                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-700",
+                    : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
                 )}
               >
                 {opt.label}
@@ -537,10 +416,7 @@ const HomePage: React.FC = () => {
         <div className="grid grid-cols-2 gap-6 md:grid-cols-3 lg:grid-cols-4">
           {loading ? (
             [...Array(8)].map((_, i) => (
-              <div
-                key={i}
-                className="h-[340px] space-y-3 rounded-2xl border border-white bg-white/60 p-4 shadow-sm"
-              >
+              <div key={i} className="h-[340px] space-y-3 rounded-2xl border border-white bg-white/60 p-4 shadow-sm">
                 <div className="h-[200px] w-full animate-pulse rounded-xl bg-slate-200" />
                 <div className="mt-4 h-4 w-3/4 animate-pulse rounded bg-slate-200" />
                 <div className="h-4 w-1/2 animate-pulse rounded bg-slate-200" />
@@ -550,10 +426,7 @@ const HomePage: React.FC = () => {
             <div className="glass-card col-span-full rounded-3xl py-20 text-center">
               <WifiOff size={40} className="mx-auto mb-4 text-red-500" />
               <p className="text-slate-500">Lỗi kết nối</p>
-              <button
-                onClick={refetch}
-                className="mt-4 rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold hover:bg-white"
-              >
+              <button onClick={refetch} className="mt-4 rounded-lg border border-slate-200 px-4 py-2 text-sm font-bold hover:bg-white">
                 Thử lại
               </button>
             </div>
@@ -584,58 +457,28 @@ const HomePage: React.FC = () => {
               to="/market"
               className="group inline-flex items-center gap-2 rounded-full border border-white bg-white/80 px-10 py-4 text-base font-bold text-[#002147] shadow-md backdrop-blur transition-all hover:border-[#0047AB] hover:text-[#0047AB] hover:shadow-xl hover:scale-105"
             >
-              Xem toàn bộ thị trường{" "}
-              <ArrowRight
-                size={20}
-                className="transition-transform group-hover:translate-x-1"
-              />
+              Xem toàn bộ thị trường 
+              <ArrowRight size={20} className="transition-transform group-hover:translate-x-1" />
             </Link>
           </div>
         )}
       </section>
 
-      {/* STATS SECTION */}
+      {/* --- STATS BANNER --- */}
       <section className="mb-24 border-y border-white/20 bg-white/60 py-16 backdrop-blur-md">
         <div className="mx-auto max-w-7xl px-4">
           <div className="grid grid-cols-2 gap-8 md:grid-cols-4">
             {[
-              {
-                label: "Tin đăng",
-                val: "8.500+",
-                icon: <Package />,
-                color: "blue",
-              },
-              {
-                label: "Thành viên",
-                val: "25.000+",
-                icon: <Users />,
-                color: "purple",
-              },
-              {
-                label: "Giao dịch",
-                val: "14.200+",
-                icon: <ShoppingBag />,
-                color: "green",
-              },
-              {
-                label: "Hài lòng",
-                val: "99.9%",
-                icon: <Smile />,
-                color: "orange",
-              },
+              { label: "Tin đăng", val: "8.500+", icon: <Package />, color: "blue" },
+              { label: "Thành viên", val: "25.000+", icon: <Users />, color: "purple" },
+              { label: "Giao dịch", val: "14.200+", icon: <ShoppingBag />, color: "green" },
+              { label: "Hài lòng", val: "99.9%", icon: <Smile />, color: "orange" },
             ].map((s, i) => (
-              <div
-                key={i}
-                className="group flex cursor-default flex-col items-center text-center"
-              >
-                <div
-                  className={`bg-${s.color}-50 text-${s.color}-600 mb-4 flex h-16 w-16 items-center justify-center rounded-2xl shadow-inner transition-all duration-500 group-hover:rotate-12 group-hover:scale-110`}
-                >
+              <div key={i} className="group flex cursor-default flex-col items-center text-center">
+                <div className={`bg-${s.color}-50 text-${s.color}-600 mb-4 flex h-16 w-16 items-center justify-center rounded-2xl shadow-inner transition-all duration-500 group-hover:rotate-12 group-hover:scale-110`}>
                   {s.icon}
                 </div>
-                <h4 className="mb-1 text-3xl font-black text-[#002147]">
-                  {s.val}
-                </h4>
+                <h4 className="mb-1 text-3xl font-black text-[#002147]">{s.val}</h4>
                 <p className="text-xs font-bold uppercase tracking-wider text-slate-400">
                   {s.label}
                 </p>
@@ -645,7 +488,7 @@ const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* AI BANNER */}
+      {/* --- AI BANNER SECTION --- */}
       <section className="mx-auto mb-24 max-w-7xl px-4">
         <div className="group relative overflow-hidden rounded-[2.5rem] bg-[#002147] p-12 text-white shadow-2xl">
           <div className="absolute -mr-20 -mt-20 right-0 top-0 h-[600px] w-[600px] rounded-full bg-[#0047AB]/30 blur-[120px] transition-all duration-1000 group-hover:bg-[#00E5FF]/20"></div>
@@ -661,8 +504,7 @@ const HomePage: React.FC = () => {
                 </span>
               </h2>
               <p className="max-w-md text-lg leading-relaxed text-slate-300">
-                Không cần nhập liệu thủ công. Chỉ cần chụp ảnh, hệ thống sẽ tự
-                động phân tích và điền thông tin trong 3 giây.
+                Không cần nhập liệu thủ công. Chỉ cần chụp ảnh, hệ thống sẽ tự động phân tích và điền thông tin trong 3 giây.
               </p>
               <div className="flex gap-4">
                 <button
@@ -686,9 +528,7 @@ const HomePage: React.FC = () => {
                   </div>
                   <div>
                     <h4 className="text-lg font-bold">AI Analysis</h4>
-                    <p className="text-xs text-[#00E5FF]">
-                      Đang xử lý hình ảnh...
-                    </p>
+                    <p className="text-xs text-[#00E5FF]">Đang xử lý hình ảnh...</p>
                   </div>
                 </div>
                 <div className="space-y-4">
@@ -706,7 +546,7 @@ const HomePage: React.FC = () => {
         </div>
       </section>
 
-      {/* FOOTER */}
+      {/* --- FOOTER --- */}
       <footer className="border-t border-[#003366] bg-[#002147] pb-12 pt-24 text-slate-400">
         <div className="mx-auto max-w-7xl px-4">
           <div className="mb-20 grid grid-cols-1 gap-12 md:grid-cols-2 lg:grid-cols-4">
@@ -716,9 +556,7 @@ const HomePage: React.FC = () => {
                   BK
                 </div>
                 <div>
-                  <h4 className="text-2xl font-black tracking-tight text-white">
-                    CHỢ BK
-                  </h4>
+                  <h4 className="text-2xl font-black tracking-tight text-white">CHỢ BK</h4>
                   <p className="mt-1 text-[10px] font-bold uppercase tracking-widest text-[#00E5FF]">
                     Student Marketplace
                   </p>
@@ -729,55 +567,29 @@ const HomePage: React.FC = () => {
               </p>
             </div>
             <div>
-              <h4 className="mb-8 text-sm font-bold uppercase tracking-wider text-white">
-                Khám phá
-              </h4>
+              <h4 className="mb-8 text-sm font-bold uppercase tracking-wider text-white">Khám phá</h4>
               <ul className="space-y-4 text-sm font-medium">
                 <li>
-                  <Link
-                    to="/market"
-                    className="flex items-center gap-2 transition-colors duration-200 hover:translate-x-1 hover:text-[#00E5FF]"
-                  >
+                  <Link to="/market" className="flex items-center gap-2 transition-colors duration-200 hover:translate-x-1 hover:text-[#00E5FF]">
                     <ChevronRight size={14} /> Dạo chợ online
                   </Link>
                 </li>
                 <li>
-                  <Link
-                    to="/post-item"
-                    className="flex items-center gap-2 transition-colors duration-200 hover:translate-x-1 hover:text-[#00E5FF]"
-                  >
+                  <Link to="/post-item" className="flex items-center gap-2 transition-colors duration-200 hover:translate-x-1 hover:text-[#00E5FF]">
                     <ChevronRight size={14} /> Đăng tin bán
                   </Link>
                 </li>
               </ul>
             </div>
             <div>
-              <h4 className="mb-8 text-sm font-bold uppercase tracking-wider text-white">
-                Hỗ trợ
-              </h4>
+              <h4 className="mb-8 text-sm font-bold uppercase tracking-wider text-white">Hỗ trợ</h4>
               <ul className="space-y-4 text-sm font-medium">
-                <li>
-                  <a
-                    href="#"
-                    className="transition-colors hover:text-[#00E5FF]"
-                  >
-                    Trung tâm trợ giúp
-                  </a>
-                </li>
-                <li>
-                  <a
-                    href="#"
-                    className="transition-colors hover:text-[#00E5FF]"
-                  >
-                    Chính sách bảo mật
-                  </a>
-                </li>
+                <li><a href="#" className="transition-colors hover:text-[#00E5FF]">Trung tâm trợ giúp</a></li>
+                <li><a href="#" className="transition-colors hover:text-[#00E5FF]">Chính sách bảo mật</a></li>
               </ul>
             </div>
             <div>
-              <h4 className="mb-8 text-sm font-bold uppercase tracking-wider text-white">
-                Liên hệ
-              </h4>
+              <h4 className="mb-8 text-sm font-bold uppercase tracking-wider text-white">Liên hệ</h4>
               <ul className="space-y-5 text-sm font-medium">
                 <li className="flex items-center gap-4">
                   <Smartphone size={20} className="shrink-0 text-[#00E5FF]" />
