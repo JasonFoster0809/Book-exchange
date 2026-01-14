@@ -12,17 +12,17 @@ import {
 import { playMessageSound } from '../utils/audio';
 
 // ============================================================================
-// 1. VISUAL ENGINE & STYLES
+// STYLES & VISUAL ENGINE
 // ============================================================================
 const VisualEngine = () => (
   <style>{`
-    /* Scrollbar */
+    /* Scrollbar tinh tế */
     .chat-scrollbar::-webkit-scrollbar { width: 6px; }
     .chat-scrollbar::-webkit-scrollbar-track { background: transparent; }
     .chat-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
     .chat-scrollbar::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
     
-    /* Message Bubbles */
+    /* Bong bóng chat */
     .msg-bubble { 
       max-width: 75%; padding: 10px 14px; border-radius: 18px; 
       position: relative; font-size: 14px; line-height: 1.5; word-wrap: break-word; 
@@ -38,25 +38,27 @@ const VisualEngine = () => (
     }
     .msg-image { padding: 4px; background: transparent; border: none; box-shadow: none; }
     
-    /* Transaction Card */
+    /* Card giao dịch */
     .transaction-card {
       background: rgba(255, 255, 255, 0.95); border-bottom: 1px solid #E2E8F0; 
       z-index: 20; backdrop-filter: blur(12px);
     }
     
-    /* Animations */
+    /* Hiệu ứng tin nhắn mới */
     .animate-slide-in { animation: slideIn 0.3s ease-out forwards; }
     @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 
-    .badge-pop { animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-    @keyframes pop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
+    /* Hiệu ứng số đỏ (Badge) nảy lên */
+    .badge-pop { animation: pop 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+    @keyframes pop { 0% { transform: scale(0); } 50% { transform: scale(1.2); } 100% { transform: scale(1); } }
 
+    /* Typing Dots */
     .typing-dot { width: 6px; height: 6px; background: #94a3b8; border-radius: 50%; animation: typing 1.4s infinite ease-in-out both; }
     .typing-dot:nth-child(1) { animation-delay: -0.32s; }
     .typing-dot:nth-child(2) { animation-delay: -0.16s; }
     @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 
-    /* Menus & Dividers */
+    /* Menu & Dropdown */
     .context-menu {
       position: absolute; background: white; border: 1px solid #e2e8f0; 
       border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 50;
@@ -72,8 +74,7 @@ const VisualEngine = () => (
       position: absolute; top: 100%; right: 0; margin-top: 8px;
       background: white; border: 1px solid #E2E8F0; border-radius: 12px;
       box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
-      width: 220px; overflow: hidden; z-index: 50;
-      animation: fadeIn 0.1s ease-out;
+      width: 220px; overflow: hidden; z-index: 50; animation: fadeIn 0.1s ease-out;
     }
     .dropdown-item {
       display: flex; items-center; gap: 10px; width: 100%;
@@ -81,11 +82,11 @@ const VisualEngine = () => (
       color: #475569; transition: all 0.2s;
     }
     .dropdown-item:hover { background: #F8FAFC; color: #00418E; }
-    .dropdown-item.danger { color: #EF4444; }
-    .dropdown-item.danger:hover { background: #FEF2F2; }
+    .dropdown-item.danger { color: #EF4444; } .dropdown-item.danger:hover { background: #FEF2F2; }
 
+    /* Date Divider - Căn giữa */
     .date-divider {
-      display: flex; justify-content: center; margin: 24px 0; position: relative;
+      display: flex; justify-content: center; align-items: center; margin: 24px 0; position: relative;
     }
     .date-divider span {
       background: #E2E8F0; color: #64748B; font-size: 11px; font-weight: 600;
@@ -97,7 +98,7 @@ const VisualEngine = () => (
 const QUICK_REPLIES = ["Sản phẩm còn mới không?", "Có bớt giá không bạn?", "Giao dịch ở H6 nhé?", "Cho mình xem thêm ảnh thật"];
 const COMMON_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"];
 
-// --- LIGHTBOX COMPONENT ---
+// Component xem ảnh phóng to
 const ImageModal = ({ src, onClose }: { src: string, onClose: () => void }) => (
   <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
     <button className="absolute top-4 right-4 text-white/70 hover:text-white p-2"><X size={32}/></button>
@@ -114,7 +115,7 @@ const ChatPage: React.FC = () => {
   const partnerIdParam = searchParams.get('partnerId');
   const productIdParam = searchParams.get('productId'); 
   
-  // --- STATE ---
+  // Data State
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
@@ -134,22 +135,19 @@ const ChatPage: React.FC = () => {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, msgId: string } | null>(null);
 
-  // --- REFS ---
+  // Derived State
+  const isSeller = user && targetProduct && user.id === targetProduct.seller_id;
+  const isBuyer = user && targetProduct && user.id !== targetProduct.seller_id;
+
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<any>(null);
 
-  // --- DERIVED STATE (Fix lỗi isSeller/isBuyer) ---
-  const isSeller = user && targetProduct && user.id === targetProduct.seller_id;
-  const isBuyer = user && targetProduct && user.id !== targetProduct.seller_id;
-
-  // ==========================================================================
-  // 2. DATA FETCHING & REALTIME
-  // ==========================================================================
-
-  // A. Initial Load: Conversations + Unread Counts
+  // ============================================================================
+  // 1. DATA FETCHING (QUAN TRỌNG: LẤY SỐ TIN CHƯA ĐỌC)
+  // ============================================================================
   const fetchConversations = async () => {
       setLoadingConv(true);
       if (!user) return;
@@ -162,7 +160,8 @@ const ChatPage: React.FC = () => {
       if (convData) {
           const enriched = await Promise.all(convData.map(async (c: any) => {
               const partner = c.participant1 === user.id ? c.p2 : c.p1;
-              // Count unread messages (sender != me AND is_read = false)
+              
+              // Đếm số tin nhắn chưa đọc (is_read = false) từ người kia gửi (sender_id != user.id)
               const { count } = await supabase.from('messages')
                 .select('*', { count: 'exact', head: true })
                 .eq('conversation_id', c.id)
@@ -174,7 +173,7 @@ const ChatPage: React.FC = () => {
                   partnerName: partner?.name || "User", 
                   partnerAvatar: partner?.avatar_url, 
                   partnerId: partner?.id,
-                  unread_count: count || 0
+                  unread_count: count || 0 // Số lượng này sẽ dùng để hiện Badge
               };
           }));
           setConversations(enriched);
@@ -184,7 +183,7 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => { if(user) fetchConversations(); }, [user]);
 
-  // B. Deep Link Handler
+  // Deep Link
   useEffect(() => {
     const initChat = async () => {
         if (!user || !partnerIdParam) return;
@@ -197,34 +196,44 @@ const ChatPage: React.FC = () => {
     initChat();
   }, [partnerIdParam, productIdParam, user]);
 
-  // C. GLOBAL REALTIME (Sidebar & Badge Updates)
+  // ============================================================================
+  // 2. REALTIME (CẬP NHẬT BADGE & LIST)
+  // ============================================================================
   useEffect(() => {
     if (!user) return;
     const channel = supabase.channel('global_chat_updates')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
           const newMsg = payload.new;
-          
           if (newMsg.sender_id !== user.id) {
-              // Case 1: NOT viewing this conversation -> Play sound, increment badge
+              playMessageSound();
+              
+              // NẾU ĐANG KHÔNG XEM HỘI THOẠI NÀY -> TĂNG BADGE
               if (activeConversation !== newMsg.conversation_id) {
-                  playMessageSound();
-                  setConversations(prev => prev.map(c => 
-                      c.id === newMsg.conversation_id 
-                      ? { 
-                          ...c, 
-                          last_message: newMsg.content, 
-                          updated_at: newMsg.created_at, 
-                          unread_count: (c.unread_count || 0) + 1 
-                        }
-                      : c
-                  ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()));
+                  setConversations(prev => {
+                      const exists = prev.find(c => c.id === newMsg.conversation_id);
+                      if (exists) {
+                          return prev.map(c => 
+                              c.id === newMsg.conversation_id 
+                              ? { 
+                                  ...c, 
+                                  last_message: newMsg.content, 
+                                  updated_at: newMsg.created_at, 
+                                  unread_count: (Number(c.unread_count) || 0) + 1 // Tăng số đỏ
+                                }
+                              : c
+                          ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime());
+                      } else {
+                          fetchConversations(); // Reload nếu là hội thoại mới tinh
+                          return prev;
+                      }
+                  });
               } 
-              // Case 2: CURRENTLY viewing -> Mark read immediately
+              // NẾU ĐANG XEM -> MARK READ NGAY
               else {
                   await supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id);
                   setConversations(prev => prev.map(c => 
                       c.id === newMsg.conversation_id 
-                      ? { ...c, last_message: newMsg.content, updated_at: newMsg.created_at } // No badge increment
+                      ? { ...c, last_message: newMsg.content, updated_at: newMsg.created_at } 
                       : c
                   ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()));
               }
@@ -240,7 +249,25 @@ const ChatPage: React.FC = () => {
     return () => { supabase.removeChannel(channel); };
   }, [user, activeConversation]);
 
-  // D. LOCAL CHAT ROOM REALTIME
+  // Handler: Khi click vào hội thoại -> Xóa Badge đỏ
+  const handleSelectConversation = async (convId: string, partnerId: string) => {
+      setActiveConversation(convId);
+      fetchPartnerInfoInternal(partnerId);
+      setTargetProduct(null); 
+      
+      // XÓA SỐ ĐỎ TRÊN UI NGAY LẬP TỨC
+      setConversations(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
+      
+      // CẬP NHẬT DB LÀ ĐÃ ĐỌC
+      if(user) {
+          await supabase.from('messages').update({ is_read: true })
+            .eq('conversation_id', convId)
+            .neq('sender_id', user.id)
+            .eq('is_read', false);
+      }
+  };
+
+  // Realtime trong phòng chat
   useEffect(() => {
     if (!activeConversation) return;
     fetchMessages(activeConversation);
@@ -253,15 +280,19 @@ const ChatPage: React.FC = () => {
                 if (prev.some(m => m.id === newMsg.id)) return prev;
                 return [...prev, newMsg];
             });
-            // If message is incoming while in room -> Play sound anyway (user choice)
+            // Mark read realtime
             if (newMsg.sender_id !== user?.id) {
-                playMessageSound();
                 supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id);
             }
             setTimeout(scrollToBottom, 100);
         })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (payload) => {
             setMessages(prev => prev.filter(m => m.id !== payload.old.id));
+        })
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, (payload) => {
+            if (targetProduct && payload.new.id === targetProduct.id) {
+                setTargetProduct({ ...targetProduct, ...payload.new });
+            }
         })
         .on('broadcast', { event: 'typing' }, (payload) => {
             if (payload.payload.userId !== user?.id) {
@@ -275,41 +306,7 @@ const ChatPage: React.FC = () => {
     return () => { supabase.removeChannel(channel); };
   }, [activeConversation]);
 
-  // ==========================================================================
-  // 3. ACTION HANDLERS
-  // ==========================================================================
-
-  const handleSelectConversation = async (convId: string, partnerId: string) => {
-      setActiveConversation(convId);
-      fetchPartnerInfoInternal(partnerId);
-      setTargetProduct(null); 
-      
-      // Clear badge immediately in UI
-      setConversations(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
-      
-      // Update DB
-      if(user) {
-          await supabase.from('messages').update({ is_read: true })
-            .eq('conversation_id', convId)
-            .neq('sender_id', user.id)
-            .eq('is_read', false);
-      }
-  };
-
-  const handleSendMessage = async (e?: React.FormEvent, content: string = newMessage, type: 'text' | 'image' | 'location' = 'text') => {
-      e?.preventDefault();
-      if ((!content.trim() && type === 'text') || !activeConversation || !user) return;
-      setNewMessage('');
-      setShowEmojiPicker(false);
-      
-      const { error } = await supabase.from('messages').insert({ conversation_id: activeConversation, sender_id: user.id, content: content, type: type });
-      if (!error) {
-          const lastMsgText = type === 'image' ? '[Hình ảnh]' : type === 'location' ? '[Vị trí]' : content;
-          await supabase.from('conversations').update({ last_message: lastMsgText, updated_at: new Date().toISOString() }).eq('id', activeConversation);
-      }
-  };
-
-  // --- HELPERS ---
+  // Helpers
   const checkAndCreateConversation = async (pId: string, prodId: string | null) => {
       if (!user) return;
       let convId = null;
@@ -331,11 +328,6 @@ const ChatPage: React.FC = () => {
       }
   };
 
-  const fetchMessages = async (convId: string) => {
-      const { data } = await supabase.from('messages').select('*').eq('conversation_id', convId).order('created_at', { ascending: true });
-      if (data) setMessages(data);
-  };
-
   const fetchPinnedProduct = async (convId: string) => {
       const { data: conv } = await supabase.from('conversations').select('current_product_id').eq('id', convId).single();
       if (conv?.current_product_id) {
@@ -344,15 +336,35 @@ const ChatPage: React.FC = () => {
       } else { setTargetProduct(null); }
   };
 
+  const fetchMessages = async (convId: string) => {
+      const { data } = await supabase.from('messages').select('*').eq('conversation_id', convId).order('created_at', { ascending: true });
+      if (data) setMessages(data);
+  };
+
   const fetchPartnerInfoInternal = async (pId: string) => {
       if (!pId) return;
       const { data } = await supabase.from('profiles').select('*').eq('id', pId).single();
       if (data) setPartnerProfile(data);
   };
 
+  const handleSendMessage = async (e?: React.FormEvent, content: string = newMessage, type: 'text' | 'image' | 'location' = 'text') => {
+      e?.preventDefault();
+      if ((!content.trim() && type === 'text') || !activeConversation || !user) return;
+      setNewMessage('');
+      setShowEmojiPicker(false);
+      
+      const { error } = await supabase.from('messages').insert({ conversation_id: activeConversation, sender_id: user.id, content: content, type: type });
+      if (!error) {
+          const lastMsgText = type === 'image' ? '[Hình ảnh]' : type === 'location' ? '[Vị trí]' : content;
+          await supabase.from('conversations').update({ last_message: lastMsgText, updated_at: new Date().toISOString() }).eq('id', activeConversation);
+      }
+  };
+
   const handleTyping = (e: any) => {
       setNewMessage(e.target.value);
-      if (activeConversation) supabase.channel(`chat_room:${activeConversation}`).send({ type: 'broadcast', event: 'typing', payload: { userId: user?.id } });
+      if (activeConversation) {
+          supabase.channel(`chat_room:${activeConversation}`).send({ type: 'broadcast', event: 'typing', payload: { userId: user?.id } });
+      }
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -369,15 +381,15 @@ const ChatPage: React.FC = () => {
   };
 
   const handleSendLocation = () => {
-      if (!navigator.geolocation) return addToast("Lỗi vị trí", "error");
+      if (!navigator.geolocation) return addToast("Trình duyệt không hỗ trợ vị trí", "error");
       navigator.geolocation.getCurrentPosition((pos) => {
           const link = `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
           handleSendMessage(undefined, link, 'location');
-      });
+      }, () => addToast("Không thể lấy vị trí", "error"));
   };
 
   const handleDeleteMessage = async (msgId: string) => {
-      if (!confirm("Thu hồi tin nhắn?")) return;
+      if (!confirm("Thu hồi tin nhắn này?")) return;
       await supabase.from('messages').delete().eq('id', msgId);
       setContextMenu(null);
   };
@@ -416,8 +428,9 @@ const ChatPage: React.FC = () => {
       } catch(e) { console.error(e); } finally { setIsProcessing(false); }
   };
 
-  // UI Helpers
   const filteredConversations = conversations.filter(c => c.partnerName?.toLowerCase().includes(searchTerm.toLowerCase()));
+
+  // UI Helpers
   const formatMessageDate = (dateStr: string) => {
       const d = new Date(dateStr); const now = new Date();
       if(d.toDateString() === now.toDateString()) return "Hôm nay";
@@ -425,6 +438,7 @@ const ChatPage: React.FC = () => {
       if(d.toDateString() === y.toDateString()) return "Hôm qua";
       return d.toLocaleDateString('vi-VN');
   }
+
   const renderMessageContent = (msg: any) => {
       if (msg.type === 'image') return (
         <div className="relative group cursor-pointer" onClick={() => setPreviewImage(msg.content)}>
@@ -438,7 +452,6 @@ const ChatPage: React.FC = () => {
       return <p>{parts.map((part: string, i: number) => part.match(urlRegex) ? <a key={i} href={part} target="_blank" rel="noreferrer" className="text-blue-200 hover:underline">{part}</a> : part)}</p>;
   };
 
-  // UI Listeners (Scroll & Click Outside)
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) setIsMenuOpen(false);
@@ -461,15 +474,12 @@ const ChatPage: React.FC = () => {
   useEffect(() => { scrollToBottom(); }, [messages]);
   const scrollToBottom = () => scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
 
-  // ==========================================================================
-  // 4. RENDER
-  // ==========================================================================
   return (
     <div className="max-w-7xl mx-auto h-[calc(100vh-64px)] flex bg-[#F1F5F9] font-sans overflow-hidden">
       <VisualEngine />
       {previewImage && <ImageModal src={previewImage} onClose={() => setPreviewImage(null)} />}
       
-      {/* --- SIDEBAR --- */}
+      {/* SIDEBAR */}
       <div className={`w-full md:w-[360px] bg-white border-r border-slate-200 flex flex-col ${activeConversation ? 'hidden md:flex' : 'flex'}`}>
          <div className="p-4 border-b border-slate-100 bg-white z-10">
             <h2 className="font-black text-2xl mb-4 text-[#00418E]">Tin nhắn</h2>
@@ -489,7 +499,14 @@ const ChatPage: React.FC = () => {
                       </div>
                       <div className="flex justify-between items-center mt-0.5">
                           <p className={`text-xs truncate max-w-[200px] ${conv.unread_count > 0 ? 'text-slate-900 font-bold' : 'text-slate-500 font-medium'}`}>{conv.last_message || "Bắt đầu trò chuyện"}</p>
-                          {conv.unread_count > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full badge-pop min-w-[18px] text-center shadow-sm border border-white">{conv.unread_count}</span>}
+                          {/* ======================= */}
+                          {/* 🔴 VÒNG TRÒN ĐỎ (BADGE) */}
+                          {/* ======================= */}
+                          {conv.unread_count > 0 && (
+                            <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full badge-pop min-w-[20px] text-center shadow-sm border border-white flex items-center justify-center">
+                              {conv.unread_count > 99 ? '99+' : conv.unread_count}
+                            </span>
+                          )}
                       </div>
                   </div>
                </div>
@@ -497,7 +514,7 @@ const ChatPage: React.FC = () => {
          </div>
       </div>
 
-      {/* --- CHAT AREA --- */}
+      {/* CHAT AREA */}
       <div className={`flex-1 flex flex-col relative bg-[#F8FAFC] ${!activeConversation ? 'hidden md:flex' : 'flex'}`}>
          {activeConversation ? (
             <>
@@ -570,7 +587,7 @@ const ChatPage: React.FC = () => {
                   </div>
                )}
 
-               {/* MESSAGES LIST */}
+               {/* MESSAGES */}
                <div className="flex-1 overflow-y-auto p-4 space-y-3 chat-scrollbar bg-[#F8FAFC]" ref={containerRef}>
                   {messages.map((msg, idx) => {
                       const isMe = msg.sender_id === user?.id;
@@ -625,7 +642,7 @@ const ChatPage: React.FC = () => {
                   )}
                </div>
 
-               {/* INPUT AREA */}
+               {/* INPUT */}
                <div className="p-3 bg-white border-t border-slate-200">
                   <div className="flex gap-2 overflow-x-auto pb-3 chat-scrollbar">
                      {QUICK_REPLIES.map((t, i) => (
