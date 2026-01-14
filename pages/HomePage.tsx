@@ -1,14 +1,9 @@
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import {
-  Search, ArrowRight, Zap, Users, BookOpen, Calculator, Shirt,
-  Monitor, Grid, Gift, Eye, ShoppingBag, PlusCircle,
-  Heart, Package, ChevronRight, Sparkles, Clock, Smile, Rocket,
-  PlayCircle, Ghost, WifiOff, MoreHorizontal, Smartphone, MapPin, 
-  TrendingUp, Filter, SlidersHorizontal, X, ChevronLeft, Tag,
-  Bell, Menu, Star, CheckCircle, ArrowUp, Mail, Info, Shield, 
-  Award, HelpCircle, ChevronDown, Activity, Quote, Calendar,
-  ExternalLink, ThumbsUp, MessageCircle, Share2
+  Search, BookOpen, Monitor, Calculator, Shirt, MoreHorizontal,
+  MapPin, Filter, ChevronDown, SlidersHorizontal, X, Clock,
+  ArrowRight, LayoutGrid, List
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { Product } from "../types";
@@ -16,49 +11,18 @@ import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 
 // ============================================================================
-// 1. CONFIGURATION & CONSTANTS
+// 1. CONFIGURATION
 // ============================================================================
 const ITEMS_PER_PAGE = 12;
 
-const TICKER_MESSAGES = [
-  "🔥 Minh Tuấn (K21) vừa đăng bán sách Giải tích 1 - 50k",
-  "💻 Lan Anh (K20) đang tìm mua Laptop Dell cũ giá < 5tr",
-  "🛍️ Chợ BK vừa đạt mốc 10.000 giao dịch thành công!",
-  "🎁 Sự kiện đổi sách cũ lấy cây xanh đang diễn ra tại H6",
-  "📢 Cảnh báo: Hãy giao dịch trực tiếp để tránh lừa đảo",
-  "⚡ Hệ thống AI đã được cập nhật - Đăng tin nhanh hơn 50%",
-];
+enum ProductCategory {
+  TEXTBOOK = "textbook",
+  ELECTRONICS = "electronics",
+  SUPPLIES = "supplies",
+  CLOTHING = "clothing",
+  OTHER = "other",
+}
 
-const BLOG_POSTS = [
-  {
-    id: 1,
-    title: "Kinh nghiệm chọn Laptop cho sinh viên IT năm nhất",
-    category: "Công nghệ",
-    date: "12/01/2026",
-    image: "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&q=80&w=600",
-    excerpt: "Nên chọn Mac hay Windows? RAM 8GB có đủ không? Cùng giải đáp thắc mắc cho tân sinh viên."
-  },
-  {
-    id: 2,
-    title: "Top 5 địa điểm học bài 'chill' nhất Bách Khoa",
-    category: "Đời sống",
-    date: "10/01/2026",
-    image: "https://images.unsplash.com/photo-1497633762265-9d179a990aa6?auto=format&fit=crop&q=80&w=600",
-    excerpt: "Thư viện hay quán cafe? Những góc khuất yên tĩnh bạn chưa biết tại cơ sở 1 và cơ sở 2."
-  },
-  {
-    id: 3,
-    title: "Bí kíp săn giáo trình cũ giá rẻ đầu kỳ",
-    category: "Mẹo vặt",
-    date: "08/01/2026",
-    image: "https://images.unsplash.com/photo-1495446815901-a7297e633e8d?auto=format&fit=crop&q=80&w=600",
-    excerpt: "Đừng vội mua sách mới. Hãy thử dạo qua Chợ BK để tiết kiệm hàng triệu đồng mỗi học kỳ."
-  }
-];
-
-// ============================================================================
-// 2. TYPES
-// ============================================================================
 enum SortOption {
   NEWEST = "newest",
   PRICE_ASC = "price_asc",
@@ -76,454 +40,477 @@ interface FilterState {
 }
 
 // ============================================================================
-// 3. UTILITY FUNCTIONS
+// 2. UTILS
 // ============================================================================
 const Utils = {
-  formatCurrency: (amount: number) => {
-    return new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount);
-  },
+  formatCurrency: (amount: number) => 
+    new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount),
+  
   timeAgo: (dateString: string) => {
-    if (!dateString) return "Vừa xong";
-    const now = new Date();
-    const posted = new Date(dateString);
-    const diff = (now.getTime() - posted.getTime()) / 1000;
-    if (diff < 60) return "Vừa xong";
-    if (diff < 3600) return Math.floor(diff / 60) + " phút trước";
-    if (diff < 86400) return Math.floor(diff / 3600) + " giờ trước";
-    return Math.floor(diff / 86400) + " ngày trước";
+    if (!dateString) return "";
+    const date = new Date(dateString);
+    return date.toLocaleDateString('vi-VN');
   },
-  cn: (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(" ")
+
+  cn: (...classes: (string | undefined | false)[]) => classes.filter(Boolean).join(" "),
 };
 
 // ============================================================================
-// 4. VISUAL ENGINE (CSS)
+// 3. STYLES (Clean & Professional)
 // ============================================================================
-const VisualEngine = () => (
+const GlobalStyles = () => (
   <style>{`
     :root {
-      --cobalt-900: #002147; --cobalt-800: #003366; --cobalt-600: #0047AB;
-      --cyan-400: #00E5FF; --light-bg: #F8FAFC;
+      --primary: #00388D; /* BK Blue Standard */
+      --secondary: #00AEEF;
+      --bg-color: #F3F4F6;
+      --text-main: #1F2937;
+      --text-muted: #6B7280;
     }
     
-    body { background-color: var(--light-bg); color: var(--cobalt-900); font-family: 'Inter', sans-serif; overflow-x: hidden; }
-
-    .grain-overlay {
-      position: fixed; inset: 0; pointer-events: none; z-index: 50; opacity: 0.03;
-      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    body {
+      background-color: var(--bg-color);
+      color: var(--text-main);
+      font-family: 'Inter', system-ui, sans-serif;
     }
 
-    .aurora-bg {
-      position: fixed; top: 0; left: 0; right: 0; height: 100vh; z-index: -1;
-      background: radial-gradient(at 0% 0%, rgba(0, 71, 171, 0.1) 0px, transparent 50%),
-                  radial-gradient(at 100% 0%, rgba(0, 229, 255, 0.1) 0px, transparent 50%);
-      filter: blur(80px); animation: aurora 15s ease-in-out infinite alternate;
+    /* Professional Card */
+    .pro-card {
+      background: white;
+      border: 1px solid #E5E7EB;
+      border-radius: 8px;
+      transition: all 0.2s ease-in-out;
     }
-    @keyframes aurora { from { transform: scale(1); } to { transform: scale(1.1); } }
-
-    .animate-float { animation: float 6s ease-in-out infinite; }
-    @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-20px); } }
-
-    .glass-card {
-      background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(16px);
-      border: 1px solid rgba(255, 255, 255, 0.8); box-shadow: 0 4px 20px rgba(0, 71, 171, 0.05);
+    .pro-card:hover {
+      border-color: var(--secondary);
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+      transform: translateY(-2px);
     }
-    .hover-lift { transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
-    .hover-lift:hover { transform: translateY(-8px); box-shadow: 0 20px 40px -10px rgba(0, 71, 171, 0.1); border-color: #BFDBFE; }
 
-    .shimmer { position: relative; overflow: hidden; }
-    .shimmer::after {
-      content: ''; position: absolute; inset: 0; transform: translateX(-100%);
-      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
-      animation: sh 1.5s infinite;
+    /* Form Elements */
+    .pro-input {
+      border: 1px solid #D1D5DB;
+      border-radius: 6px;
+      transition: border-color 0.2s;
     }
-    @keyframes sh { to { transform: translateX(100%); } }
+    .pro-input:focus {
+      border-color: var(--primary);
+      outline: none;
+      box-shadow: 0 0 0 2px rgba(0, 56, 141, 0.1);
+    }
 
-    .ticker-move { animation: ticker 40s linear infinite; }
-    @keyframes ticker { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+    /* Buttons */
+    .btn-primary {
+      background-color: var(--primary);
+      color: white;
+      font-weight: 600;
+      border-radius: 6px;
+      transition: background-color 0.2s;
+    }
+    .btn-primary:hover { background-color: #002b6e; }
 
-    .animate-enter { animation: ent 0.6s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0; }
-    @keyframes ent { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+    .btn-outline {
+      background-color: white;
+      border: 1px solid #D1D5DB;
+      color: var(--text-main);
+      font-weight: 500;
+      border-radius: 6px;
+      transition: all 0.2s;
+    }
+    .btn-outline:hover { border-color: var(--text-muted); background-color: #F9FAFB; }
+
+    /* Skeleton Loading */
+    .skeleton {
+      background-color: #E5E7EB;
+      animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+    }
+    @keyframes pulse { 50% { opacity: .5; } }
+
+    .hide-scrollbar::-webkit-scrollbar { display: none; }
+    
+    /* Modal Backdrop */
+    .modal-backdrop {
+      background: rgba(0, 0, 0, 0.5);
+      position: fixed; inset: 0; z-index: 50;
+      display: flex; align-items: center; justify-content: center;
+    }
   `}</style>
 );
 
 // ============================================================================
-// 5. SUB-COMPONENTS
+// 4. DATA LOGIC
+// ============================================================================
+function useProducts(filter: FilterState) {
+  const [products, setProducts] = useState<Product[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(true);
+  const [page, setPage] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+
+  useEffect(() => {
+    setProducts([]); setPage(0); setHasMore(true); setLoading(true); fetchData(0, true);
+  }, [filter]);
+
+  const fetchData = async (pageIdx: number, isNewFilter = false) => {
+    try {
+      let query = supabase.from("products").select("*", { count: 'exact' }).eq("status", "available");
+
+      if (filter.category !== "all") query = query.eq("category", filter.category);
+      if (filter.search) query = query.ilike("title", `%${filter.search}%`);
+      if (filter.minPrice !== "") query = query.gte("price", filter.minPrice);
+      if (filter.maxPrice !== "") query = query.lte("price", filter.maxPrice);
+      if (filter.condition !== "all") query = query.eq("condition", filter.condition);
+
+      switch(filter.sort) {
+        case SortOption.PRICE_ASC: query = query.order("price", { ascending: true }); break;
+        case SortOption.PRICE_DESC: query = query.order("price", { ascending: false }); break;
+        case SortOption.MOST_VIEWED: query = query.order("view_count", { ascending: false }); break;
+        default: query = query.order("created_at", { ascending: false });
+      }
+
+      const { data, error, count } = await query.range(pageIdx * ITEMS_PER_PAGE, (pageIdx * ITEMS_PER_PAGE) + ITEMS_PER_PAGE - 1);
+      if (error) throw error;
+
+      if (count !== null) setTotalCount(count);
+      if (data.length < ITEMS_PER_PAGE) setHasMore(false);
+      
+      setProducts(prev => isNewFilter ? data : [...prev, ...data]);
+    } catch (err) { console.error(err); } finally { setLoading(false); }
+  };
+
+  const loadMore = () => { if (!loading && hasMore) { setPage(p => p + 1); fetchData(page + 1); } };
+  return { products, loading, hasMore, loadMore, totalCount };
+}
+
+// ============================================================================
+// 5. COMPONENTS
 // ============================================================================
 
-const LiveTicker = () => (
-  <div className="bg-[#002147] text-white h-10 flex items-center overflow-hidden sticky top-0 z-[60] border-b border-white/10">
-    <div className="bg-[#0047AB] h-full px-4 flex items-center z-20 font-black text-[10px] uppercase tracking-tighter whitespace-nowrap">
-      <Activity size={14} className="mr-2 animate-pulse text-[#00E5FF]"/> Hoạt động thực
-    </div>
-    <div className="flex-1 overflow-hidden whitespace-nowrap relative">
-      <div className="ticker-move inline-block">
-        {[...TICKER_MESSAGES, ...TICKER_MESSAGES].map((msg, i) => (
-          <span key={i} className="inline-block px-8 text-xs font-medium opacity-90">
-            <span className="text-[#00E5FF] mr-2">✦</span> {msg}
-          </span>
-        ))}
-      </div>
-    </div>
-  </div>
-);
-
-const HeroSlider = () => {
-  const [cur, setCur] = useState(0);
-  const slides = [
-    { t: "Chợ Đồ Cũ Bách Khoa", s: "Thông Minh & Tiết Kiệm", c: "from-[#0047AB] to-[#00E5FF]" },
-    { t: "Giáo Trình Giá Rẻ", s: "Tiếp Sức Mùa Thi", c: "from-orange-500 to-red-500" },
-    { t: "Hỗ Trợ Công Nghệ", s: "Ưu Đãi Sinh Viên", c: "from-purple-600 to-indigo-500" }
-  ];
-  useEffect(() => { const i = setInterval(() => setCur(p => (p+1)%3), 5000); return () => clearInterval(i); }, []);
-  return (
-    <div className="relative z-10 mx-auto max-w-5xl mb-16 pt-10">
-      <div className="grid grid-cols-1 relative min-h-[250px]">
-        {slides.map((s, i) => (
-          <div key={i} className={`col-start-1 row-start-1 transition-all duration-1000 flex flex-col items-center ${i === cur ? 'opacity-100' : 'opacity-0 translate-y-4 pointer-events-none'}`}>
-            <div className="bg-white/40 backdrop-blur-md px-4 py-1 rounded-full border border-white/60 text-[10px] font-bold uppercase tracking-widest text-[#002147] mb-6 flex items-center gap-2">
-              <Sparkles size={12} className="text-yellow-500"/> HCMUT Student Marketplace
-            </div>
-            <h1 className="text-5xl md:text-7xl font-black text-[#002147] text-center leading-[1.1] mb-6">
-              {s.t} <br/> <span className={`bg-gradient-to-r ${s.c} bg-clip-text text-transparent`}>{s.s}</span>
-            </h1>
-            <p className="text-slate-500 max-w-2xl text-center text-lg font-medium leading-relaxed">Nền tảng mua bán phi lợi nhuận dành riêng cho sinh viên Đại học Bách Khoa TP.HCM.</p>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-};
-
-const ProductCard: React.FC<{ product: Product, onQuickView: (p: Product) => void }> = ({ product, onQuickView }) => {
-  const navigate = useNavigate();
-  const [liked, setLiked] = useState(false);
-  return (
-    <div onClick={() => navigate(`/product/${product.id}`)} className="glass-card hover-lift group flex flex-col rounded-3xl bg-white h-full cursor-pointer overflow-hidden border border-white/60 relative">
-      <div className="shimmer relative aspect-[4/3] bg-slate-100 overflow-hidden">
-        <img src={product.images?.[0] || 'https://via.placeholder.com/300'} alt={product.title} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-110" loading="lazy"/>
-        <div className="absolute left-3 top-3 flex flex-col gap-1 z-10">
-          {product.price === 0 && <span className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold shadow-lg backdrop-blur-md bg-red-500 text-white"><Gift size={10}/> FREE</span>}
-          {(new Date().getTime() - new Date(product.created_at).getTime() < 172800000) && <span className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold shadow-lg backdrop-blur-md bg-[#0047AB] text-white"><Zap size={10}/> NEW</span>}
-        </div>
-        <div className="absolute top-3 right-3 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-4 group-hover:translate-x-0 z-20">
-          <button onClick={(e) => { e.stopPropagation(); setLiked(!liked); }} className="p-2 bg-white/90 backdrop-blur rounded-full text-slate-400 hover:text-red-500 shadow-xl transition-colors"><Heart size={18} className={liked ? "fill-red-500 text-red-500" : ""}/></button>
-          <button onClick={(e) => { e.stopPropagation(); onQuickView(product); }} className="p-2 bg-white/90 backdrop-blur rounded-full text-slate-400 hover:text-[#0047AB] shadow-xl transition-colors"><Eye size={18}/></button>
-        </div>
-      </div>
-      <div className="p-5 flex flex-col flex-1">
-        <div className="flex justify-between items-start mb-3">
-          <span className="text-[10px] font-black text-[#0047AB] bg-blue-50 px-2 py-0.5 rounded-lg border border-blue-100 uppercase tracking-tighter">{product.category}</span>
-          <span className="text-[10px] text-slate-400 font-bold flex items-center gap-1"><Clock size={10}/> {Utils.timeAgo(product.created_at)}</span>
-        </div>
-        <h3 className="font-bold text-slate-800 line-clamp-2 text-sm mb-auto group-hover:text-[#0047AB] transition-colors leading-relaxed">{product.title}</h3>
-        <div className="mt-4 pt-4 border-t border-slate-50 flex justify-between items-center">
-          <span className="text-lg font-black text-[#002147] tracking-tight">{product.price === 0 ? "Tặng free" : Utils.formatCurrency(product.price)}</span>
-          {product.location_name && <div className="flex items-center gap-1 text-[10px] font-bold text-slate-400"><MapPin size={10}/> {product.location_name}</div>}
-        </div>
-      </div>
-    </div>
-  );
-};
-
 const FilterModal = ({ filter, setFilter, onClose }: { filter: FilterState, setFilter: any, onClose: () => void }) => (
-  <div className="modal-backdrop z-[100]" onClick={onClose}>
-    <div className="modal-content bg-white rounded-[2.5rem] p-8 w-full max-w-md shadow-2xl m-4 relative overflow-hidden" onClick={e => e.stopPropagation()}>
-      <div className="absolute top-0 right-0 p-8 opacity-5"><Filter size={120}/></div>
-      <div className="flex justify-between items-center mb-8 relative z-10">
-        <h3 className="text-2xl font-black text-[#002147] flex items-center gap-2"><SlidersHorizontal size={24} className="text-[#0047AB]"/> Bộ lọc</h3>
-        <button onClick={onClose} className="p-2 hover:bg-slate-100 rounded-full transition-colors"><X size={24} className="text-slate-400"/></button>
+  <div className="modal-backdrop" onClick={onClose}>
+    <div className="bg-white rounded-lg p-6 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+      <div className="flex justify-between items-center mb-6 border-b pb-4">
+        <h3 className="text-lg font-bold text-slate-800">Bộ lọc tìm kiếm</h3>
+        <button onClick={onClose}><X size={20} className="text-slate-500 hover:text-slate-800"/></button>
       </div>
-      <div className="space-y-8 relative z-10">
+      
+      <div className="space-y-6">
         <div>
-          <label className="text-xs font-black uppercase tracking-widest text-slate-400 mb-4 block">Khoảng giá phù hợp</label>
+          <label className="text-sm font-medium text-slate-700 mb-2 block">Khoảng giá (VNĐ)</label>
           <div className="flex gap-4 items-center">
-            <div className="flex-1 relative">
-              <input type="number" placeholder="Từ" className="w-full pl-4 pr-10 py-3 bg-slate-50 rounded-2xl border border-slate-200 outline-none focus:border-[#0047AB] font-bold text-sm" value={filter.minPrice} onChange={e => setFilter({ ...filter, minPrice: e.target.value })}/>
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-300">VNĐ</span>
-            </div>
-            <div className="w-4 h-[2px] bg-slate-200"></div>
-            <div className="flex-1 relative">
-              <input type="number" placeholder="Đến" className="w-full pl-4 pr-10 py-3 bg-slate-50 rounded-2xl border border-slate-200 outline-none focus:border-[#0047AB] font-bold text-sm" value={filter.maxPrice} onChange={e => setFilter({ ...filter, maxPrice: e.target.value })}/>
-              <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-300">VNĐ</span>
-            </div>
+            <input 
+              type="number" placeholder="0" className="pro-input w-full p-2.5 text-sm"
+              value={filter.minPrice} onChange={e => setFilter({ ...filter, minPrice: e.target.value })}
+            />
+            <span className="text-slate-400">-</span>
+            <input 
+              type="number" placeholder="Tối đa" className="pro-input w-full p-2.5 text-sm"
+              value={filter.maxPrice} onChange={e => setFilter({ ...filter, maxPrice: e.target.value })}
+            />
           </div>
         </div>
+
         <div>
-          <label className="text-xs font-black uppercase tracking-widest text-slate-400 mb-4 block">Độ mới sản phẩm</label>
-          <div className="grid grid-cols-3 gap-2">
-            {[{ id: 'all', l: 'Tất cả' }, { id: 'new', l: 'Mới 100%' }, { id: 'used', l: 'Đã dùng' }].map(opt => (
-              <button key={opt.id} onClick={() => setFilter({ ...filter, condition: opt.id })} className={`py-3 rounded-2xl text-xs font-black border transition-all ${filter.condition === opt.id ? 'bg-[#0047AB] border-[#0047AB] text-white shadow-lg shadow-blue-200' : 'border-slate-200 text-slate-500 hover:bg-slate-50'}`}>{opt.l}</button>
+          <label className="text-sm font-medium text-slate-700 mb-2 block">Tình trạng sản phẩm</label>
+          <div className="flex gap-2">
+            {[
+              { id: 'all', label: 'Tất cả' },
+              { id: 'new', label: 'Mới' },
+              { id: 'used', label: 'Cũ' }
+            ].map(opt => (
+              <button 
+                key={opt.id}
+                onClick={() => setFilter({ ...filter, condition: opt.id })}
+                className={`flex-1 py-2 rounded text-sm font-medium border ${filter.condition === opt.id ? 'bg-blue-50 border-blue-600 text-blue-700' : 'border-gray-200 text-gray-600 hover:bg-gray-50'}`}
+              >
+                {opt.label}
+              </button>
             ))}
           </div>
         </div>
       </div>
-      <div className="mt-10 pt-6 border-t border-slate-100 flex gap-4 relative z-10">
-        <button onClick={() => setFilter({ ...filter, minPrice: "", maxPrice: "", condition: "all" })} className="flex-1 py-4 text-slate-400 font-black uppercase tracking-widest text-[10px] hover:text-[#0047AB] transition-colors">Đặt lại</button>
-        <button onClick={onClose} className="flex-[2] py-4 bg-[#002147] text-white font-black uppercase tracking-widest text-[10px] rounded-2xl shadow-xl hover:bg-[#0047AB] transition-all active:scale-95">Áp dụng lọc</button>
+
+      <div className="mt-8 flex gap-3">
+        <button 
+          onClick={() => setFilter({ ...filter, minPrice: "", maxPrice: "", condition: "all" })}
+          className="flex-1 py-2.5 btn-outline text-sm"
+        >
+          Đặt lại
+        </button>
+        <button 
+          onClick={onClose}
+          className="flex-1 py-2.5 btn-primary text-sm"
+        >
+          Áp dụng
+        </button>
       </div>
     </div>
   </div>
 );
+
+const ProductCard: React.FC<{ product: Product }> = ({ product }) => {
+  const navigate = useNavigate();
+  return (
+    <div onClick={() => navigate(`/product/${product.id}`)} className="pro-card group cursor-pointer flex flex-col h-full bg-white overflow-hidden">
+      <div className="relative aspect-[4/3] bg-gray-100 overflow-hidden border-b border-gray-100">
+        <img 
+          src={product.images?.[0] || 'https://via.placeholder.com/300'} 
+          alt={product.title} 
+          className="w-full h-full object-cover object-center group-hover:scale-105 transition-transform duration-300"
+          loading="lazy"
+        />
+        {/* Simple Badge */}
+        {product.condition === 'new' && (
+          <span className="absolute top-2 right-2 bg-blue-600 text-white text-[10px] font-bold px-2 py-1 rounded shadow-sm">MỚI</span>
+        )}
+      </div>
+      
+      <div className="p-4 flex flex-col flex-1">
+        <div className="flex justify-between items-start mb-2">
+          <span className="text-xs font-medium text-blue-600 uppercase tracking-wide">{product.category}</span>
+          <span className="text-xs text-gray-400">{Utils.timeAgo(product.created_at)}</span>
+        </div>
+        
+        <h3 className="text-sm font-bold text-gray-900 line-clamp-2 mb-auto group-hover:text-blue-700 transition-colors">
+          {product.title}
+        </h3>
+        
+        <div className="mt-3 pt-3 border-t border-gray-100 flex items-center justify-between">
+          <span className="text-base font-bold text-red-600">
+            {product.price === 0 ? "Thỏa thuận" : Utils.formatCurrency(product.price)}
+          </span>
+          {product.location_name && (
+            <div className="flex items-center gap-1 text-xs text-gray-500">
+              <MapPin size={12} /> <span className="truncate max-w-[80px]">{product.location_name}</span>
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
 
 // ============================================================================
 // 6. MAIN PAGE
 // ============================================================================
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
-  const { addToast } = useToast();
   const [filter, setFilter] = useState<FilterState>({ category: "all", sort: SortOption.NEWEST, search: "", minPrice: "", maxPrice: "", condition: "all" });
   const [searchTerm, setSearchTerm] = useState("");
   const [showFilterModal, setShowFilterModal] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [showBackToTop, setShowBackToTop] = useState(false);
-  const countU = useCounter(25000);
-  const countP = useCounter(8500);
+  
+  // Debounce Search
+  useEffect(() => {
+    const t = setTimeout(() => setFilter(p => ({...p, search: searchTerm})), 500);
+    return () => clearTimeout(t);
+  }, [searchTerm]);
 
   const { products, loading, hasMore, loadMore, totalCount } = useProducts(filter);
 
-  useEffect(() => { const t = setTimeout(() => setFilter(p => ({...p, search: searchTerm})), 500); return () => clearTimeout(t); }, [searchTerm]);
-  useEffect(() => { const h = () => setShowBackToTop(window.scrollY > 500); window.addEventListener('scroll', h); return () => window.removeEventListener('scroll', h); }, []);
-
   return (
-    <div className="relative min-h-screen selection:bg-[#0047AB] selection:text-white pb-20">
-      <VisualEngine />
-      <div className="grain-overlay"></div>
-      <div className="aurora-bg"></div>
+    <div className="min-h-screen pb-12 font-sans">
+      <GlobalStyles />
       
-      <LiveTicker />
-
       {showFilterModal && <FilterModal filter={filter} setFilter={setFilter} onClose={() => setShowFilterModal(false)} />}
-      
-      {/* Quick View Modal */}
-      {selectedProduct && (
-        <div className="modal-backdrop z-[110]" onClick={() => setSelectedProduct(null)}>
-          <div className="modal-content bg-white rounded-[3rem] p-8 w-full max-w-4xl shadow-2xl m-4 flex flex-col md:flex-row gap-10 relative overflow-hidden" onClick={e => e.stopPropagation()}>
-            <button onClick={() => setSelectedProduct(null)} className="absolute top-6 right-6 p-2 bg-slate-100 rounded-full hover:bg-slate-200 transition-colors z-10"><X size={24}/></button>
-            <div className="w-full md:w-1/2 bg-slate-50 rounded-[2rem] overflow-hidden flex items-center justify-center border border-slate-100"><img src={selectedProduct.images?.[0]} className="max-h-[400px] object-contain hover:scale-110 transition-transform duration-700"/></div>
-            <div className="w-full md:w-1/2 flex flex-col">
-              <div className="flex justify-between items-start mb-4"><span className="bg-blue-100 text-[#0047AB] text-[10px] font-black px-3 py-1 rounded-full uppercase tracking-widest">{selectedProduct.category}</span><span className="text-slate-400 text-xs font-bold flex items-center gap-1"><Clock size={14}/> {Utils.timeAgo(selectedProduct.created_at)}</span></div>
-              <h2 className="text-3xl font-black text-[#002147] mb-4 leading-tight">{selectedProduct.title}</h2>
-              <p className="text-4xl font-black text-[#0047AB] mb-8">{selectedProduct.price === 0 ? "MIỄN PHÍ" : Utils.formatCurrency(selectedProduct.price)}</p>
-              <div className="space-y-4 bg-slate-50 p-6 rounded-3xl border border-slate-100 mb-8 flex-1">
-                <div className="flex items-center justify-between"><span className="text-sm font-bold text-slate-400 uppercase tracking-tighter">Tình trạng</span><span className="font-black text-[#002147] flex items-center gap-2"><Star size={16} className="fill-yellow-400 text-yellow-400"/> {selectedProduct.condition === 'new' ? 'Mới 100%' : 'Đã qua sử dụng'}</span></div>
-                <div className="h-[1px] bg-slate-200 w-full"></div>
-                <div className="flex items-center justify-between"><span className="text-sm font-bold text-slate-400 uppercase tracking-tighter">Địa điểm</span><span className="font-black text-[#002147] flex items-center gap-2"><MapPin size={16} className="text-red-500"/> {selectedProduct.location_name || 'ĐH Bách Khoa'}</span></div>
+
+      {/* --- HERO SECTION (CLEAN) --- */}
+      <section className="bg-white border-b border-gray-200 pt-12 pb-16 px-4">
+        <div className="max-w-7xl mx-auto text-center">
+          <h1 className="text-3xl md:text-4xl font-extrabold text-slate-900 mb-4 tracking-tight">
+            Sàn Giao Dịch Sinh Viên <span className="text-[#00388D]">Bách Khoa</span>
+          </h1>
+          <p className="text-slate-600 mb-8 max-w-2xl mx-auto text-base">
+            Nơi trao đổi giáo trình, tài liệu, thiết bị điện tử và dụng cụ học tập uy tín, an toàn dành riêng cho cộng đồng sinh viên HCMUT.
+          </p>
+
+          {/* Search Box */}
+          <div className="max-w-2xl mx-auto relative">
+            <div className="flex shadow-sm rounded-lg overflow-hidden border border-gray-300 focus-within:ring-2 focus-within:ring-blue-500 focus-within:border-blue-500 transition-all">
+              <div className="bg-gray-50 px-4 flex items-center border-r border-gray-200">
+                <Search className="text-gray-400" size={20} />
               </div>
-              <button onClick={() => navigate(`/product/${selectedProduct.id}`)} className="w-full py-5 bg-[#002147] text-white font-black uppercase tracking-widest text-xs rounded-2xl shadow-2xl shadow-blue-900/20 hover:bg-[#0047AB] transition-all flex items-center justify-center gap-3">Xem chi tiết bài đăng <ArrowRight size={18}/></button>
+              <input 
+                type="text"
+                className="flex-1 py-3 px-4 text-gray-900 placeholder-gray-500 outline-none"
+                placeholder="Tìm kiếm sách, máy tính, tài liệu..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+              />
+              <button 
+                onClick={() => setShowFilterModal(true)}
+                className="bg-white px-4 border-l border-gray-200 text-gray-600 hover:bg-gray-50 hover:text-blue-600 transition-colors"
+                title="Bộ lọc nâng cao"
+              >
+                <SlidersHorizontal size={20} />
+              </button>
+              <button 
+                onClick={() => navigate(`/market?search=${searchTerm}`)}
+                className="bg-[#00388D] text-white px-6 py-3 font-semibold hover:bg-[#002b6e] transition-colors"
+              >
+                Tìm kiếm
+              </button>
             </div>
           </div>
-        </div>
-      )}
 
-      {/* Hero Section */}
-      <section className="relative px-4 pb-24 text-center overflow-hidden">
-        <div className="absolute inset-0 pointer-events-none opacity-20 overflow-hidden">
-           <BookOpen size={100} className="animate-float absolute left-[5%] top-[10%] text-[#0047AB]"/>
-           <Monitor size={120} className="animate-float delay-100 absolute right-[10%] top-[20%] text-[#00E5FF]"/>
-           <Smartphone size={80} className="animate-float delay-200 absolute left-[15%] bottom-[20%] text-indigo-400"/>
-           <Rocket size={150} className="animate-float delay-300 absolute right-[5%] bottom-[10%] text-purple-400 opacity-50"/>
-        </div>
-        <HeroSlider />
-        <div className="max-w-2xl mx-auto relative z-20 mb-16 animate-enter" style={{animationDelay: "400ms"}}>
-          <div className="absolute -inset-2 bg-gradient-to-r from-[#0047AB] to-[#00E5FF] rounded-full opacity-20 blur-2xl animate-pulse"></div>
-          <div className="relative bg-white/90 p-2.5 rounded-full shadow-2xl flex items-center backdrop-blur-xl border border-white/50">
-            <Search className="ml-5 text-slate-300" size={24}/>
-            <input className="flex-1 bg-transparent border-none outline-none px-5 py-4 text-slate-900 placeholder:text-slate-400 font-bold text-lg" placeholder="Bạn đang tìm giáo trình, laptop...?" value={searchTerm} onChange={e => setSearchTerm(e.target.value)}/>
-            <div className="h-10 w-[1px] bg-slate-200 mx-2"></div>
-            <button onClick={() => setShowFilterModal(true)} className="p-4 text-slate-400 hover:text-[#0047AB] hover:bg-blue-50 rounded-full transition-all relative group"><SlidersHorizontal size={24}/><span className="absolute -top-10 left-1/2 -translate-x-1/2 bg-[#002147] text-white text-[10px] px-2 py-1 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap">Lọc nâng cao</span></button>
-            <button onClick={() => navigate(`/market?search=${searchTerm}`)} className="bg-[#002147] text-white px-10 py-4 rounded-full font-black uppercase tracking-tighter text-sm hover:bg-[#0047AB] transition-all ml-2 shadow-xl active:scale-95">Tìm kiếm</button>
+          {/* Quick Stats */}
+          <div className="flex justify-center gap-8 mt-8 text-sm text-gray-500">
+            <div className="flex items-center gap-2"><BookOpen size={16} className="text-blue-600"/> <strong>2,500+</strong> Giáo trình</div>
+            <div className="flex items-center gap-2"><Monitor size={16} className="text-blue-600"/> <strong>1,200+</strong> Thiết bị</div>
+            <div className="flex items-center gap-2"><Users size={16} className="text-blue-600"/> <strong>15k+</strong> Sinh viên</div>
           </div>
-        </div>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6 max-w-5xl mx-auto px-4 animate-enter" style={{animationDelay: "600ms"}}>
-           {[{ l: "Dạo Chợ", i: <ShoppingBag size={28}/>, path: "/market", c: "text-cyan-600 bg-cyan-50" }, { l: "Đăng Tin", i: <PlusCircle size={28}/>, path: "/post-item", c: "text-indigo-600 bg-indigo-50" }, { l: "Đã Lưu", i: <Heart size={28}/>, path: "/saved", c: "text-pink-600 bg-pink-50" }, { l: "Quản Lý", i: <Package size={28}/>, path: "/my-items", c: "text-orange-600 bg-orange-50" }].map((item, idx) => (
-             <Link to={item.path} key={idx} className="glass-card hover-lift p-8 rounded-[2.5rem] flex flex-col items-center gap-4 group">
-               <div className={`p-5 rounded-2xl ${item.c} group-hover:scale-110 transition-transform shadow-inner`}>{item.i}</div>
-               <span className="font-black text-[#002147] text-xs uppercase tracking-widest">{item.l}</span>
-             </Link>
-           ))}
         </div>
       </section>
 
-      {/* Animated Stats */}
-      <section className="mb-24 border-y border-white/20 bg-white/60 py-20 backdrop-blur-md relative overflow-hidden">
-        <div className="absolute inset-0 bg-grid-slate-100 [mask-image:linear-gradient(0deg,white,rgba(255,255,255,0.6))] opacity-25"></div>
-        <div className="mx-auto max-w-7xl px-4 grid grid-cols-2 md:grid-cols-4 gap-12 text-center relative z-10">
-          {[
-            { v: countU + "+", l: "Thành viên", i: <Users size={32}/>, color: "text-blue-600" },
-            { v: countP + "+", l: "Sản phẩm", i: <Package size={32}/>, color: "text-purple-600" },
-            { v: "15K+", l: "Giao dịch", i: <ShoppingBag size={32}/>, color: "text-green-600" },
-            { v: "99%", l: "Hài lòng", i: <Smile size={32}/>, color: "text-orange-600" },
-          ].map((s, i) => (
-            <div key={i} className="group flex flex-col items-center">
-              <div className={`mb-4 ${s.color} transform group-hover:scale-125 transition-transform duration-500`}>{s.i}</div>
-              <p className="text-5xl font-black text-[#002147] mb-2 tabular-nums tracking-tighter">{s.v}</p>
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.2em]">{s.l}</p>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* Top Sellers */}
-      <TopSellers />
-
-      {/* Main Feed */}
-      <section className="max-w-7xl mx-auto px-4 mb-32 min-h-[800px]">
-        <div className="sticky top-10 z-40 bg-white/95 backdrop-blur-2xl border-y border-white/20 py-5 mb-12 -mx-4 px-6 shadow-xl rounded-full flex items-center justify-between overflow-x-auto hide-scrollbar border border-slate-100">
-          <div className="flex gap-3">
-            {[
-              { id: "all", l: "Tất cả", i: <Grid size={18}/> },
-              { id: ProductCategory.TEXTBOOK, l: "Giáo trình", i: <BookOpen size={18}/> },
-              { id: ProductCategory.ELECTRONICS, l: "Điện tử", i: <Monitor size={18}/> },
-              { id: ProductCategory.CLOTHING, l: "Đồng phục", i: <Shirt size={18}/> }
-            ].map(cat => (
-              <button key={cat.id} onClick={() => setFilter({ ...filter, category: cat.id })} className={Utils.cn("flex items-center gap-2 px-6 py-3 rounded-full text-xs font-black uppercase tracking-widest border transition-all active:scale-95", filter.category === cat.id ? 'bg-[#002147] text-white border-[#002147] shadow-xl' : 'bg-white text-slate-500 border-slate-200 hover:border-[#0047AB]')}>{cat.i} {cat.l}</button>
-            ))}
-          </div>
-          <div className="ml-6 border-l border-slate-100 pl-6 flex items-center gap-4">
-             <span className="text-[10px] font-black text-slate-300 uppercase tracking-widest hidden lg:block">Sắp xếp theo</span>
-             <select className="bg-slate-50 px-4 py-2 rounded-xl text-xs font-black text-[#002147] outline-none cursor-pointer border border-slate-100" value={filter.sort} onChange={e => setFilter({ ...filter, sort: e.target.value as SortOption })}>
-               <option value={SortOption.NEWEST}> ✨ Mới nhất </option>
-               <option value={SortOption.PRICE_ASC}> 💰 Giá rẻ </option>
-               <option value={SortOption.MOST_VIEWED}> 🔥 Hot nhất </option>
-             </select>
-          </div>
-        </div>
-
-        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-8">
-          {loading && products.length === 0 ? (
-            [...Array(12)].map((_, i) => (
-              <div key={i} className="h-[380px] rounded-[2.5rem] bg-white/50 border border-white p-6 space-y-6 shadow-sm"><div className="h-[200px] bg-slate-200 rounded-[2rem] animate-pulse"/><div className="h-4 w-3/4 bg-slate-200 rounded animate-pulse"/><div className="h-4 w-1/2 bg-slate-200 rounded animate-pulse"/></div>
-            ))
-          ) : products.length > 0 ? (
-            products.map(p => <div key={p.id} className="animate-enter"><ProductCard product={p} onQuickView={setSelectedProduct}/></div>)
-          ) : (
-            <div className="col-span-full py-32 text-center glass-card rounded-[3rem] border-2 border-dashed border-slate-200">
-              <Ghost size={80} className="mx-auto text-slate-200 mb-8 animate-float"/>
-              <h3 className="text-3xl font-black text-slate-700 mb-4">Ối! Trống trơn rồi...</h3>
-              <p className="text-slate-400 mb-10 max-w-md mx-auto font-medium">Chúng tôi không tìm thấy kết quả nào khớp với yêu cầu của bạn. Thử đổi từ khóa khác nhé!</p>
-              <button onClick={() => {setFilter({category: 'all', sort: SortOption.NEWEST, search: '', minPrice: "", maxPrice: "", condition: "all"}); setSearchTerm("")}} className="px-10 py-4 bg-[#002147] text-white rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-[#0047AB] transition-all shadow-2xl active:scale-95">Xóa hết bộ lọc</button>
-            </div>
-          )}
-        </div>
-
-        {hasMore && products.length > 0 && (
-          <div className="mt-24 text-center">
-            <button onClick={loadMore} disabled={loading} className="group relative px-12 py-5 bg-[#002147] text-white rounded-[2rem] font-black uppercase tracking-[0.2em] text-[10px] overflow-hidden shadow-2xl transition-all hover:scale-105 active:scale-95 disabled:opacity-50">
-              <span className="relative z-10 flex items-center gap-3">{loading ? <Activity className="animate-spin" size={16}/> : "Tải thêm bài đăng"} <ChevronDown size={16}/></span>
-              <div className="absolute inset-0 bg-[#0047AB] transform scale-x-0 group-hover:scale-x-100 transition-transform origin-left"></div>
-            </button>
-          </div>
-        )}
-      </section>
-
-      {/* Extra: Features / AI Promo */}
-      <section className="max-w-7xl mx-auto px-4 mb-32">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-           <div className="relative overflow-hidden rounded-[3.5rem] bg-gradient-to-br from-[#002147] to-[#0047AB] p-16 text-white shadow-2xl group border border-white/10">
-              <div className="absolute -top-20 -right-20 w-80 h-80 bg-[#00E5FF] rounded-full blur-[100px] opacity-20 group-hover:opacity-40 transition-opacity"></div>
-              <div className="relative z-10">
-                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/20 bg-white/5 text-[#00E5FF] text-[10px] font-black uppercase tracking-[0.2em] mb-8 animate-pulse"><Zap size={14}/> New AI Engine V2</div>
-                <h2 className="text-5xl font-black mb-6 leading-tight">Chụp Ảnh <br/> Bán Hàng Ngay</h2>
-                <p className="text-slate-300 mb-10 text-lg leading-relaxed font-medium">Hệ thống AI tiên tiến tự động nhận diện sản phẩm, phân tích tình trạng và gợi ý mức giá trung bình trên thị trường Bách Khoa.</p>
-                <button onClick={() => navigate('/post-item')} className="px-10 py-5 bg-[#00E5FF] text-[#002147] rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-white transition-all shadow-xl shadow-cyan-400/20 active:scale-95 flex items-center gap-3">Thử nghiệm ngay <Rocket size={18}/></button>
+      {/* --- MAIN CONTENT --- */}
+      <section className="max-w-7xl mx-auto px-4 py-8">
+        <div className="flex flex-col md:flex-row gap-8">
+          
+          {/* LEFT: CATEGORIES & SIDEBAR */}
+          <div className="w-full md:w-64 flex-shrink-0 space-y-6">
+            <div className="bg-white rounded-lg border border-gray-200 p-4 shadow-sm">
+              <h3 className="font-bold text-gray-900 mb-4 flex items-center gap-2">
+                <LayoutGrid size={18}/> Danh mục
+              </h3>
+              <div className="space-y-1">
+                {[
+                  { id: "all", label: "Tất cả sản phẩm" },
+                  { id: ProductCategory.TEXTBOOK, label: "Sách & Giáo trình" },
+                  { id: ProductCategory.ELECTRONICS, label: "Điện tử & Laptop" },
+                  { id: ProductCategory.SUPPLIES, label: "Dụng cụ học tập" },
+                  { id: ProductCategory.CLOTHING, label: "Đồng phục & Khác" },
+                ].map(cat => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setFilter({ ...filter, category: cat.id })}
+                    className={`w-full text-left px-3 py-2 rounded-md text-sm font-medium transition-colors ${filter.category === cat.id ? 'bg-blue-50 text-blue-700' : 'text-gray-600 hover:bg-gray-50'}`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
               </div>
-           </div>
-           <div className="glass-card rounded-[3.5rem] p-16 border border-white/80">
-              <h2 className="text-3xl font-black text-[#002147] mb-10 flex items-center gap-3"><HelpCircle className="text-[#0047AB]"/> Hỗ trợ tân sinh viên</h2>
-              <div className="space-y-6">
-                {[{ q: "Giao dịch ở đâu an toàn nhất?", a: "Cơ sở 1 nên ở sảnh H6, cơ sở 2 ở B4 hoặc thư viện." }, { q: "Làm sao biết người bán uy tín?", a: "Xem đánh giá sao và huy hiệu 'Sinh viên thực' trên hồ sơ." }, { q: "Giá sách cũ bao nhiêu là hợp lý?", a: "Thường từ 40% - 60% giá bìa tùy độ mới." }].map((f, i) => (
-                  <div key={i} className="bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100 hover:border-blue-200 transition-colors cursor-default">
-                    <h4 className="font-black text-[#0047AB] mb-2 text-sm uppercase tracking-tight">Q: {f.q}</h4>
-                    <p className="text-slate-500 text-sm font-medium leading-relaxed">A: {f.a}</p>
+            </div>
+
+            <div className="bg-blue-50 rounded-lg border border-blue-100 p-4">
+              <h4 className="font-bold text-blue-800 mb-2 text-sm">Bạn cần bán đồ?</h4>
+              <p className="text-xs text-blue-600 mb-3">Đăng tin miễn phí, tiếp cận hàng ngàn sinh viên Bách Khoa ngay hôm nay.</p>
+              <button 
+                onClick={() => navigate('/post-item')}
+                className="w-full py-2 bg-white border border-blue-200 text-blue-700 text-sm font-bold rounded hover:bg-blue-100 transition-colors"
+              >
+                Đăng tin ngay
+              </button>
+            </div>
+          </div>
+
+          {/* RIGHT: PRODUCTS GRID */}
+          <div className="flex-1">
+            {/* Header Sort */}
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-xl font-bold text-gray-900">
+                {filter.category === 'all' ? 'Tin đăng mới nhất' : 'Kết quả lọc'}
+              </h2>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-500 hidden sm:inline">Sắp xếp:</span>
+                <select 
+                  className="bg-white border border-gray-300 text-gray-700 text-sm rounded-md px-3 py-1.5 outline-none focus:border-blue-500"
+                  value={filter.sort}
+                  onChange={e => setFilter({ ...filter, sort: e.target.value as SortOption })}
+                >
+                  <option value={SortOption.NEWEST}>Mới nhất</option>
+                  <option value={SortOption.PRICE_ASC}>Giá thấp đến cao</option>
+                  <option value={SortOption.PRICE_DESC}>Giá cao đến thấp</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Grid */}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+              {loading && products.length === 0 ? (
+                [...Array(8)].map((_, i) => (
+                  <div key={i} className="bg-white rounded-lg border border-gray-200 p-4 space-y-3">
+                    <div className="h-40 bg-gray-200 rounded skeleton"/>
+                    <div className="h-4 w-3/4 bg-gray-200 rounded skeleton"/>
+                    <div className="h-4 w-1/2 bg-gray-200 rounded skeleton"/>
                   </div>
-                ))}
+                ))
+              ) : products.length > 0 ? (
+                products.map(p => <ProductCard key={p.id} product={p} />)
+              ) : (
+                <div className="col-span-full py-16 text-center bg-white border border-gray-200 rounded-lg">
+                  <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                    <Search className="text-gray-400" size={32}/>
+                  </div>
+                  <h3 className="text-lg font-bold text-gray-800">Không tìm thấy sản phẩm</h3>
+                  <p className="text-gray-500 text-sm mt-1 mb-4">Thử thay đổi từ khóa hoặc bộ lọc của bạn.</p>
+                  <button 
+                    onClick={() => {
+                      setFilter({ category: 'all', sort: SortOption.NEWEST, search: '', minPrice: "", maxPrice: "", condition: "all" });
+                      setSearchTerm("");
+                    }} 
+                    className="text-blue-600 font-bold text-sm hover:underline"
+                  >
+                    Xóa bộ lọc
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* Load More */}
+            {products.length > 0 && hasMore && (
+              <div className="mt-10 text-center">
+                <button 
+                  onClick={loadMore} 
+                  disabled={loading}
+                  className="px-6 py-2.5 bg-white border border-gray-300 text-gray-700 font-medium rounded-md hover:bg-gray-50 hover:border-gray-400 transition-all disabled:opacity-50"
+                >
+                  {loading ? "Đang tải..." : "Xem thêm sản phẩm"}
+                </button>
               </div>
-           </div>
+            )}
+          </div>
         </div>
       </section>
 
-      {/* News / Blog */}
-      <BlogSection />
-
-      {/* FAQ & Testimonials */}
-      <TestimonialsSection />
-      <FAQSection />
-
-      {/* Newsletter */}
-      <section className="max-w-7xl mx-auto px-4 mb-32">
-        <div className="bg-gradient-to-r from-[#003366] to-[#002147] p-16 rounded-[4rem] flex flex-col md:flex-row items-center justify-between gap-16 border border-white/10 shadow-2xl relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-20 opacity-5"><Mail size={300}/></div>
-          <div className="flex-1 relative z-10 text-center md:text-left">
-            <h3 className="text-5xl font-black text-white mb-4 tracking-tighter">Đừng bỏ lỡ deal hời!</h3>
-            <p className="text-slate-400 text-xl font-medium">Chúng tôi sẽ gửi danh sách giáo trình rẻ nhất vào mỗi sáng thứ 2.</p>
+      {/* --- FOOTER --- */}
+      <footer className="bg-white border-t border-gray-200 pt-12 pb-8 mt-12">
+        <div className="max-w-7xl mx-auto px-4 grid grid-cols-1 md:grid-cols-4 gap-8">
+          <div className="col-span-1 md:col-span-1">
+            <div className="flex items-center gap-2 mb-4">
+              <div className="w-8 h-8 bg-[#00388D] rounded flex items-center justify-center text-white font-bold">BK</div>
+              <span className="text-lg font-bold text-[#00388D]">BK Market</span>
+            </div>
+            <p className="text-sm text-gray-500 mb-4">Cộng đồng trao đổi hàng đầu dành cho sinh viên Bách Khoa.</p>
+            <p className="text-xs text-gray-400">© 2026 HCMUT Student Project.</p>
           </div>
-          <div className="flex w-full md:w-auto gap-4 relative z-10">
-            <div className="flex-1 md:w-96 relative">
-              <Mail className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-500"/>
-              <input placeholder="Email sinh viên của bạn..." className="w-full bg-[#001529] border border-[#0047AB]/50 text-white pl-14 pr-6 py-5 rounded-3xl outline-none focus:border-[#00E5FF] transition-all shadow-inner font-bold"/>
-            </div>
-            <button className="bg-[#00E5FF] text-[#002147] font-black px-10 py-5 rounded-3xl hover:bg-white transition-all shadow-xl shadow-cyan-400/20 active:scale-95 uppercase text-xs tracking-widest">Đăng ký</button>
+          
+          <div>
+            <h4 className="font-bold text-gray-900 mb-4 text-sm uppercase">Về chúng tôi</h4>
+            <ul className="space-y-2 text-sm text-gray-600">
+              <li><Link to="/about" className="hover:text-blue-600">Giới thiệu</Link></li>
+              <li><Link to="/rules" className="hover:text-blue-600">Quy chế hoạt động</Link></li>
+              <li><Link to="/privacy" className="hover:text-blue-600">Chính sách bảo mật</Link></li>
+            </ul>
           </div>
-        </div>
-      </section>
 
-      {/* Footer */}
-      <footer className="bg-[#002147] pt-32 pb-16 text-slate-500 border-t border-white/5 relative overflow-hidden">
-        <div className="max-w-7xl mx-auto px-4 relative z-10">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-20 mb-24">
-            <div className="space-y-8">
-              <div className="flex items-center gap-4 text-white">
-                <div className="w-14 h-14 bg-gradient-to-br from-[#0047AB] to-[#00E5FF] rounded-[1.2rem] flex items-center justify-center font-black shadow-2xl text-2xl">BK</div>
-                <div><h4 className="font-black text-3xl tracking-tighter">CHỢ BK</h4><p className="text-[10px] uppercase text-[#00E5FF] tracking-[0.4em] font-black">Marketplace</p></div>
-              </div>
-              <p className="text-sm leading-relaxed font-medium">Nền tảng thương mại điện tử chuyên biệt cho cộng đồng sinh viên Đại học Bách Khoa TP.HCM. Sứ mệnh của chúng tôi là kết nối và hỗ trợ đời sống sinh viên thông qua việc trao đổi giáo trình và đồ dùng học tập.</p>
-              <div className="flex gap-5">
-                {[Share2, MessageCircle, ThumbsUp].map((Icon, i) => (
-                  <div key={i} className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center hover:bg-[#0047AB] hover:text-white transition-all cursor-pointer border border-white/5 shadow-lg"><Icon size={20}/></div>
-                ))}
-              </div>
-            </div>
-            <div>
-              <h4 className="text-white font-black uppercase text-xs mb-10 tracking-[0.3em] border-l-4 border-[#00E5FF] pl-4">Menu Chính</h4>
-              <ul className="space-y-5 text-sm font-bold">
-                <li><Link to="/market" className="hover:text-[#00E5FF] transition-colors flex items-center gap-3 group"><ChevronRight size={14} className="group-hover:translate-x-2 transition-transform"/> Dạo chợ online</Link></li>
-                <li><Link to="/post-item" className="hover:text-[#00E5FF] transition-colors flex items-center gap-3 group"><ChevronRight size={14} className="group-hover:translate-x-2 transition-transform"/> Đăng tin rao bán</Link></li>
-                <li><Link to="/saved" className="hover:text-[#00E5FF] transition-colors flex items-center gap-3 group"><ChevronRight size={14} className="group-hover:translate-x-2 transition-transform"/> Danh sách yêu thích</Link></li>
-                <li><Link to="/chat" className="hover:text-[#00E5FF] transition-colors flex items-center gap-3 group"><ChevronRight size={14} className="group-hover:translate-x-2 transition-transform"/> Trung tâm tin nhắn</Link></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="text-white font-black uppercase text-xs mb-10 tracking-[0.3em] border-l-4 border-[#00E5FF] pl-4">Pháp Lý</h4>
-              <ul className="space-y-5 text-sm font-bold">
-                <li><a href="#" className="hover:text-[#00E5FF] transition-colors">Quy định chung</a></li>
-                <li><a href="#" className="hover:text-[#00E5FF] transition-colors">Chính sách bảo mật</a></li>
-                <li><a href="#" className="hover:text-[#00E5FF] transition-colors">Tranh chấp & Khiếu nại</a></li>
-                <li><a href="#" className="hover:text-[#00E5FF] transition-colors">An toàn giao dịch</a></li>
-              </ul>
-            </div>
-            <div>
-              <h4 className="text-white font-black uppercase text-xs mb-10 tracking-[0.3em] border-l-4 border-[#00E5FF] pl-4">Liên Hệ</h4>
-              <ul className="space-y-6 text-sm font-bold">
-                <li className="flex items-center gap-4 group cursor-pointer"><div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover:text-[#00E5FF] transition-colors"><Smartphone size={20}/></div> (028) 3864 7256</li>
-                <li className="flex items-start gap-4 group cursor-pointer"><div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover:text-[#00E5FF] transition-colors mt-1"><MapPin size={20}/></div> 268 Lý Thường Kiệt, Quận 10, TP.HCM</li>
-                <li className="flex items-center gap-4 group cursor-pointer"><div className="w-10 h-10 rounded-xl bg-white/5 flex items-center justify-center group-hover:text-[#00E5FF] transition-colors"><Mail size={20}/></div> support@bkmart.vn</li>
-              </ul>
-            </div>
+          <div>
+            <h4 className="font-bold text-gray-900 mb-4 text-sm uppercase">Hỗ trợ</h4>
+            <ul className="space-y-2 text-sm text-gray-600">
+              <li><a href="#" className="hover:text-blue-600">Trung tâm trợ giúp</a></li>
+              <li><a href="#" className="hover:text-blue-600">Báo cáo vi phạm</a></li>
+              <li><a href="#" className="hover:text-blue-600">Liên hệ admin</a></li>
+            </ul>
           </div>
-          <div className="border-t border-white/5 pt-12 text-center flex flex-col md:flex-row justify-between items-center gap-6">
-            <p className="text-[10px] font-black uppercase tracking-[0.3em] text-slate-600">© 2026 HCMUT Student Project. All Rights Reserved.</p>
-            <div className="flex items-center gap-2 text-[10px] font-black uppercase tracking-widest text-slate-600">
-              Handcrafted with <Heart size={12} className="text-red-500 fill-red-500 mx-1"/> for the BK Community
-            </div>
+
+          <div>
+            <h4 className="font-bold text-gray-900 mb-4 text-sm uppercase">Liên hệ</h4>
+            <ul className="space-y-2 text-sm text-gray-600">
+              <li>268 Lý Thường Kiệt, Q.10, TP.HCM</li>
+              <li>Email: support@bkmart.vn</li>
+              <li>Hotline: (028) 3864 7256</li>
+            </ul>
           </div>
         </div>
       </footer>
-
-      {showBackToTop && (
-        <button onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })} className="fixed bottom-10 right-10 bg-gradient-to-tr from-[#002147] to-[#0047AB] text-white p-5 rounded-[1.5rem] shadow-2xl hover:scale-110 active:scale-95 transition-all z-[100] border border-white/10 group animate-enter">
-          <ArrowUp size={28} className="group-hover:-translate-y-1 transition-transform"/>
-        </button>
-      )}
     </div>
   );
 };
