@@ -1,10 +1,10 @@
-import React, { useEffect, useState, useMemo } from "react";
+import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Users, Package, AlertTriangle, 
-  Search, Bell, LogOut, CheckCircle, XCircle, Trash2, 
-  Shield, Ban, Eye, TrendingUp, ChevronLeft, ChevronRight,
-  Activity, Calendar, ArrowUpRight, Filter
+  Search, LogOut, CheckCircle, Trash2, 
+  Shield, Ban, Eye, ChevronLeft, ChevronRight,
+  Activity, Calendar, ArrowUpRight
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -34,6 +34,12 @@ interface ActivityLog {
   message: string;
   time: string;
 }
+
+// Helper để lấy tên người bán an toàn (Fix lỗi Array/Object)
+const getSellerName = (seller: any) => {
+  if (Array.isArray(seller)) return seller[0]?.name || 'Ẩn danh';
+  return seller?.name || 'Ẩn danh';
+};
 
 // ============================================================================
 // 2. VISUAL ENGINE (CSS)
@@ -185,7 +191,7 @@ const AdminPage = () => {
         revenue: totalVal
       });
 
-      // 3. Chart Data (Last 7 Days) - Client Side Aggregation for REAL data
+      // 3. Chart Data (Last 7 Days)
       const sevenDaysAgo = new Date();
       sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
       
@@ -212,13 +218,18 @@ const AdminPage = () => {
 
       setChartData(Array.from(chartMap.entries()).map(([date, val]) => ({ date, ...val })).reverse());
 
-      // 4. Activity Feed (Merged Stream)
+      // 4. Activity Feed (Merged Stream) - FIX LỖI TẠI ĐÂY
       const { data: uLogs } = await supabase.from('profiles').select('id, name, created_at').order('created_at', { ascending: false }).limit(5);
       const { data: pLogs } = await supabase.from('products').select('id, title, created_at, seller:profiles(name)').order('created_at', { ascending: false }).limit(5);
 
       const mixedLogs: ActivityLog[] = [
         ...(uLogs?.map(u => ({ id: u.id, type: 'user_join', message: `${u.name} đã tham gia hệ thống`, time: u.created_at } as ActivityLog)) || []),
-        ...(pLogs?.map(p => ({ id: p.id, type: 'new_product', message: `${p.seller?.name} đăng bán "${p.title}"`, time: p.created_at } as ActivityLog)) || [])
+        ...(pLogs?.map(p => ({ 
+            id: p.id, 
+            type: 'new_product', 
+            message: `${getSellerName(p.seller)} đăng bán "${p.title}"`, // <-- FIX HERE
+            time: p.created_at 
+        } as ActivityLog)) || [])
       ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 10);
 
       setActivities(mixedLogs);
@@ -435,7 +446,7 @@ const AdminPage = () => {
                       <tr key={p.id}>
                         <td className="font-bold text-slate-700 max-w-xs truncate">{p.title}</td>
                         <td className="font-mono text-blue-600 font-bold">{new Intl.NumberFormat('vi-VN').format(p.price)}₫</td>
-                        <td>{p.seller?.name}</td>
+                        <td>{getSellerName(p.seller)}</td> {/* <-- DÙNG HÀM GET SELLER NAME */}
                         <td>{new Date(p.created_at).toLocaleDateString('vi-VN')}</td>
                         <td className="text-right">
                           <button onClick={() => window.open(`/product/${p.id}`, '_blank')} className="p-2 text-blue-500 hover:bg-blue-50 rounded"><Eye size={18}/></button>
