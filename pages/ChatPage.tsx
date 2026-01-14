@@ -31,59 +31,29 @@ const VisualEngine = () => (
       background: #FFFFFF; color: #1E293B; border: 1px solid #F1F5F9;
       border-bottom-left-radius: 4px; margin-right: auto; 
     }
-    .msg-image { padding: 4px; background: transparent; border: none; box-shadow: none; }
     
+    .badge-pop { animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+    @keyframes pop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
+
     .transaction-card {
       background: rgba(255, 255, 255, 0.95); border-bottom: 1px solid #E2E8F0; 
       z-index: 20; backdrop-filter: blur(12px);
     }
-    
     .animate-slide-in { animation: slideIn 0.3s ease-out forwards; }
     @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-
     .typing-dot { width: 6px; height: 6px; background: #94a3b8; border-radius: 50%; animation: typing 1.4s infinite ease-in-out both; }
-    .typing-dot:nth-child(1) { animation-delay: -0.32s; }
-    .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+    .typing-dot:nth-child(1) { animation-delay: -0.32s; } .typing-dot:nth-child(2) { animation-delay: -0.16s; }
     @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
-
-    .context-menu {
-      position: absolute; background: white; border: 1px solid #e2e8f0; 
-      border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); z-index: 50;
-      min-width: 160px; overflow: hidden; animation: fadeIn 0.1s;
-    }
-    .context-item {
-      padding: 10px 14px; font-size: 13px; color: #ef4444; font-weight: 500;
-      display: flex; items-center; gap: 8px; cursor: pointer; transition: background 0.1s;
-    }
-    .context-item:hover { background: #fef2f2; }
-
-    .dropdown-menu {
-      position: absolute; top: 100%; right: 0; margin-top: 8px;
-      background: white; border: 1px solid #E2E8F0; border-radius: 12px;
-      box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1);
-      width: 220px; overflow: hidden; z-index: 50;
-      animation: fadeIn 0.1s ease-out;
-    }
-    .dropdown-item {
-      display: flex; items-center; gap: 10px; width: 100%;
-      padding: 12px 16px; text-align: left; font-size: 14px; font-weight: 500;
-      color: #475569; transition: all 0.2s;
-    }
-    .dropdown-item:hover { background: #F8FAFC; color: #00418E; }
-    .dropdown-item.danger { color: #EF4444; }
-    .dropdown-item.danger:hover { background: #FEF2F2; }
-
-    .date-divider {
-      display: flex; justify-content: center; margin: 24px 0; position: relative;
-    }
-    .date-divider span {
-      background: #E2E8F0; color: #64748B; font-size: 11px; font-weight: 600;
-      padding: 4px 12px; border-radius: 12px; z-index: 10;
-    }
     
-    /* Animation cho badge */
-    .badge-pop { animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-    @keyframes pop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
+    .dropdown-menu {
+      position: absolute; top: 100%; right: 0; margin-top: 8px; background: white; border: 1px solid #E2E8F0; 
+      border-radius: 12px; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1); width: 220px; overflow: hidden; z-index: 50;
+    }
+    .dropdown-item { display: flex; items-center; gap: 10px; width: 100%; padding: 12px 16px; text-align: left; font-size: 14px; font-weight: 500; color: #475569; transition: all 0.2s; }
+    .dropdown-item:hover { background: #F8FAFC; color: #00418E; }
+    .dropdown-item.danger { color: #EF4444; } .dropdown-item.danger:hover { background: #FEF2F2; }
+    .date-divider { display: flex; justify-content: center; margin: 24px 0; position: relative; }
+    .date-divider span { background: #E2E8F0; color: #64748B; font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 12px; z-index: 10; }
   `}</style>
 );
 
@@ -137,19 +107,17 @@ const ChatPage: React.FC = () => {
       setLoadingConv(true);
       if (!user) return;
       
-      // Lấy danh sách hội thoại
       const { data: convData } = await supabase.from('conversations')
         .select(`*, p1:profiles!participant1(id, name, avatar_url), p2:profiles!participant2(id, name, avatar_url)`)
         .or(`participant1.eq.${user.id},participant2.eq.${user.id}`)
         .order('updated_at', { ascending: false });
 
       if (convData) {
-          // Lấy số tin nhắn chưa đọc cho MỖI hội thoại
-          // (Cách tối ưu hơn là dùng RPC, nhưng ở đây dùng Promise.all cho đơn giản)
+          // Tính toán số lượng tin chưa đọc
           const enriched = await Promise.all(convData.map(async (c: any) => {
               const partner = c.participant1 === user.id ? c.p2 : c.p1;
               
-              // Count unread messages where sender != me AND is_read = false
+              // Đếm số tin nhắn: Của người kia gửi (sender != me) VÀ Chưa đọc (is_read = false)
               const { count } = await supabase.from('messages')
                 .select('*', { count: 'exact', head: true })
                 .eq('conversation_id', c.id)
@@ -161,7 +129,7 @@ const ChatPage: React.FC = () => {
                   partnerName: partner?.name || "User", 
                   partnerAvatar: partner?.avatar_url, 
                   partnerId: partner?.id,
-                  unread_count: count || 0 // Thêm trường này
+                  unread_count: count || 0 // Lưu số lượng vào state
               };
           }));
           setConversations(enriched);
@@ -184,28 +152,36 @@ const ChatPage: React.FC = () => {
     initChat();
   }, [partnerIdParam, productIdParam, user]);
 
-  // 2. GLOBAL REALTIME: Lắng nghe tin nhắn mới để cập nhật List & Badge
+  // 2. GLOBAL REALTIME: Update List & Badges
   useEffect(() => {
     if (!user) return;
     const channel = supabase.channel('global_chat_updates')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
           const newMsg = payload.new;
-          
-          // Nếu tin nhắn KHÔNG PHẢI của mình
+          // Nếu tin nhắn từ người khác
           if (newMsg.sender_id !== user.id) {
-              // Nếu đang KHÔNG mở cuộc hội thoại này -> Play sound & Tăng badge
+              playMessageSound();
+              
+              // Nếu KHÔNG phải hội thoại đang mở -> Tăng badge
               if (activeConversation !== newMsg.conversation_id) {
-                  playMessageSound();
                   setConversations(prev => prev.map(c => 
                       c.id === newMsg.conversation_id 
                       ? { ...c, last_message: newMsg.content, updated_at: newMsg.created_at, unread_count: (c.unread_count || 0) + 1 }
+                      : c
+                  ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()));
+              } else {
+                  // Nếu ĐANG mở hội thoại này -> Chỉ update last_message (không tăng badge)
+                  // Và đánh dấu đã đọc ngay lập tức trong DB
+                  await supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id);
+                  setConversations(prev => prev.map(c => 
+                      c.id === newMsg.conversation_id 
+                      ? { ...c, last_message: newMsg.content, updated_at: newMsg.created_at }
                       : c
                   ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()));
               }
           }
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations' }, (payload) => {
-          // Cập nhật last_message mà không cần reload
           setConversations(prev => prev.map(c => 
              c.id === payload.new.id ? { ...c, ...payload.new } : c
           ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()));
@@ -215,20 +191,22 @@ const ChatPage: React.FC = () => {
     return () => { supabase.removeChannel(channel); };
   }, [user, activeConversation]);
 
-  // 3. Mark as Read Logic
+  // 3. Mark as Read Handler
   const handleSelectConversation = async (convId: string, partnerId: string) => {
       setActiveConversation(convId);
       fetchPartnerInfoInternal(partnerId);
-      setTargetProduct(null); // Reset product panel
+      setTargetProduct(null); 
 
-      // Update local UI immediately (Remove badge)
+      // UI Update: Xóa badge đỏ ngay lập tức
       setConversations(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
 
-      // Update DB: Mark all messages in this conv from partner as read
-      await supabase.from('messages').update({ is_read: true })
-        .eq('conversation_id', convId)
-        .neq('sender_id', user!.id)
-        .eq('is_read', false);
+      // DB Update: Đánh dấu tất cả tin nhắn của đối phương là đã đọc
+      if(user) {
+          await supabase.from('messages').update({ is_read: true })
+            .eq('conversation_id', convId)
+            .neq('sender_id', user.id)
+            .eq('is_read', false);
+      }
   };
 
   // 4. CHAT ROOM REALTIME
@@ -244,12 +222,6 @@ const ChatPage: React.FC = () => {
                 if (prev.some(m => m.id === newMsg.id)) return prev;
                 return [...prev, newMsg];
             });
-            
-            // Nếu đang mở hội thoại này và nhận tin mới -> Đánh dấu đã đọc ngay
-            if (newMsg.sender_id !== user?.id) {
-                playMessageSound();
-                supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id);
-            }
             setTimeout(scrollToBottom, 100);
         })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (payload) => {
@@ -272,7 +244,7 @@ const ChatPage: React.FC = () => {
     return () => { supabase.removeChannel(channel); };
   }, [activeConversation]);
 
-  // Helpers & Handlers
+  // Helpers & API
   const checkAndCreateConversation = async (pId: string, prodId: string | null) => {
       if (!user) return;
       let convId = null;
@@ -286,7 +258,7 @@ const ChatPage: React.FC = () => {
       }
 
       if (convId) {
-          handleSelectConversation(convId, pId); // Use new handler
+          handleSelectConversation(convId, pId); 
           if (prodId) {
               await supabase.from('conversations').update({ current_product_id: prodId }).eq('id', convId);
               const { data: pData } = await supabase.from('products').select('*').eq('id', prodId).single();
@@ -300,9 +272,7 @@ const ChatPage: React.FC = () => {
       if (conv?.current_product_id) {
           const { data: prod } = await supabase.from('products').select('*').eq('id', conv.current_product_id).single();
           if (prod) setTargetProduct(prod);
-      } else {
-          setTargetProduct(null);
-      }
+      } else { setTargetProduct(null); }
   };
 
   const fetchMessages = async (convId: string) => {
@@ -346,22 +316,15 @@ const ChatPage: React.FC = () => {
           if (uploadError) throw uploadError;
           const { data } = supabase.storage.from('chat-images').getPublicUrl(fileName);
           await handleSendMessage(undefined, data.publicUrl, 'image');
-      } catch (err) {
-          addToast("Lỗi gửi ảnh", "error");
-      } finally {
-          setUploading(false);
-      }
+      } catch (err) { addToast("Lỗi gửi ảnh", "error"); } finally { setUploading(false); }
   };
 
   const handleSendLocation = () => {
       if (!navigator.geolocation) return addToast("Trình duyệt không hỗ trợ vị trí", "error");
-      navigator.geolocation.getCurrentPosition(
-          (pos) => {
-              const link = `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
-              handleSendMessage(undefined, link, 'location');
-          },
-          () => addToast("Không thể lấy vị trí", "error")
-      );
+      navigator.geolocation.getCurrentPosition((pos) => {
+          const link = `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
+          handleSendMessage(undefined, link, 'location');
+      }, () => addToast("Không thể lấy vị trí", "error"));
   };
 
   const handleDeleteMessage = async (msgId: string) => {
@@ -373,9 +336,7 @@ const ChatPage: React.FC = () => {
   const handleUnpinProduct = async () => {
       if (!activeConversation) return;
       await supabase.from('conversations').update({ current_product_id: null }).eq('id', activeConversation);
-      setTargetProduct(null);
-      setIsMenuOpen(false);
-      addToast("Đã gỡ ghim sản phẩm", "info");
+      setTargetProduct(null); setIsMenuOpen(false); addToast("Đã gỡ ghim", "info");
   };
 
   const handleViewProfile = () => {
@@ -413,8 +374,6 @@ const ChatPage: React.FC = () => {
       const d = new Date(dateStr);
       const now = new Date();
       if(d.toDateString() === now.toDateString()) return "Hôm nay";
-      const yesterday = new Date(now); yesterday.setDate(now.getDate()-1);
-      if(d.toDateString() === yesterday.toDateString()) return "Hôm qua";
       return d.toLocaleDateString('vi-VN');
   }
 
@@ -422,22 +381,16 @@ const ChatPage: React.FC = () => {
       if (msg.type === 'image') return (
         <div className="relative group cursor-pointer" onClick={() => setPreviewImage(msg.content)}>
             <img src={msg.content} className="rounded-lg max-w-[200px] border border-white/20 transition-transform group-hover:scale-[1.02]"/>
-            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100">
-                <Maximize2 size={20} className="text-white drop-shadow-md"/>
-            </div>
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100"><Maximize2 size={20} className="text-white drop-shadow-md"/></div>
         </div>
       );
-      if (msg.type === 'location') return (
-          <a href={msg.content} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-blue-100 underline hover:text-white font-medium">
-              <MapPin size={16}/> Vị trí hiện tại <ExternalLink size={12}/>
-          </a>
-      );
+      if (msg.type === 'location') return (<a href={msg.content} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-blue-100 underline hover:text-white font-medium"><MapPin size={16}/> Vị trí hiện tại <ExternalLink size={12}/></a>);
       const urlRegex = /(https?:\/\/[^\s]+)/g;
       const parts = msg.content.split(urlRegex);
       return <p>{parts.map((part: string, i: number) => part.match(urlRegex) ? <a key={i} href={part} target="_blank" rel="noreferrer" className="text-blue-200 hover:underline">{part}</a> : part)}</p>;
   };
 
-  // Close menus on click outside & Scroll
+  // Click Outside & Scroll
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) setIsMenuOpen(false);
@@ -452,13 +405,13 @@ const ChatPage: React.FC = () => {
             setShowScrollBtn(scrollHeight - scrollTop - clientHeight > 300);
         };
         container.addEventListener('scroll', handleScroll);
-        return () => {
-            document.removeEventListener("mousedown", handleClickOutside);
-            container.removeEventListener('scroll', handleScroll);
-        }
+        return () => { document.removeEventListener("mousedown", handleClickOutside); container.removeEventListener('scroll', handleScroll); }
     }
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, [contextMenu, showEmojiPicker]);
+
+  useEffect(() => { scrollToBottom(); }, [messages]);
+  const scrollToBottom = () => scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
 
   return (
     <div className="max-w-7xl mx-auto h-[calc(100vh-64px)] flex bg-[#F1F5F9] font-sans overflow-hidden">
@@ -484,9 +437,9 @@ const ChatPage: React.FC = () => {
                           <span className="text-[10px] text-slate-400 whitespace-nowrap">{conv.updated_at ? new Date(conv.updated_at).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'}) : ''}</span>
                       </div>
                       <div className="flex justify-between items-center mt-0.5">
-                          <p className={`text-xs truncate max-w-[180px] ${conv.unread_count > 0 ? 'text-slate-900 font-bold' : 'text-slate-500 font-medium'}`}>{conv.last_message || "Bắt đầu trò chuyện"}</p>
+                          <p className={`text-xs truncate max-w-[200px] ${conv.unread_count > 0 ? 'text-slate-900 font-bold' : 'text-slate-500 font-medium'}`}>{conv.last_message || "Bắt đầu trò chuyện"}</p>
                           {/* UNREAD BADGE */}
-                          {conv.unread_count > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full badge-pop min-w-[18px] text-center">{conv.unread_count}</span>}
+                          {conv.unread_count > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-1.5 py-0.5 rounded-full badge-pop min-w-[18px] text-center shadow-sm border border-white">{conv.unread_count}</span>}
                       </div>
                   </div>
                </div>
@@ -494,7 +447,7 @@ const ChatPage: React.FC = () => {
          </div>
       </div>
 
-      {/* CHAT AREA (Giữ nguyên UI như cũ) */}
+      {/* CHAT AREA */}
       <div className={`flex-1 flex flex-col relative bg-[#F8FAFC] ${!activeConversation ? 'hidden md:flex' : 'flex'}`}>
          {activeConversation ? (
             <>
@@ -572,20 +525,17 @@ const ChatPage: React.FC = () => {
                   {messages.map((msg, idx) => {
                       const isMe = msg.sender_id === user?.id;
                       const isSystem = msg.content?.includes("TÔI MUỐN MUA") || msg.content?.includes("ĐÃ XÁC NHẬN") || msg.content?.includes("GIAO DỊCH") || msg.content?.includes("ĐÃ HỦY");
-                      
                       const prevMsg = messages[idx-1];
                       const showDate = !prevMsg || new Date(msg.created_at).toDateString() !== new Date(prevMsg.created_at).toDateString();
 
                       return (
                          <React.Fragment key={idx}>
                              {showDate && <div className="date-divider"><span>{formatMessageDate(msg.created_at)}</span></div>}
-                             
                              {isSystem ? (
                                  <div className="flex justify-center my-6"><div className="bg-slate-100 border border-slate-200 text-slate-600 px-4 py-2 rounded-full text-xs font-bold shadow-sm flex items-center gap-2"><AlertCircle size={12} className="text-[#00418E]"/><span className="whitespace-pre-wrap text-center">{msg.content}</span></div></div>
                              ) : (
                                  <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-slide-in group relative`}>
                                     {!isMe && <img src={partnerProfile?.avatar_url} className="w-8 h-8 rounded-full mr-2 self-end border border-slate-200 bg-white"/>}
-                                    
                                     <div 
                                         className={`msg-bubble ${isMe ? 'msg-me' : 'msg-you'} ${msg.type === 'image' ? 'msg-image' : ''}`}
                                         onContextMenu={(e) => {
@@ -598,7 +548,7 @@ const ChatPage: React.FC = () => {
                                        {renderMessageContent(msg)}
                                        <div className={`text-[10px] mt-1 flex items-center justify-end gap-1 ${isMe ? 'text-blue-100' : 'text-slate-400'} ${msg.type === 'image' ? 'hidden' : ''}`}>
                                           {new Date(msg.created_at).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'})}
-                                          {isMe && <CheckCheck size={12} />}
+                                          {isMe && <CheckCheck size={12} className={msg.is_read ? "text-white" : "opacity-50"} />}
                                        </div>
                                     </div>
                                  </div>
@@ -606,7 +556,6 @@ const ChatPage: React.FC = () => {
                          </React.Fragment>
                       );
                   })}
-                  
                   {partnerTyping && (
                      <div className="flex gap-2 items-end">
                         <img src={partnerProfile?.avatar_url} className="w-6 h-6 rounded-full" />
@@ -616,15 +565,7 @@ const ChatPage: React.FC = () => {
                      </div>
                   )}
                   <div ref={scrollRef} className="h-2"/>
-                  
-                  {/* Scroll Down Button */}
-                  {showScrollBtn && (
-                      <button onClick={scrollToBottom} className="fixed bottom-24 right-8 bg-white p-3 rounded-full shadow-lg border border-slate-200 text-[#00418E] animate-bounce z-40 hover:bg-blue-50">
-                          <ChevronDown size={20} />
-                      </button>
-                  )}
-
-                  {/* Context Menu */}
+                  {showScrollBtn && <button onClick={scrollToBottom} className="fixed bottom-24 right-8 bg-white p-3 rounded-full shadow-lg border border-slate-200 text-[#00418E] animate-bounce z-40 hover:bg-blue-50"><ChevronDown size={20} /></button>}
                   {contextMenu && (
                       <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
                           <div className="context-item" onClick={() => handleDeleteMessage(contextMenu.msgId)}>
@@ -643,24 +584,17 @@ const ChatPage: React.FC = () => {
                   </div>
                   <form onSubmit={(e) => handleSendMessage(e)} className="flex items-center gap-2 relative">
                       <input type="file" ref={fileInputRef} hidden accept="image/*" onChange={handleImageUpload} />
-                      
                       <div className="flex gap-1">
                           <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-slate-400 hover:text-[#00418E] hover:bg-blue-50 rounded-full transition-colors" disabled={uploading}>
                               {uploading ? <Loader2 size={20} className="animate-spin"/> : <ImageIcon size={20}/>}
                           </button>
-                          <button type="button" onClick={handleSendLocation} className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-full transition-colors">
-                              <MapPin size={20}/>
-                          </button>
+                          <button type="button" onClick={handleSendLocation} className="p-2 text-slate-400 hover:text-green-600 hover:bg-green-50 rounded-full transition-colors"><MapPin size={20}/></button>
                       </div>
-
                       <div className="flex-1 bg-slate-100 rounded-full px-4 py-3 focus-within:ring-2 focus-within:ring-[#00418E]/20 transition-all flex items-center gap-2">
                          <input value={newMessage} onChange={handleTyping} placeholder="Nhập tin nhắn..." className="flex-1 bg-transparent outline-none text-sm text-slate-800 placeholder:text-slate-400"/>
                          <button type="button" onClick={() => setShowEmojiPicker(!showEmojiPicker)} className="text-slate-400 hover:text-orange-500 emoji-btn"><Smile size={18}/></button>
                       </div>
-                      
                       <button type="submit" disabled={!newMessage.trim()} className="p-3 bg-[#00418E] hover:bg-[#00306b] text-white rounded-full disabled:opacity-50 shadow-md transition-all active:scale-95"><Send size={18}/></button>
-
-                      {/* Emoji Picker */}
                       {showEmojiPicker && (
                           <div className="absolute bottom-16 right-16 bg-white border border-slate-200 rounded-xl shadow-lg p-2 grid grid-cols-6 gap-2 emoji-btn animate-slide-in z-50">
                               {COMMON_EMOJIS.map(e => (
