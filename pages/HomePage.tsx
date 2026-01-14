@@ -16,52 +16,9 @@ import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 
 // ============================================================================
-// 1. CONFIGURATION & CONSTANTS
+// 1. CONFIGURATION
 // ============================================================================
 const ITEMS_PER_PAGE = 12;
-
-const BLOG_POSTS = [
-  {
-    id: 1,
-    title: "Kinh nghiệm chọn Laptop cho sinh viên IT năm nhất",
-    category: "Công nghệ",
-    date: "12/01/2026",
-    image: "https://images.unsplash.com/photo-1517694712202-14dd9538aa97?auto=format&fit=crop&q=80&w=600",
-    excerpt: "Nên chọn Mac hay Windows? RAM 8GB có đủ không? Cùng giải đáp thắc mắc cho tân sinh viên."
-  },
-  {
-    id: 2,
-    title: "Top 5 địa điểm học bài 'chill' nhất Bách Khoa",
-    category: "Đời sống",
-    date: "10/01/2026",
-    image: "https://images.unsplash.com/photo-1497633762265-9d179a990aa6?auto=format&fit=crop&q=80&w=600",
-    excerpt: "Thư viện hay quán cafe? Những góc khuất yên tĩnh bạn chưa biết tại cơ sở 1 và cơ sở 2."
-  },
-  {
-    id: 3,
-    title: "Bí kíp săn giáo trình cũ giá rẻ đầu kỳ",
-    category: "Mẹo vặt",
-    date: "08/01/2026",
-    image: "https://images.unsplash.com/photo-1495446815901-a7297e633e8d?auto=format&fit=crop&q=80&w=600",
-    excerpt: "Đừng vội mua sách mới. Hãy thử dạo qua Chợ BK để tiết kiệm hàng triệu đồng mỗi học kỳ."
-  }
-];
-
-const TESTIMONIALS = [
-  { id: 1, name: "Minh Tuấn", role: "K19 - Máy Tính", content: "Tìm được cuốn Giải tích 1 giá siêu rẻ, lại còn được anh khóa trên hướng dẫn tận tình. 10 điểm!", rating: 5 },
-  { id: 2, name: "Lan Anh", role: "K20 - Hóa", content: "Giao diện đẹp, dễ dùng. Thích nhất tính năng AI scan, đăng bán sách cũ cực nhanh.", rating: 5 },
-  { id: 3, name: "Hoàng Nam", role: "K21 - Điện", content: "Cộng đồng uy tín, toàn sinh viên trường mình nên rất yên tâm khi giao dịch.", rating: 4 }
-];
-
-// ============================================================================
-// 2. TYPES
-// ============================================================================
-enum SortOption {
-  NEWEST = "newest",
-  PRICE_ASC = "price_asc",
-  PRICE_DESC = "price_desc",
-  MOST_VIEWED = "most_viewed",
-}
 
 enum ProductCategory {
   TEXTBOOK = "textbook",
@@ -69,6 +26,13 @@ enum ProductCategory {
   SUPPLIES = "supplies",
   CLOTHING = "clothing",
   OTHER = "other",
+}
+
+enum SortOption {
+  NEWEST = "newest",
+  PRICE_ASC = "price_asc",
+  PRICE_DESC = "price_desc",
+  MOST_VIEWED = "most_viewed",
 }
 
 interface FilterState {
@@ -81,7 +45,7 @@ interface FilterState {
 }
 
 // ============================================================================
-// 3. UTILS
+// 2. UTILS
 // ============================================================================
 const Utils = {
   formatCurrency: (amount: number) => new Intl.NumberFormat("vi-VN", { style: "currency", currency: "VND" }).format(amount),
@@ -97,55 +61,38 @@ const Utils = {
 };
 
 // ============================================================================
-// 4. VISUAL ENGINE (CSS + NEW ANIMATIONS)
+// 3. VISUAL ENGINE
 // ============================================================================
 const VisualEngine = () => (
   <style>{`
     :root {
-      --cobalt-900: #002147; --cobalt-800: #003366; --cobalt-600: #0047AB;
-      --cyan-400: #00E5FF; --light-bg: #F8FAFC;
+      --cobalt-900: #002147; --cobalt-600: #0047AB; --cyan-400: #00E5FF;
+      --light-bg: #F8FAFC;
     }
     body { background-color: var(--light-bg); color: var(--cobalt-900); font-family: 'Inter', sans-serif; overflow-x: hidden; }
 
-    /* --- New: Cyber Grid Animation --- */
-    .cyber-grid {
-      position: absolute; width: 200%; height: 200%; top: -50%; left: -50%; z-index: -1;
-      background-image: 
-        linear-gradient(rgba(0, 71, 171, 0.1) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(0, 71, 171, 0.1) 1px, transparent 1px);
-      background-size: 40px 40px;
-      transform: perspective(500px) rotateX(60deg);
-      animation: cyber-move 20s linear infinite;
-      pointer-events: none;
-    }
-    @keyframes cyber-move {
-      0% { transform: perspective(500px) rotateX(60deg) translateY(0); }
-      100% { transform: perspective(500px) rotateX(60deg) translateY(40px); }
-    }
-
-    /* Aurora Background */
+    /* Backgrounds */
     .aurora-bg {
-      position: fixed; top: 0; left: 0; right: 0; height: 120vh; z-index: -2;
+      position: fixed; top: 0; left: 0; right: 0; height: 120vh; z-index: -1;
       background: 
-        radial-gradient(at 0% 0%, rgba(0, 71, 171, 0.08) 0px, transparent 50%),
-        radial-gradient(at 100% 0%, rgba(0, 229, 255, 0.08) 0px, transparent 50%);
-      filter: blur(60px);
+        radial-gradient(at 0% 0%, rgba(0, 71, 171, 0.1) 0px, transparent 50%),
+        radial-gradient(at 100% 0%, rgba(0, 229, 255, 0.1) 0px, transparent 50%);
+      filter: blur(80px); animation: aurora 15s ease-in-out infinite alternate;
     }
+    @keyframes aurora { from { transform: scale(1); } to { transform: scale(1.1); } }
 
-    /* Floating Animation */
-    .animate-float { animation: float 6s ease-in-out infinite; }
-    @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-20px); } }
-    .delay-100 { animation-delay: 1s; } .delay-200 { animation-delay: 2s; }
-
-    /* Glass Cards */
+    /* Glass Effect */
     .glass-card {
-      background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(16px);
+      background: rgba(255, 255, 255, 0.7); backdrop-filter: blur(20px);
       border: 1px solid rgba(255, 255, 255, 0.8); box-shadow: 0 4px 20px rgba(0, 71, 171, 0.05);
     }
     .hover-lift { transition: all 0.3s cubic-bezier(0.25, 0.8, 0.25, 1); }
-    .hover-lift:hover { transform: translateY(-8px); box-shadow: 0 20px 40px -10px rgba(0, 71, 171, 0.1); border-color: #BFDBFE; }
+    .hover-lift:hover { transform: translateY(-5px); box-shadow: 0 20px 40px -10px rgba(0, 71, 171, 0.1); border-color: #BFDBFE; }
 
-    /* Shimmer */
+    /* Animations */
+    .animate-float { animation: float 6s ease-in-out infinite; }
+    @keyframes float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-20px); } }
+    
     .shimmer { position: relative; overflow: hidden; }
     .shimmer::after {
       content: ''; position: absolute; inset: 0; transform: translateX(-100%);
@@ -154,7 +101,6 @@ const VisualEngine = () => (
     }
     @keyframes sh { to { transform: translateX(100%); } }
 
-    /* Modal Animation */
     .modal-backdrop {
       background: rgba(0, 33, 71, 0.6); backdrop-filter: blur(8px);
       position: fixed; inset: 0; z-index: 100;
@@ -171,7 +117,7 @@ const VisualEngine = () => (
 );
 
 // ============================================================================
-// 5. DATA HOOKS
+// 4. DATA HOOKS
 // ============================================================================
 function useProducts(filter: FilterState) {
   const [products, setProducts] = useState<Product[]>([]);
@@ -225,7 +171,7 @@ function useCounter(end: number, duration = 2000) {
 }
 
 // ============================================================================
-// 6. COMPONENTS
+// 5. COMPONENTS
 // ============================================================================
 
 const HeroSlider = () => {
@@ -260,7 +206,17 @@ const HeroSlider = () => {
 
 const ProductCard: React.FC<{ product: Product, onQuickView: (p: Product) => void }> = ({ product, onQuickView }) => {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const { addToast } = useToast();
   const [liked, setLiked] = useState(false);
+
+  const handleLike = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!user) return addToast("Vui lòng đăng nhập", "info");
+    setLiked(!liked);
+    if (!liked) addToast("Đã lưu tin", "success");
+  };
+
   return (
     <div onClick={() => navigate(`/product/${product.id}`)} className="glass-card hover-lift group flex flex-col rounded-3xl bg-white h-full cursor-pointer overflow-hidden border border-white/60 relative">
       <div className="shimmer relative aspect-[4/3] bg-slate-100 overflow-hidden">
@@ -270,7 +226,7 @@ const ProductCard: React.FC<{ product: Product, onQuickView: (p: Product) => voi
           {(new Date().getTime() - new Date(product.created_at).getTime() < 172800000) && <span className="flex items-center gap-1 rounded-full px-2 py-1 text-[10px] font-bold shadow-lg backdrop-blur-md bg-[#0047AB] text-white"><Zap size={10}/> NEW</span>}
         </div>
         <div className="absolute top-3 right-3 flex flex-col gap-2 opacity-0 group-hover:opacity-100 transition-all duration-300 translate-x-4 group-hover:translate-x-0 z-20">
-          <button onClick={(e) => { e.stopPropagation(); setLiked(!liked); }} className="p-2 bg-white/90 backdrop-blur rounded-full text-slate-400 hover:text-red-500 shadow-xl transition-colors"><Heart size={18} className={liked ? "fill-red-500 text-red-500" : ""}/></button>
+          <button onClick={handleLike} className="p-2 bg-white/90 backdrop-blur rounded-full text-slate-400 hover:text-red-500 shadow-xl transition-colors"><Heart size={18} className={liked ? "fill-red-500 text-red-500" : ""}/></button>
           <button onClick={(e) => { e.stopPropagation(); onQuickView(product); }} className="p-2 bg-white/90 backdrop-blur rounded-full text-slate-400 hover:text-[#0047AB] shadow-xl transition-colors"><Eye size={18}/></button>
         </div>
       </div>
@@ -330,7 +286,7 @@ const FilterModal = ({ filter, setFilter, onClose }: { filter: FilterState, setF
 );
 
 // ============================================================================
-// 7. MAIN PAGE
+// 6. MAIN PAGE
 // ============================================================================
 const HomePage: React.FC = () => {
   const navigate = useNavigate();
@@ -339,8 +295,10 @@ const HomePage: React.FC = () => {
   const [showFilterModal, setShowFilterModal] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [showBackToTop, setShowBackToTop] = useState(false);
+  
   const countU = useCounter(25000);
   const countP = useCounter(8500);
+  const countT = useCounter(15000);
 
   const { products, loading, hasMore, loadMore } = useProducts(filter);
 
@@ -377,9 +335,12 @@ const HomePage: React.FC = () => {
 
       {/* Hero Section */}
       <section className="relative px-4 pb-24 pt-24 text-center overflow-hidden">
-        {/* NEW: CYBER GRID ANIMATION REPLACING OLD FLOATERS */}
-        <div className="cyber-grid"></div>
-
+        <div className="absolute inset-0 pointer-events-none opacity-20 overflow-hidden">
+           <BookOpen size={100} className="animate-float absolute left-[5%] top-[10%] text-[#0047AB]"/>
+           <Monitor size={120} className="animate-float delay-100 absolute right-[10%] top-[20%] text-[#00E5FF]"/>
+           <Smartphone size={80} className="animate-float delay-200 absolute left-[15%] bottom-[20%] text-indigo-400"/>
+           <Rocket size={150} className="animate-float delay-300 absolute right-[5%] bottom-[10%] text-purple-400 opacity-50"/>
+        </div>
         <HeroSlider />
         <div className="max-w-2xl mx-auto relative z-20 mb-16 animate-enter" style={{animationDelay: "400ms"}}>
           <div className="absolute -inset-2 bg-gradient-to-r from-[#0047AB] to-[#00E5FF] rounded-full opacity-20 blur-2xl animate-pulse"></div>
@@ -408,7 +369,7 @@ const HomePage: React.FC = () => {
           {[
             { v: countU + "+", l: "Thành viên", i: <Users size={32}/>, color: "text-blue-600" },
             { v: countP + "+", l: "Sản phẩm", i: <Package size={32}/>, color: "text-purple-600" },
-            { v: "15K+", l: "Giao dịch", i: <ShoppingBag size={32}/>, color: "text-green-600" },
+            { v: countT + "+", l: "Giao dịch", i: <ShoppingBag size={32}/>, color: "text-green-600" },
             { v: "99%", l: "Hài lòng", i: <Smile size={32}/>, color: "text-orange-600" },
           ].map((s, i) => (
             <div key={i} className="group flex flex-col items-center">
@@ -470,66 +431,32 @@ const HomePage: React.FC = () => {
         )}
       </section>
 
-      {/* Extra: Features / AI Promo */}
-      <section className="max-w-7xl mx-auto px-4 mb-32">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-10">
-           <div className="relative overflow-hidden rounded-[3.5rem] bg-gradient-to-br from-[#002147] to-[#0047AB] p-16 text-white shadow-2xl group border border-white/10">
-              <div className="absolute -top-20 -right-20 w-80 h-80 bg-[#00E5FF] rounded-full blur-[100px] opacity-20 group-hover:opacity-40 transition-opacity"></div>
-              <div className="relative z-10">
-                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/20 bg-white/5 text-[#00E5FF] text-[10px] font-black uppercase tracking-[0.2em] mb-8 animate-pulse"><Zap size={14}/> New AI Engine V2</div>
-                <h2 className="text-5xl font-black mb-6 leading-tight">Chụp Ảnh <br/> Bán Hàng Ngay</h2>
-                <p className="text-slate-300 mb-10 text-lg leading-relaxed font-medium">Hệ thống AI tiên tiến tự động nhận diện sản phẩm, phân tích tình trạng và gợi ý mức giá trung bình trên thị trường Bách Khoa.</p>
-                <button onClick={() => navigate('/post-item')} className="px-10 py-5 bg-[#00E5FF] text-[#002147] rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-white transition-all shadow-xl shadow-cyan-400/20 active:scale-95 flex items-center gap-3">Thử nghiệm ngay <Rocket size={18}/></button>
-              </div>
-           </div>
-           <div className="glass-card rounded-[3.5rem] p-16 border border-white/80">
-              <h2 className="text-3xl font-black text-[#002147] mb-10 flex items-center gap-3"><HelpCircle className="text-[#0047AB]"/> Hỗ trợ tân sinh viên</h2>
-              <div className="space-y-6">
-                {[{ q: "Giao dịch ở đâu an toàn nhất?", a: "Cơ sở 1 nên ở sảnh H6, cơ sở 2 ở B4 hoặc thư viện." }, { q: "Làm sao biết người bán uy tín?", a: "Xem đánh giá sao và huy hiệu 'Sinh viên thực' trên hồ sơ." }, { q: "Giá sách cũ bao nhiêu là hợp lý?", a: "Thường từ 40% - 60% giá bìa tùy độ mới." }].map((f, i) => (
-                  <div key={i} className="bg-slate-50/50 p-6 rounded-[2rem] border border-slate-100 hover:border-blue-200 transition-colors cursor-default">
-                    <h4 className="font-black text-[#0047AB] mb-2 text-sm uppercase tracking-tight">Q: {f.q}</h4>
-                    <p className="text-slate-500 text-sm font-medium leading-relaxed">A: {f.a}</p>
+      {/* AI Promo */}
+      <section className="max-w-7xl mx-auto px-4 mb-32 animate-enter">
+        <div className="relative overflow-hidden rounded-[3.5rem] bg-gradient-to-br from-[#002147] to-[#0047AB] p-16 text-white shadow-2xl group border border-white/10">
+          <div className="absolute -top-20 -right-20 w-80 h-80 bg-[#00E5FF] rounded-full blur-[100px] opacity-20 group-hover:opacity-40 transition-opacity"></div>
+          <div className="relative z-10 grid grid-cols-1 lg:grid-cols-2 gap-10 items-center">
+            <div>
+              <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/20 bg-white/5 text-[#00E5FF] text-[10px] font-black uppercase tracking-[0.2em] mb-8 animate-pulse"><Zap size={14}/> New AI Engine V2</div>
+              <h2 className="text-5xl font-black mb-6 leading-tight">Chụp Ảnh <br/> Bán Hàng Ngay</h2>
+              <p className="text-slate-300 mb-10 text-lg leading-relaxed font-medium">Hệ thống AI tiên tiến tự động nhận diện sản phẩm, phân tích tình trạng và gợi ý mức giá trung bình trên thị trường Bách Khoa.</p>
+              <button onClick={() => navigate('/post-item')} className="px-10 py-5 bg-[#00E5FF] text-[#002147] rounded-2xl font-black uppercase tracking-widest text-xs hover:bg-white transition-all shadow-xl shadow-cyan-400/20 active:scale-95 flex items-center gap-3 w-fit">Thử nghiệm ngay <Rocket size={18}/></button>
+            </div>
+            {/* AI Animation */}
+            <div className="hidden lg:block relative perspective-1000">
+               <div className="bg-[#001529]/90 backdrop-blur-2xl border border-white/10 p-8 rounded-3xl w-full rotate-y-12 group-hover:rotate-y-0 transition-transform duration-700 shadow-2xl">
+                  <div className="flex items-center gap-4 mb-6 border-b border-white/10 pb-6">
+                    <div className="w-12 h-12 rounded-full bg-[#0047AB] flex items-center justify-center animate-bounce shadow-lg shadow-blue-500/50"><Sparkles size={24}/></div>
+                    <div><h4 className="font-bold text-lg">AI Analysis</h4><p className="text-xs text-[#00E5FF] animate-pulse">Đang xử lý hình ảnh...</p></div>
                   </div>
-                ))}
-              </div>
-           </div>
-        </div>
-      </section>
-
-      {/* Blog & Testimonials */}
-      <section className="mb-24 max-w-7xl mx-auto px-4">
-        <div className="flex items-center justify-between mb-8">
-          <h2 className="text-2xl font-black text-[#002147] flex items-center gap-2"><BookOpen/> Cẩm nang sinh viên</h2>
-          <button className="text-[#0047AB] font-bold text-sm hover:underline flex items-center gap-1">Xem tất cả <ChevronRight size={16}/></button>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
-          {BLOG_POSTS.map((post) => (
-            <div key={post.id} className="group cursor-pointer">
-              <div className="rounded-2xl overflow-hidden mb-4 relative aspect-video">
-                <img src={post.image} className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"/>
-                <div className="absolute top-3 left-3 bg-white/90 backdrop-blur px-3 py-1 rounded-lg text-xs font-bold text-[#002147] uppercase tracking-wider shadow-sm">{post.category}</div>
-              </div>
-              <p className="text-xs text-slate-400 font-bold mb-2 flex items-center gap-1"><Calendar size={12}/> {post.date}</p>
-              <h3 className="text-lg font-bold text-[#002147] mb-2 group-hover:text-[#0047AB] transition-colors leading-tight">{post.title}</h3>
-              <p className="text-sm text-slate-500 line-clamp-2">{post.excerpt}</p>
+                  <div className="space-y-4">
+                    <div className="h-32 bg-slate-700/50 rounded-xl w-full animate-pulse border border-white/5"></div>
+                    <div className="h-4 bg-slate-700/50 rounded w-3/4 animate-pulse"></div>
+                    <div className="h-4 bg-slate-700/50 rounded w-1/2 animate-pulse"></div>
+                  </div>
+               </div>
             </div>
-          ))}
-        </div>
-      </section>
-
-      <section className="mb-24 max-w-7xl mx-auto px-4">
-        <div className="text-center mb-12"><h2 className="text-3xl font-black text-[#002147] mb-2 flex items-center justify-center gap-2"><Quote className="fill-current text-[#0047AB]"/> Sinh viên nói gì?</h2><p className="text-slate-500">Những câu chuyện từ cộng đồng BK Market</p></div>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {TESTIMONIALS.map((t) => (
-            <div key={t.id} className="bg-white p-8 rounded-3xl shadow-sm border border-slate-100 italic relative hover:shadow-lg transition-shadow">
-              <div className="flex items-center gap-4 mb-6">
-                <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center font-bold text-[#0047AB]">{t.name.charAt(0)}</div>
-                <div><h4 className="font-bold text-[#002147]">{t.name}</h4><p className="text-xs text-slate-400 font-bold uppercase tracking-wider">{t.role}</p></div>
-              </div>
-              <p className="text-slate-600 mb-6 text-sm leading-relaxed relative z-10">"{t.content}"</p>
-              <div className="flex text-yellow-400 gap-1">{[...Array(t.rating)].map((_, i) => <Star key={i} size={14} className="fill-current"/>)}</div>
-            </div>
-          ))}
+          </div>
         </div>
       </section>
 
