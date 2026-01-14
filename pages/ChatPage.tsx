@@ -12,18 +12,21 @@ import {
 import { playMessageSound } from '../utils/audio';
 
 // ============================================================================
-// STYLES & VISUAL ENGINE
+// 1. VISUAL ENGINE & STYLES
 // ============================================================================
 const VisualEngine = () => (
   <style>{`
-    .chat-scrollbar::-webkit-scrollbar { width: 5px; }
+    /* Scrollbar */
+    .chat-scrollbar::-webkit-scrollbar { width: 6px; }
     .chat-scrollbar::-webkit-scrollbar-track { background: transparent; }
     .chat-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
+    .chat-scrollbar::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
     
+    /* Message Bubbles */
     .msg-bubble { 
       max-width: 75%; padding: 10px 14px; border-radius: 18px; 
       position: relative; font-size: 14px; line-height: 1.5; word-wrap: break-word; 
-      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05); transition: all 0.2s;
     }
     .msg-me { 
       background: linear-gradient(135deg, #00418E 0%, #0065D1 100%); 
@@ -35,27 +38,33 @@ const VisualEngine = () => (
     }
     .msg-image { padding: 4px; background: transparent; border: none; box-shadow: none; }
     
+    /* Transaction Card */
     .transaction-card {
       background: rgba(255, 255, 255, 0.95); border-bottom: 1px solid #E2E8F0; 
       z-index: 20; backdrop-filter: blur(12px);
     }
     
+    /* Animations */
     .animate-slide-in { animation: slideIn 0.3s ease-out forwards; }
     @keyframes slideIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    .badge-pop { animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+    @keyframes pop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
 
     .typing-dot { width: 6px; height: 6px; background: #94a3b8; border-radius: 50%; animation: typing 1.4s infinite ease-in-out both; }
     .typing-dot:nth-child(1) { animation-delay: -0.32s; }
     .typing-dot:nth-child(2) { animation-delay: -0.16s; }
     @keyframes typing { 0%, 80%, 100% { transform: scale(0); } 40% { transform: scale(1); } }
 
+    /* Menus & Dividers */
     .context-menu {
       position: absolute; background: white; border: 1px solid #e2e8f0; 
-      border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); z-index: 50;
-      min-width: 160px; overflow: hidden; animation: fadeIn 0.1s;
+      border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 50;
+      min-width: 160px; overflow: hidden; animation: fadeIn 0.1s ease-out;
     }
     .context-item {
-      padding: 10px 14px; font-size: 13px; color: #ef4444; font-weight: 500;
-      display: flex; items-center; gap: 8px; cursor: pointer; transition: background 0.1s;
+      padding: 10px 14px; font-size: 13px; color: #ef4444; font-weight: 600;
+      display: flex; items-center; gap: 8px; cursor: pointer; transition: background 0.2s;
     }
     .context-item:hover { background: #fef2f2; }
 
@@ -80,17 +89,15 @@ const VisualEngine = () => (
     }
     .date-divider span {
       background: #E2E8F0; color: #64748B; font-size: 11px; font-weight: 600;
-      padding: 4px 12px; border-radius: 12px; z-index: 10;
+      padding: 4px 12px; border-radius: 999px; z-index: 10;
     }
-    
-    .badge-pop { animation: pop 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
-    @keyframes pop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
   `}</style>
 );
 
 const QUICK_REPLIES = ["Sản phẩm còn mới không?", "Có bớt giá không bạn?", "Giao dịch ở H6 nhé?", "Cho mình xem thêm ảnh thật"];
 const COMMON_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"];
 
+// --- LIGHTBOX COMPONENT ---
 const ImageModal = ({ src, onClose }: { src: string, onClose: () => void }) => (
   <div className="fixed inset-0 z-[100] bg-black/90 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in" onClick={onClose}>
     <button className="absolute top-4 right-4 text-white/70 hover:text-white p-2"><X size={32}/></button>
@@ -107,7 +114,7 @@ const ChatPage: React.FC = () => {
   const partnerIdParam = searchParams.get('partnerId');
   const productIdParam = searchParams.get('productId'); 
   
-  // Data State
+  // --- STATE ---
   const [conversations, setConversations] = useState<any[]>([]);
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
@@ -127,17 +134,22 @@ const ChatPage: React.FC = () => {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, msgId: string } | null>(null);
 
-  // --- QUAN TRỌNG: ĐỊNH NGHĨA BIẾN Ở ĐÂY ĐỂ DÙNG TOÀN COMPONENT ---
-  const isSeller = user && targetProduct && user.id === targetProduct.seller_id;
-  const isBuyer = user && targetProduct && user.id !== targetProduct.seller_id;
-
+  // --- REFS ---
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<any>(null);
 
-  // 1. Fetch Conversations
+  // --- DERIVED STATE (Fix lỗi isSeller/isBuyer) ---
+  const isSeller = user && targetProduct && user.id === targetProduct.seller_id;
+  const isBuyer = user && targetProduct && user.id !== targetProduct.seller_id;
+
+  // ==========================================================================
+  // 2. DATA FETCHING & REALTIME
+  // ==========================================================================
+
+  // A. Initial Load: Conversations + Unread Counts
   const fetchConversations = async () => {
       setLoadingConv(true);
       if (!user) return;
@@ -150,6 +162,7 @@ const ChatPage: React.FC = () => {
       if (convData) {
           const enriched = await Promise.all(convData.map(async (c: any) => {
               const partner = c.participant1 === user.id ? c.p2 : c.p1;
+              // Count unread messages (sender != me AND is_read = false)
               const { count } = await supabase.from('messages')
                 .select('*', { count: 'exact', head: true })
                 .eq('conversation_id', c.id)
@@ -171,7 +184,7 @@ const ChatPage: React.FC = () => {
 
   useEffect(() => { if(user) fetchConversations(); }, [user]);
 
-  // Deep Link
+  // B. Deep Link Handler
   useEffect(() => {
     const initChat = async () => {
         if (!user || !partnerIdParam) return;
@@ -184,25 +197,34 @@ const ChatPage: React.FC = () => {
     initChat();
   }, [partnerIdParam, productIdParam, user]);
 
-  // 2. Global Realtime
+  // C. GLOBAL REALTIME (Sidebar & Badge Updates)
   useEffect(() => {
     if (!user) return;
     const channel = supabase.channel('global_chat_updates')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, async (payload) => {
           const newMsg = payload.new;
+          
           if (newMsg.sender_id !== user.id) {
+              // Case 1: NOT viewing this conversation -> Play sound, increment badge
               if (activeConversation !== newMsg.conversation_id) {
                   playMessageSound();
                   setConversations(prev => prev.map(c => 
                       c.id === newMsg.conversation_id 
-                      ? { ...c, last_message: newMsg.content, updated_at: newMsg.created_at, unread_count: (c.unread_count || 0) + 1 }
+                      ? { 
+                          ...c, 
+                          last_message: newMsg.content, 
+                          updated_at: newMsg.created_at, 
+                          unread_count: (c.unread_count || 0) + 1 
+                        }
                       : c
                   ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()));
-              } else {
+              } 
+              // Case 2: CURRENTLY viewing -> Mark read immediately
+              else {
                   await supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id);
                   setConversations(prev => prev.map(c => 
                       c.id === newMsg.conversation_id 
-                      ? { ...c, last_message: newMsg.content, updated_at: newMsg.created_at }
+                      ? { ...c, last_message: newMsg.content, updated_at: newMsg.created_at } // No badge increment
                       : c
                   ).sort((a, b) => new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime()));
               }
@@ -218,21 +240,7 @@ const ChatPage: React.FC = () => {
     return () => { supabase.removeChannel(channel); };
   }, [user, activeConversation]);
 
-  // 3. Select Handler
-  const handleSelectConversation = async (convId: string, partnerId: string) => {
-      setActiveConversation(convId);
-      fetchPartnerInfoInternal(partnerId);
-      setTargetProduct(null); 
-      setConversations(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
-      if(user) {
-          await supabase.from('messages').update({ is_read: true })
-            .eq('conversation_id', convId)
-            .neq('sender_id', user.id)
-            .eq('is_read', false);
-      }
-  };
-
-  // 4. Chat Room Realtime
+  // D. LOCAL CHAT ROOM REALTIME
   useEffect(() => {
     if (!activeConversation) return;
     fetchMessages(activeConversation);
@@ -245,6 +253,7 @@ const ChatPage: React.FC = () => {
                 if (prev.some(m => m.id === newMsg.id)) return prev;
                 return [...prev, newMsg];
             });
+            // If message is incoming while in room -> Play sound anyway (user choice)
             if (newMsg.sender_id !== user?.id) {
                 playMessageSound();
                 supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id);
@@ -253,11 +262,6 @@ const ChatPage: React.FC = () => {
         })
         .on('postgres_changes', { event: 'DELETE', schema: 'public', table: 'messages' }, (payload) => {
             setMessages(prev => prev.filter(m => m.id !== payload.old.id));
-        })
-        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, (payload) => {
-            if (targetProduct && payload.new.id === targetProduct.id) {
-                setTargetProduct({ ...targetProduct, ...payload.new });
-            }
         })
         .on('broadcast', { event: 'typing' }, (payload) => {
             if (payload.payload.userId !== user?.id) {
@@ -271,46 +275,25 @@ const ChatPage: React.FC = () => {
     return () => { supabase.removeChannel(channel); };
   }, [activeConversation]);
 
-  // Helpers
-  const checkAndCreateConversation = async (pId: string, prodId: string | null) => {
-      if (!user) return;
-      let convId = null;
-      const { data: existing } = await supabase.from('conversations').select('id').or(`and(participant1.eq.${user.id},participant2.eq.${pId}),and(participant1.eq.${pId},participant2.eq.${user.id})`).maybeSingle();
+  // ==========================================================================
+  // 3. ACTION HANDLERS
+  // ==========================================================================
 
-      if (existing) {
-          convId = existing.id;
-      } else {
-          const { data: newConv } = await supabase.from('conversations').insert({ participant1: user.id, participant2: pId }).select().single();
-          if (newConv) { convId = newConv.id; await fetchConversations(); }
+  const handleSelectConversation = async (convId: string, partnerId: string) => {
+      setActiveConversation(convId);
+      fetchPartnerInfoInternal(partnerId);
+      setTargetProduct(null); 
+      
+      // Clear badge immediately in UI
+      setConversations(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
+      
+      // Update DB
+      if(user) {
+          await supabase.from('messages').update({ is_read: true })
+            .eq('conversation_id', convId)
+            .neq('sender_id', user.id)
+            .eq('is_read', false);
       }
-
-      if (convId) {
-          handleSelectConversation(convId, pId); 
-          if (prodId) {
-              await supabase.from('conversations').update({ current_product_id: prodId }).eq('id', convId);
-              const { data: pData } = await supabase.from('products').select('*').eq('id', prodId).single();
-              if (pData) setTargetProduct(pData);
-          }
-      }
-  };
-
-  const fetchPinnedProduct = async (convId: string) => {
-      const { data: conv } = await supabase.from('conversations').select('current_product_id').eq('id', convId).single();
-      if (conv?.current_product_id) {
-          const { data: prod } = await supabase.from('products').select('*').eq('id', conv.current_product_id).single();
-          if (prod) setTargetProduct(prod);
-      } else { setTargetProduct(null); }
-  };
-
-  const fetchMessages = async (convId: string) => {
-      const { data } = await supabase.from('messages').select('*').eq('conversation_id', convId).order('created_at', { ascending: true });
-      if (data) setMessages(data);
-  };
-
-  const fetchPartnerInfoInternal = async (pId: string) => {
-      if (!pId) return;
-      const { data } = await supabase.from('profiles').select('*').eq('id', pId).single();
-      if (data) setPartnerProfile(data);
   };
 
   const handleSendMessage = async (e?: React.FormEvent, content: string = newMessage, type: 'text' | 'image' | 'location' = 'text') => {
@@ -326,11 +309,50 @@ const ChatPage: React.FC = () => {
       }
   };
 
+  // --- HELPERS ---
+  const checkAndCreateConversation = async (pId: string, prodId: string | null) => {
+      if (!user) return;
+      let convId = null;
+      const { data: existing } = await supabase.from('conversations').select('id').or(`and(participant1.eq.${user.id},participant2.eq.${pId}),and(participant1.eq.${pId},participant2.eq.${user.id})`).maybeSingle();
+
+      if (existing) { convId = existing.id; } 
+      else {
+          const { data: newConv } = await supabase.from('conversations').insert({ participant1: user.id, participant2: pId }).select().single();
+          if (newConv) { convId = newConv.id; await fetchConversations(); }
+      }
+
+      if (convId) {
+          handleSelectConversation(convId, pId);
+          if (prodId) {
+              await supabase.from('conversations').update({ current_product_id: prodId }).eq('id', convId);
+              const { data: pData } = await supabase.from('products').select('*').eq('id', prodId).single();
+              if (pData) setTargetProduct(pData);
+          }
+      }
+  };
+
+  const fetchMessages = async (convId: string) => {
+      const { data } = await supabase.from('messages').select('*').eq('conversation_id', convId).order('created_at', { ascending: true });
+      if (data) setMessages(data);
+  };
+
+  const fetchPinnedProduct = async (convId: string) => {
+      const { data: conv } = await supabase.from('conversations').select('current_product_id').eq('id', convId).single();
+      if (conv?.current_product_id) {
+          const { data: prod } = await supabase.from('products').select('*').eq('id', conv.current_product_id).single();
+          if (prod) setTargetProduct(prod);
+      } else { setTargetProduct(null); }
+  };
+
+  const fetchPartnerInfoInternal = async (pId: string) => {
+      if (!pId) return;
+      const { data } = await supabase.from('profiles').select('*').eq('id', pId).single();
+      if (data) setPartnerProfile(data);
+  };
+
   const handleTyping = (e: any) => {
       setNewMessage(e.target.value);
-      if (activeConversation) {
-          supabase.channel(`chat_room:${activeConversation}`).send({ type: 'broadcast', event: 'typing', payload: { userId: user?.id } });
-      }
+      if (activeConversation) supabase.channel(`chat_room:${activeConversation}`).send({ type: 'broadcast', event: 'typing', payload: { userId: user?.id } });
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -347,15 +369,15 @@ const ChatPage: React.FC = () => {
   };
 
   const handleSendLocation = () => {
-      if (!navigator.geolocation) return addToast("Trình duyệt không hỗ trợ vị trí", "error");
+      if (!navigator.geolocation) return addToast("Lỗi vị trí", "error");
       navigator.geolocation.getCurrentPosition((pos) => {
           const link = `https://www.google.com/maps?q=${pos.coords.latitude},${pos.coords.longitude}`;
           handleSendMessage(undefined, link, 'location');
-      }, () => addToast("Không thể lấy vị trí", "error"));
+      });
   };
 
   const handleDeleteMessage = async (msgId: string) => {
-      if (!confirm("Thu hồi tin nhắn này?")) return;
+      if (!confirm("Thu hồi tin nhắn?")) return;
       await supabase.from('messages').delete().eq('id', msgId);
       setContextMenu(null);
   };
@@ -394,15 +416,15 @@ const ChatPage: React.FC = () => {
       } catch(e) { console.error(e); } finally { setIsProcessing(false); }
   };
 
+  // UI Helpers
   const filteredConversations = conversations.filter(c => c.partnerName?.toLowerCase().includes(searchTerm.toLowerCase()));
-
   const formatMessageDate = (dateStr: string) => {
-      const d = new Date(dateStr);
-      const now = new Date();
+      const d = new Date(dateStr); const now = new Date();
       if(d.toDateString() === now.toDateString()) return "Hôm nay";
+      const y = new Date(now); y.setDate(now.getDate()-1);
+      if(d.toDateString() === y.toDateString()) return "Hôm qua";
       return d.toLocaleDateString('vi-VN');
   }
-
   const renderMessageContent = (msg: any) => {
       if (msg.type === 'image') return (
         <div className="relative group cursor-pointer" onClick={() => setPreviewImage(msg.content)}>
@@ -416,7 +438,7 @@ const ChatPage: React.FC = () => {
       return <p>{parts.map((part: string, i: number) => part.match(urlRegex) ? <a key={i} href={part} target="_blank" rel="noreferrer" className="text-blue-200 hover:underline">{part}</a> : part)}</p>;
   };
 
-  // Click Outside & Scroll
+  // UI Listeners (Scroll & Click Outside)
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (menuRef.current && !menuRef.current.contains(event.target as Node)) setIsMenuOpen(false);
@@ -439,12 +461,15 @@ const ChatPage: React.FC = () => {
   useEffect(() => { scrollToBottom(); }, [messages]);
   const scrollToBottom = () => scrollRef.current?.scrollIntoView({ behavior: 'smooth' });
 
+  // ==========================================================================
+  // 4. RENDER
+  // ==========================================================================
   return (
     <div className="max-w-7xl mx-auto h-[calc(100vh-64px)] flex bg-[#F1F5F9] font-sans overflow-hidden">
       <VisualEngine />
       {previewImage && <ImageModal src={previewImage} onClose={() => setPreviewImage(null)} />}
       
-      {/* SIDEBAR */}
+      {/* --- SIDEBAR --- */}
       <div className={`w-full md:w-[360px] bg-white border-r border-slate-200 flex flex-col ${activeConversation ? 'hidden md:flex' : 'flex'}`}>
          <div className="p-4 border-b border-slate-100 bg-white z-10">
             <h2 className="font-black text-2xl mb-4 text-[#00418E]">Tin nhắn</h2>
@@ -472,7 +497,7 @@ const ChatPage: React.FC = () => {
          </div>
       </div>
 
-      {/* CHAT AREA */}
+      {/* --- CHAT AREA --- */}
       <div className={`flex-1 flex flex-col relative bg-[#F8FAFC] ${!activeConversation ? 'hidden md:flex' : 'flex'}`}>
          {activeConversation ? (
             <>
@@ -490,8 +515,8 @@ const ChatPage: React.FC = () => {
                               <div className="flex items-center gap-2">
                                 <h3 className="font-bold text-sm text-slate-800">{partnerProfile.name}</h3>
                                 {targetProduct && (
-                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isSeller ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'}`}>
-                                        {isSeller ? 'Người bán' : 'Người mua'}
+                                    <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isBuyer ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'}`}>
+                                        {isBuyer ? 'Người bán' : 'Người mua'}
                                     </span>
                                 )}
                               </div>
@@ -545,7 +570,7 @@ const ChatPage: React.FC = () => {
                   </div>
                )}
 
-               {/* MESSAGES */}
+               {/* MESSAGES LIST */}
                <div className="flex-1 overflow-y-auto p-4 space-y-3 chat-scrollbar bg-[#F8FAFC]" ref={containerRef}>
                   {messages.map((msg, idx) => {
                       const isMe = msg.sender_id === user?.id;
@@ -600,7 +625,7 @@ const ChatPage: React.FC = () => {
                   )}
                </div>
 
-               {/* INPUT */}
+               {/* INPUT AREA */}
                <div className="p-3 bg-white border-t border-slate-200">
                   <div className="flex gap-2 overflow-x-auto pb-3 chat-scrollbar">
                      {QUICK_REPLIES.map((t, i) => (
