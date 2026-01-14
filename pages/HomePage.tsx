@@ -3,7 +3,7 @@ import { useNavigate, Link } from "react-router-dom";
 import {
   Search, BookOpen, Monitor, Calculator, Shirt, MoreHorizontal,
   MapPin, Filter, ChevronDown, SlidersHorizontal, X, Clock,
-  ArrowRight, LayoutGrid, List
+  ArrowRight, LayoutGrid, List, Users // <--- ĐÃ BỔ SUNG USERS
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { Product } from "../types";
