@@ -1,49 +1,50 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useState, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   LayoutDashboard, Users, Package, AlertTriangle, 
   Search, Bell, LogOut, CheckCircle, XCircle, Trash2, 
-  Shield, Ban, Eye, TrendingUp, DollarSign, Activity, Menu
+  Shield, Ban, Eye, TrendingUp, ChevronLeft, ChevronRight,
+  Activity, Calendar, ArrowUpRight, Filter
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 
 // ============================================================================
-// 1. TYPES & VISUAL ENGINE
+// 1. TYPES & CONFIG
 // ============================================================================
+const ITEMS_PER_PAGE = 10;
 
 interface DashboardStats {
   totalUsers: number;
   totalProducts: number;
   pendingReports: number;
-  totalMarketValue: number; // Tổng giá trị hàng hóa đang rao bán
+  revenue: number;
 }
 
-interface UserData {
+interface ChartData {
+  date: string;
+  users: number;
+  products: number;
+}
+
+interface ActivityLog {
   id: string;
-  email: string;
-  name: string;
-  avatar_url: string;
-  role: string;
-  created_at: string;
+  type: 'user_join' | 'new_product';
+  message: string;
+  time: string;
 }
 
-interface ReportData {
-  id: string;
-  reason: string;
-  status: 'pending' | 'resolved' | 'dismissed';
-  created_at: string;
-  reporter: { name: string };
-  product: { id: string; title: string; seller_id: string } | null; // Product có thể null nếu đã bị xóa
-}
-
+// ============================================================================
+// 2. VISUAL ENGINE (CSS)
+// ============================================================================
 const VisualEngine = () => (
   <style>{`
     :root { 
-      --primary: #00388D;
-      --bg-body: #F1F5F9;
-      --bg-sidebar: #1E293B;
+      --primary: #0F172A; 
+      --accent: #3B82F6;
+      --bg-body: #F8FAFC;
+      --border: #E2E8F0;
     }
     body { background-color: var(--bg-body); color: #334155; font-family: 'Inter', sans-serif; }
     
@@ -51,145 +52,224 @@ const VisualEngine = () => (
     .admin-layout { display: flex; min-height: 100vh; }
     
     /* Sidebar */
-    .sidebar { width: 260px; background-color: var(--bg-sidebar); color: #94A3B8; flex-shrink: 0; transition: all 0.3s; }
+    .sidebar { 
+      width: 260px; background-color: var(--primary); color: #94A3B8; 
+      flex-shrink: 0; display: flex; flex-direction: column; 
+      transition: all 0.3s;
+    }
     .sidebar-link {
-      display: flex; items-center; gap: 12px; padding: 12px 20px;
+      display: flex; items-center; gap: 12px; padding: 14px 24px;
       font-weight: 500; font-size: 0.9rem; transition: all 0.2s;
-      border-left: 3px solid transparent;
+      border-left: 3px solid transparent; color: #94A3B8;
     }
     .sidebar-link:hover { background-color: rgba(255,255,255,0.05); color: #F8FAFC; }
-    .sidebar-link.active { background-color: rgba(59, 130, 246, 0.1); color: #60A5FA; border-left-color: #60A5FA; }
+    .sidebar-link.active { 
+      background-color: rgba(59, 130, 246, 0.1); color: white; 
+      border-left-color: var(--accent); 
+    }
 
     /* Content */
-    .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
-    .top-header { background: white; border-bottom: 1px solid #E2E8F0; height: 64px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; }
+    .main-content { flex: 1; display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
+    .top-header { 
+      background: white; border-bottom: 1px solid var(--border); height: 64px; 
+      padding: 0 32px; display: flex; align-items: center; justify-content: space-between;
+    }
 
-    /* Cards */
-    .stat-card { background: white; padding: 24px; border-radius: 12px; border: 1px solid #E2E8F0; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    
+    /* Dashboard Grid */
+    .dashboard-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px; margin-bottom: 24px; }
+    .stat-card { 
+      background: white; padding: 24px; border-radius: 12px; 
+      border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(0,0,0,0.05); 
+    }
+
+    /* Chart Bar */
+    .chart-bar {
+      transition: height 1s ease-out;
+      border-radius: 4px 4px 0 0;
+      min-height: 4px;
+    }
+
     /* Tables */
-    .data-table-wrapper { background: white; border-radius: 12px; border: 1px solid #E2E8F0; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); }
-    .data-table { w-full; text-align: left; border-collapse: collapse; width: 100%; }
-    .data-table th { background: #F8FAFC; padding: 16px; font-size: 0.75rem; font-weight: 700; text-transform: uppercase; color: #64748B; border-bottom: 1px solid #E2E8F0; }
-    .data-table td { padding: 16px; border-bottom: 1px solid #E2E8F0; font-size: 0.875rem; color: #334155; }
-    .data-table tr:last-child td { border-bottom: none; }
+    .table-wrapper { 
+      background: white; border-radius: 12px; border: 1px solid var(--border); 
+      overflow: hidden; box-shadow: 0 1px 2px rgba(0,0,0,0.05); 
+    }
+    .data-table { width: 100%; text-align: left; border-collapse: collapse; }
+    .data-table th { 
+      background: #F8FAFC; padding: 16px 24px; font-size: 0.75rem; 
+      font-weight: 700; text-transform: uppercase; color: #64748B; 
+      border-bottom: 1px solid var(--border); 
+    }
+    .data-table td { padding: 16px 24px; border-bottom: 1px solid var(--border); font-size: 0.875rem; }
     .data-table tr:hover { background-color: #F8FAFC; }
 
-    /* Badges */
-    .badge { padding: 4px 10px; border-radius: 99px; font-size: 0.75rem; font-weight: 600; display: inline-block; }
-    .badge.green { background: #DCFCE7; color: #166534; }
-    .badge.red { background: #FEE2E2; color: #991B1B; }
-    .badge.yellow { background: #FEF3C7; color: #92400E; }
-    .badge.blue { background: #DBEAFE; color: #1E40AF; }
+    /* Utilities */
+    .badge { padding: 4px 10px; border-radius: 99px; font-size: 0.7rem; font-weight: 700; display: inline-flex; items-center; gap: 4px; }
+    .badge-green { background: #DCFCE7; color: #166534; }
+    .badge-red { background: #FEE2E2; color: #991B1B; }
+    .badge-yellow { background: #FEF3C7; color: #92400E; }
+    .badge-blue { background: #DBEAFE; color: #1E40AF; }
 
     .hide-scrollbar::-webkit-scrollbar { display: none; }
+    .animate-enter { animation: slideUp 0.4s ease-out forwards; opacity: 0; }
+    @keyframes slideUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
   `}</style>
 );
 
 // ============================================================================
-// 2. MAIN COMPONENT
+// 3. SUB-COMPONENTS
+// ============================================================================
+
+const StatCard = ({ title, value, icon: Icon, color }: any) => (
+  <div className="stat-card flex items-start justify-between group hover:border-blue-200 transition-colors">
+    <div>
+      <p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">{title}</p>
+      <h3 className="text-3xl font-black text-slate-800 tracking-tight">{value}</h3>
+    </div>
+    <div className={`p-3 rounded-xl ${color} bg-opacity-10 text-opacity-100 group-hover:scale-110 transition-transform`}>
+      <Icon size={24} className={color.replace('bg-', 'text-')}/>
+    </div>
+  </div>
+);
+
+// ============================================================================
+// 4. MAIN ADMIN PAGE
 // ============================================================================
 const AdminPage = () => {
-  const { user, isAdmin, signOut } = useAuth();
+  const { user, isAdmin } = useAuth();
   const navigate = useNavigate();
   const { addToast } = useToast();
   
-  // State
+  // Tabs & Navigation
   const [activeTab, setActiveTab] = useState<'dashboard' | 'users' | 'products' | 'reports'>('dashboard');
-  const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState<DashboardStats>({ totalUsers: 0, totalProducts: 0, pendingReports: 0, totalMarketValue: 0 });
-  const [users, setUsers] = useState<UserData[]>([]);
-  const [reports, setReports] = useState<ReportData[]>([]);
+  
+  // Data States
+  const [stats, setStats] = useState<DashboardStats>({ totalUsers: 0, totalProducts: 0, pendingReports: 0, revenue: 0 });
+  const [chartData, setChartData] = useState<ChartData[]>([]);
+  const [activities, setActivities] = useState<ActivityLog[]>([]);
+  
+  // List States with Pagination
+  const [users, setUsers] = useState<any[]>([]);
   const [products, setProducts] = useState<any[]>([]);
+  const [reports, setReports] = useState<any[]>([]);
+  
+  const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
 
-  // Check Permission
+  // Security Check
   useEffect(() => {
     if (!loading && (!user || !isAdmin)) {
-      addToast("Truy cập bị từ chối. Khu vực dành riêng cho Admin.", "error");
+      addToast("Truy cập bị từ chối.", "error");
       navigate("/");
     }
-  }, [user, isAdmin, loading, navigate]);
+  }, [user, isAdmin, loading]);
 
-  // Fetch REAL Data from Supabase
-  const fetchData = async () => {
+  // --- DATA FETCHING ENGINE ---
+  const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      // 1. Get Stats (Real Count)
+      // 1. Basic Counts
       const { count: uCount } = await supabase.from('profiles').select('*', { count: 'exact', head: true });
       const { count: pCount } = await supabase.from('products').select('*', { count: 'exact', head: true });
       const { count: rCount } = await supabase.from('reports').select('*', { count: 'exact', head: true }).eq('status', 'pending');
       
-      // Calculate Total Market Value (Sum of price)
+      // 2. Real Market Value
       const { data: priceData } = await supabase.from('products').select('price').eq('status', 'available');
-      const totalValue = priceData?.reduce((acc, curr) => acc + (curr.price || 0), 0) || 0;
+      const totalVal = priceData?.reduce((a, b) => a + (b.price || 0), 0) || 0;
 
       setStats({
         totalUsers: uCount || 0,
         totalProducts: pCount || 0,
         pendingReports: rCount || 0,
-        totalMarketValue: totalValue
+        revenue: totalVal
       });
 
-      // 2. Get Lists
+      // 3. Chart Data (Last 7 Days) - Client Side Aggregation for REAL data
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 6);
+      
+      const { data: recentUsers } = await supabase.from('profiles').select('created_at').gte('created_at', sevenDaysAgo.toISOString());
+      const { data: recentProducts } = await supabase.from('products').select('created_at').gte('created_at', sevenDaysAgo.toISOString());
+
+      const chartMap = new Map<string, {users: number, products: number}>();
+      
+      // Initialize 7 days
+      for(let i=0; i<7; i++) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        chartMap.set(d.toLocaleDateString('vi-VN'), { users: 0, products: 0 });
+      }
+
+      recentUsers?.forEach(u => {
+        const key = new Date(u.created_at).toLocaleDateString('vi-VN');
+        if(chartMap.has(key)) chartMap.get(key)!.users++;
+      });
+      recentProducts?.forEach(p => {
+        const key = new Date(p.created_at).toLocaleDateString('vi-VN');
+        if(chartMap.has(key)) chartMap.get(key)!.products++;
+      });
+
+      setChartData(Array.from(chartMap.entries()).map(([date, val]) => ({ date, ...val })).reverse());
+
+      // 4. Activity Feed (Merged Stream)
+      const { data: uLogs } = await supabase.from('profiles').select('id, name, created_at').order('created_at', { ascending: false }).limit(5);
+      const { data: pLogs } = await supabase.from('products').select('id, title, created_at, seller:profiles(name)').order('created_at', { ascending: false }).limit(5);
+
+      const mixedLogs: ActivityLog[] = [
+        ...(uLogs?.map(u => ({ id: u.id, type: 'user_join', message: `${u.name} đã tham gia hệ thống`, time: u.created_at } as ActivityLog)) || []),
+        ...(pLogs?.map(p => ({ id: p.id, type: 'new_product', message: `${p.seller?.name} đăng bán "${p.title}"`, time: p.created_at } as ActivityLog)) || [])
+      ].sort((a, b) => new Date(b.time).getTime() - new Date(a.time).getTime()).slice(0, 10);
+
+      setActivities(mixedLogs);
+
+    } catch (err) { console.error(err); } finally { setLoading(false); }
+  };
+
+  const fetchTableData = async () => {
+    setLoading(true);
+    const from = page * ITEMS_PER_PAGE;
+    const to = from + ITEMS_PER_PAGE - 1;
+
+    try {
       if (activeTab === 'users') {
         let q = supabase.from('profiles').select('*').order('created_at', { ascending: false });
         if (searchTerm) q = q.ilike('email', `%${searchTerm}%`);
-        const { data } = await q.limit(50);
-        setUsers(data as any || []);
-      }
-      
-      if (activeTab === 'products') {
-        let q = supabase.from('products').select(`*, seller:profiles(name)`).order('created_at', { ascending: false });
+        const { data } = await q.range(from, to);
+        setUsers(data || []);
+      } 
+      else if (activeTab === 'products') {
+        let q = supabase.from('products').select('*, seller:profiles(name)').order('created_at', { ascending: false });
         if (searchTerm) q = q.ilike('title', `%${searchTerm}%`);
-        const { data } = await q.limit(50);
+        const { data } = await q.range(from, to);
         setProducts(data || []);
       }
-
-      if (activeTab === 'reports') {
+      else if (activeTab === 'reports') {
         const { data } = await supabase.from('reports')
-          .select(`*, reporter:profiles!reporter_id(name), product:products(id, title, seller_id)`)
-          .order('created_at', { ascending: false });
-        setReports(data as any || []);
+          .select('*, reporter:profiles!reporter_id(name), product:products(id, title)')
+          .order('created_at', { ascending: false })
+          .range(from, to);
+        setReports(data || []);
       }
-
-    } catch (error) {
-      console.error(error);
-      addToast("Lỗi tải dữ liệu", "error");
-    } finally {
-      setLoading(false);
-    }
+    } catch(e) { console.error(e); } finally { setLoading(false); }
   };
 
-  useEffect(() => { fetchData(); }, [activeTab, searchTerm]);
+  useEffect(() => {
+    if (activeTab === 'dashboard') fetchDashboardData();
+    else fetchTableData();
+  }, [activeTab, page, searchTerm]);
 
   // Actions
-  const handleToggleBan = async (userId: string, currentRole: string) => {
-    const newRole = currentRole === 'banned' ? 'user' : 'banned';
-    if (!confirm(newRole === 'banned' ? 'Khóa tài khoản này?' : 'Mở khóa tài khoản này?')) return;
-
-    const { error } = await supabase.from('profiles').update({ role: newRole }).eq('id', userId);
-    if (!error) {
-      addToast("Cập nhật trạng thái thành công", "success");
-      fetchData(); // Reload data
-    }
-  };
-
-  const handleDeleteProduct = async (productId: string) => {
-    if (!confirm("Xóa vĩnh viễn tin đăng này?")) return;
-    const { error } = await supabase.from('products').delete().eq('id', productId);
-    if (!error) {
-      addToast("Đã xóa tin đăng", "success");
-      fetchData();
-    }
-  };
-
-  const handleResolveReport = async (reportId: string, action: 'resolved' | 'dismissed') => {
-    const { error } = await supabase.from('reports').update({ status: action }).eq('id', reportId);
-    if (!error) {
-      addToast("Đã cập nhật trạng thái báo cáo", "success");
-      fetchData();
-    }
+  const handleAction = async (action: string, id: string, payload?: any) => {
+    if(!confirm("Xác nhận thực hiện hành động này?")) return;
+    try {
+      if(action === 'ban_user') await supabase.from('profiles').update({ role: payload }).eq('id', id);
+      if(action === 'delete_product') await supabase.from('products').delete().eq('id', id);
+      if(action === 'resolve_report') await supabase.from('reports').update({ status: payload }).eq('id', id);
+      
+      addToast("Thành công", "success");
+      fetchTableData(); // Reload
+    } catch(e) { addToast("Có lỗi xảy ra", "error"); }
   };
 
   if (!isAdmin) return null;
@@ -201,260 +281,196 @@ const AdminPage = () => {
       {/* --- SIDEBAR --- */}
       <aside className="sidebar">
         <div className="h-16 flex items-center px-6 border-b border-slate-700/50">
-          <Shield className="text-blue-400 mr-2" size={24}/>
-          <span className="font-bold text-white text-lg tracking-tight">ADMIN CP</span>
+          <Shield className="text-blue-500 mr-3" size={24}/>
+          <span className="font-bold text-white text-xl tracking-tight">ADMIN CP</span>
         </div>
 
-        <nav className="p-4 space-y-1">
+        <div className="flex-1 py-6 px-3 space-y-1">
           {[
             { id: 'dashboard', label: 'Tổng quan', icon: LayoutDashboard },
-            { id: 'users', label: 'Người dùng', icon: Users },
+            { id: 'users', label: 'Thành viên', icon: Users },
             { id: 'products', label: 'Tin đăng', icon: Package },
-            { id: 'reports', label: 'Báo cáo vi phạm', icon: AlertTriangle },
+            { id: 'reports', label: 'Khiếu nại', icon: AlertTriangle },
           ].map((item) => (
             <button
               key={item.id}
-              onClick={() => { setActiveTab(item.id as any); setSearchTerm(""); }}
+              onClick={() => { setActiveTab(item.id as any); setPage(0); setSearchTerm(""); }}
               className={`sidebar-link w-full rounded-lg ${activeTab === item.id ? 'active' : ''}`}
             >
               <item.icon size={18} />
               <span className="flex-1 text-left">{item.label}</span>
-              {item.id === 'reports' && stats.pendingReports > 0 && (
-                <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{stats.pendingReports}</span>
-              )}
+              {item.id === 'reports' && stats.pendingReports > 0 && <span className="bg-red-500 text-white text-[10px] font-bold px-2 py-0.5 rounded-full">{stats.pendingReports}</span>}
             </button>
           ))}
-        </nav>
+        </div>
 
-        <div className="absolute bottom-0 left-0 w-full p-4 border-t border-slate-700/50">
-          <button onClick={() => navigate('/')} className="sidebar-link w-full rounded-lg text-slate-400 hover:text-white">
-            <LogOut size={18} /> Thoát
+        <div className="p-4 border-t border-slate-700/50">
+          <button onClick={() => navigate('/')} className="sidebar-link w-full rounded-lg text-slate-400 hover:text-white justify-center border border-slate-600 hover:border-slate-400">
+            <LogOut size={16} /> Về trang chủ
           </button>
         </div>
       </aside>
 
-      {/* --- MAIN CONTENT --- */}
-      <div className="main-content">
-        {/* Top Header */}
-        <header className="top-header">
-          <h2 className="text-xl font-bold text-slate-800 capitalize">{activeTab === 'dashboard' ? 'Dashboard' : activeTab}</h2>
-          
+      {/* --- CONTENT --- */}
+      <main className="main-content bg-[#F1F5F9]">
+        <header className="top-header sticky top-0 z-20">
+          <h2 className="text-xl font-bold text-slate-800 capitalize">{activeTab === 'dashboard' ? 'Dashboard' : 'Quản lý dữ liệu'}</h2>
           <div className="flex items-center gap-4">
-            {activeTab !== 'dashboard' && (
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
-                <input 
-                  placeholder="Tìm kiếm..." 
-                  className="bg-slate-100 border-none rounded-lg pl-10 pr-4 py-2 text-sm text-slate-700 w-64 outline-none focus:ring-2 focus:ring-blue-500/20"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-            )}
-            <div className="h-8 w-[1px] bg-slate-200"></div>
             <div className="flex items-center gap-3">
-              <span className="text-sm font-bold text-slate-700">{user?.name}</span>
-              <img src={user?.avatar || "https://ui-avatars.com/api/?name=Admin"} className="w-8 h-8 rounded-full border border-slate-200"/>
+              <div className="text-right hidden md:block">
+                <p className="text-sm font-bold text-slate-700">{user?.name}</p>
+                <p className="text-xs text-slate-500 uppercase font-bold text-blue-600">Administrator</p>
+              </div>
+              <img src={user?.avatar || "https://ui-avatars.com/api/?name=Admin"} className="w-9 h-9 rounded-full border border-slate-200"/>
             </div>
           </div>
         </header>
 
-        {/* Content Body */}
-        <div className="p-8 overflow-y-auto bg-[#F1F5F9] flex-1">
-          
-          {/* 1. DASHBOARD OVERVIEW */}
+        <div className="flex-1 overflow-y-auto p-8">
+          {/* DASHBOARD */}
           {activeTab === 'dashboard' && (
-            <div className="max-w-6xl mx-auto space-y-8 animate-enter">
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div className="stat-card">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="text-slate-500 text-xs font-bold uppercase mb-1">Thành viên</p>
-                      <h3 className="text-3xl font-black text-slate-800">{stats.totalUsers}</h3>
-                    </div>
-                    <div className="p-3 bg-blue-50 text-blue-600 rounded-lg"><Users size={24}/></div>
-                  </div>
-                </div>
-                <div className="stat-card">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="text-slate-500 text-xs font-bold uppercase mb-1">Tin đăng</p>
-                      <h3 className="text-3xl font-black text-slate-800">{stats.totalProducts}</h3>
-                    </div>
-                    <div className="p-3 bg-indigo-50 text-indigo-600 rounded-lg"><Package size={24}/></div>
-                  </div>
-                </div>
-                <div className="stat-card">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="text-slate-500 text-xs font-bold uppercase mb-1">Giá trị sàn</p>
-                      <h3 className="text-2xl font-black text-slate-800 tracking-tight">
-                        {new Intl.NumberFormat('vi-VN', { notation: "compact", compactDisplay: "short" }).format(stats.totalMarketValue)} ₫
-                      </h3>
-                    </div>
-                    <div className="p-3 bg-emerald-50 text-emerald-600 rounded-lg"><DollarSign size={24}/></div>
-                  </div>
-                </div>
-                <div className="stat-card border-l-4 border-l-red-500">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <p className="text-slate-500 text-xs font-bold uppercase mb-1">Báo cáo mới</p>
-                      <h3 className="text-3xl font-black text-red-600">{stats.pendingReports}</h3>
-                    </div>
-                    <div className="p-3 bg-red-50 text-red-600 rounded-lg animate-pulse"><AlertTriangle size={24}/></div>
-                  </div>
-                </div>
+            <div className="max-w-7xl mx-auto space-y-6 animate-enter">
+              {/* Stats Cards */}
+              <div className="dashboard-grid">
+                <StatCard title="Thành viên" value={stats.totalUsers} icon={Users} color="bg-blue-500"/>
+                <StatCard title="Tin đăng" value={stats.totalProducts} icon={Package} color="bg-indigo-500"/>
+                <StatCard title="Khiếu nại" value={stats.pendingReports} icon={AlertTriangle} color="bg-rose-500"/>
+                <StatCard title="Tổng giá trị sàn" value={`${new Intl.NumberFormat('vi-VN', { notation: "compact" }).format(stats.revenue)}₫`} icon={TrendingUp} color="bg-emerald-500"/>
               </div>
 
-              {/* Recent Activity Section could go here */}
-              <div className="bg-white p-8 rounded-xl border border-slate-200 text-center py-16">
-                <Activity size={48} className="mx-auto text-slate-300 mb-4"/>
-                <h3 className="text-lg font-bold text-slate-700">Hệ thống hoạt động ổn định</h3>
-                <p className="text-slate-500 text-sm">Dữ liệu được cập nhật theo thời gian thực từ Database.</p>
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                {/* Real Chart */}
+                <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+                  <div className="flex justify-between items-center mb-8">
+                    <h3 className="font-bold text-slate-800 flex items-center gap-2"><Activity size={18} className="text-blue-500"/> Tăng trưởng 7 ngày qua</h3>
+                  </div>
+                  <div className="h-64 flex items-end justify-between gap-4 px-2">
+                    {chartData.map((d, i) => (
+                      <div key={i} className="flex-1 flex flex-col justify-end gap-1 group relative">
+                        {/* Tooltip */}
+                        <div className="absolute -top-12 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-xs p-2 rounded opacity-0 group-hover:opacity-100 transition-opacity z-10 whitespace-nowrap">
+                          {d.date}: {d.products} Tin, {d.users} Mem
+                        </div>
+                        {/* Bars */}
+                        <div className="w-full bg-blue-500 rounded-t opacity-80 hover:opacity-100 transition-all chart-bar" style={{height: `${Math.max(d.products * 5, 4)}%`}}></div>
+                        <div className="w-full bg-slate-300 rounded-t opacity-80 hover:opacity-100 transition-all chart-bar" style={{height: `${Math.max(d.users * 5, 4)}%`}}></div>
+                        <span className="text-[10px] text-slate-400 text-center mt-2 font-medium">{d.date.slice(0,5)}</span>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="flex justify-center gap-6 mt-6">
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-500"><span className="w-3 h-3 bg-blue-500 rounded-full"></span> Tin đăng mới</div>
+                    <div className="flex items-center gap-2 text-xs font-bold text-slate-500"><span className="w-3 h-3 bg-slate-300 rounded-full"></span> Thành viên mới</div>
+                  </div>
+                </div>
+
+                {/* Activity Feed */}
+                <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+                  <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2"><Calendar size={18} className="text-orange-500"/> Hoạt động mới</h3>
+                  <div className="space-y-6 overflow-y-auto flex-1 pr-2">
+                    {activities.map((act) => (
+                      <div key={act.id} className="flex gap-3 items-start">
+                        <div className={`mt-1 w-2 h-2 rounded-full shrink-0 ${act.type === 'user_join' ? 'bg-blue-500' : 'bg-emerald-500'}`}></div>
+                        <div>
+                          <p className="text-sm text-slate-700 font-medium leading-snug">{act.message}</p>
+                          <p className="text-xs text-slate-400 mt-1">{new Date(act.time).toLocaleString('vi-VN')}</p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               </div>
             </div>
           )}
 
-          {/* 2. USERS TABLE */}
-          {activeTab === 'users' && (
-            <div className="data-table-wrapper animate-enter">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Người dùng</th>
-                    <th>Email</th>
-                    <th>Vai trò</th>
-                    <th>Ngày tham gia</th>
-                    <th>Trạng thái</th>
-                    <th className="text-right">Hành động</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map((u) => (
-                    <tr key={u.id}>
-                      <td>
-                        <div className="flex items-center gap-3">
-                          <img src={u.avatar_url || `https://ui-avatars.com/api/?name=${u.name}`} className="w-8 h-8 rounded-full bg-slate-100"/>
-                          <span className="font-bold text-slate-700">{u.name}</span>
-                        </div>
-                      </td>
-                      <td className="font-mono text-xs">{u.email}</td>
-                      <td><span className="bg-slate-100 px-2 py-1 rounded text-xs font-bold uppercase">{u.role}</span></td>
-                      <td>{new Date(u.created_at).toLocaleDateString('vi-VN')}</td>
-                      <td>
-                        <span className={`badge ${u.role === 'banned' ? 'red' : 'green'}`}>
-                          {u.role === 'banned' ? 'Banned' : 'Active'}
-                        </span>
-                      </td>
-                      <td className="text-right">
-                        {u.role !== 'admin' && (
-                          <button 
-                            onClick={() => handleToggleBan(u.id, u.role)}
-                            className={`p-2 rounded hover:bg-slate-100 ${u.role === 'banned' ? 'text-green-600' : 'text-red-600'}`}
-                            title={u.role === 'banned' ? "Mở khóa" : "Khóa"}
-                          >
-                            {u.role === 'banned' ? <CheckCircle size={18}/> : <Ban size={18}/>}
-                          </button>
-                        )}
-                      </td>
+          {/* LIST VIEWS (Users, Products, Reports) */}
+          {activeTab !== 'dashboard' && (
+            <div className="animate-enter">
+              <div className="flex justify-between items-center mb-6">
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16}/>
+                  <input 
+                    placeholder="Tìm kiếm..." 
+                    className="pl-10 pr-4 py-2 border border-slate-300 rounded-lg text-sm w-64 focus:border-blue-500 outline-none"
+                    value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0} className="p-2 border rounded hover:bg-white disabled:opacity-50"><ChevronLeft size={16}/></button>
+                  <span className="px-4 py-2 text-sm font-bold text-slate-600 bg-white border rounded">Trang {page + 1}</span>
+                  <button onClick={() => setPage(page + 1)} className="p-2 border rounded hover:bg-white"><ChevronRight size={16}/></button>
+                </div>
+              </div>
+
+              <div className="table-wrapper">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      {activeTab === 'users' && <><th>User</th><th>Email</th><th>Role</th><th>Ngày tạo</th><th>Status</th><th className="text-right">Action</th></>}
+                      {activeTab === 'products' && <><th>Sản phẩm</th><th>Giá</th><th>Người bán</th><th>Ngày đăng</th><th className="text-right">Action</th></>}
+                      {activeTab === 'reports' && <><th>Lý do</th><th>Người báo cáo</th><th>Sản phẩm</th><th>Status</th><th className="text-right">Action</th></>}
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+                  </thead>
+                  <tbody>
+                    {/* USERS ROW */}
+                    {activeTab === 'users' && users.map(u => (
+                      <tr key={u.id}>
+                        <td className="font-bold text-slate-700">{u.name}</td>
+                        <td className="font-mono text-xs">{u.email}</td>
+                        <td><span className="bg-slate-100 px-2 py-1 rounded text-xs font-bold uppercase">{u.role}</span></td>
+                        <td>{new Date(u.created_at).toLocaleDateString('vi-VN')}</td>
+                        <td><span className={`badge ${u.role === 'banned' ? 'badge-red' : 'badge-green'}`}>{u.role === 'banned' ? 'Banned' : 'Active'}</span></td>
+                        <td className="text-right">
+                          {u.role !== 'admin' && (
+                            <button onClick={() => handleAction('ban_user', u.id, u.role === 'banned' ? 'user' : 'banned')} className={`p-2 rounded hover:bg-slate-100 ${u.role === 'banned' ? 'text-green-600' : 'text-red-600'}`}>
+                              {u.role === 'banned' ? <CheckCircle size={18}/> : <Ban size={18}/>}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
 
-          {/* 3. PRODUCTS TABLE */}
-          {activeTab === 'products' && (
-            <div className="data-table-wrapper animate-enter">
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th>Sản phẩm</th>
-                    <th>Giá bán</th>
-                    <th>Người bán</th>
-                    <th>Ngày đăng</th>
-                    <th className="text-right">Tùy chọn</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {products.map((p) => (
-                    <tr key={p.id}>
-                      <td className="max-w-xs">
-                        <div className="flex items-center gap-3">
-                          <img src={p.images?.[0] || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded object-cover bg-slate-100"/>
-                          <span className="font-bold text-slate-700 truncate">{p.title}</span>
-                        </div>
-                      </td>
-                      <td className="font-mono text-blue-600 font-bold">{new Intl.NumberFormat('vi-VN', {style: 'currency', currency: 'VND'}).format(p.price)}</td>
-                      <td>{p.seller?.name || 'Unknown'}</td>
-                      <td>{new Date(p.created_at).toLocaleDateString('vi-VN')}</td>
-                      <td className="text-right">
-                        <div className="flex justify-end gap-2">
+                    {/* PRODUCTS ROW */}
+                    {activeTab === 'products' && products.map(p => (
+                      <tr key={p.id}>
+                        <td className="font-bold text-slate-700 max-w-xs truncate">{p.title}</td>
+                        <td className="font-mono text-blue-600 font-bold">{new Intl.NumberFormat('vi-VN').format(p.price)}₫</td>
+                        <td>{p.seller?.name}</td>
+                        <td>{new Date(p.created_at).toLocaleDateString('vi-VN')}</td>
+                        <td className="text-right">
                           <button onClick={() => window.open(`/product/${p.id}`, '_blank')} className="p-2 text-blue-500 hover:bg-blue-50 rounded"><Eye size={18}/></button>
-                          <button onClick={() => handleDeleteProduct(p.id)} className="p-2 text-red-500 hover:bg-red-50 rounded"><Trash2 size={18}/></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                          <button onClick={() => handleAction('delete_product', p.id)} className="p-2 text-red-500 hover:bg-red-50 rounded"><Trash2 size={18}/></button>
+                        </td>
+                      </tr>
+                    ))}
+
+                    {/* REPORTS ROW */}
+                    {activeTab === 'reports' && reports.map(r => (
+                      <tr key={r.id}>
+                        <td className="font-bold text-slate-700">{r.reason}</td>
+                        <td>{r.reporter?.name || 'Ẩn danh'}</td>
+                        <td><a href={`/product/${r.product?.id}`} target="_blank" className="text-blue-600 hover:underline">{r.product?.title || 'Đã xóa'}</a></td>
+                        <td><span className={`badge ${r.status === 'pending' ? 'badge-yellow' : 'badge-green'}`}>{r.status}</span></td>
+                        <td className="text-right">
+                          {r.status === 'pending' && (
+                            <div className="flex justify-end gap-2">
+                              <button onClick={() => handleAction('delete_product', r.product?.id)} className="text-red-600 hover:bg-red-50 p-1.5 rounded" title="Xóa bài"><Trash2 size={16}/></button>
+                              <button onClick={() => handleAction('resolve_report', r.id, 'dismissed')} className="text-slate-500 hover:bg-slate-100 p-1.5 rounded" title="Bỏ qua"><XCircle size={16}/></button>
+                              <button onClick={() => handleAction('resolve_report', r.id, 'resolved')} className="text-green-600 hover:bg-green-50 p-1.5 rounded" title="Đã xử lý"><CheckCircle size={16}/></button>
+                            </div>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
-
-          {/* 4. REPORTS CENTER */}
-          {activeTab === 'reports' && (
-            <div className="space-y-4 animate-enter">
-              {reports.length === 0 ? (
-                <div className="text-center py-20 bg-white rounded-xl border border-slate-200">
-                  <Shield size={48} className="mx-auto text-emerald-500 mb-4"/>
-                  <h3 className="text-lg font-bold text-slate-800">Tuyệt vời! Không có báo cáo vi phạm.</h3>
-                </div>
-              ) : (
-                reports.map((report) => (
-                  <div key={report.id} className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col md:flex-row gap-6">
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className={`badge ${report.status === 'pending' ? 'yellow' : 'green'}`}>{report.status}</span>
-                        <span className="text-xs text-slate-400">{new Date(report.created_at).toLocaleString('vi-VN')}</span>
-                      </div>
-                      <h4 className="font-bold text-slate-800 text-lg mb-1">Lý do: {report.reason}</h4>
-                      <div className="text-sm text-slate-600 bg-slate-50 p-3 rounded-lg border border-slate-100">
-                        <p><strong>Người báo cáo:</strong> {report.reporter?.name || 'Ẩn danh'}</p>
-                        <p><strong>Sản phẩm:</strong> {report.product ? (
-                          <a href={`/product/${report.product.id}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{report.product.title}</a>
-                        ) : <span className="text-red-500 italic">Sản phẩm đã bị xóa</span>}</p>
-                      </div>
-                    </div>
-                    
-                    {report.status === 'pending' && (
-                      <div className="flex flex-col gap-2 justify-center border-l pl-6 border-slate-100">
-                        {report.product && (
-                          <button onClick={() => handleDeleteProduct(report.product!.id)} className="flex items-center gap-2 px-4 py-2 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-bold transition-colors">
-                            <Trash2 size={14}/> Xóa bài đăng
-                          </button>
-                        )}
-                        <div className="flex gap-2">
-                          <button onClick={() => handleResolveReport(report.id, 'dismissed')} className="flex-1 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 rounded-lg text-xs font-bold">
-                            Bỏ qua
-                          </button>
-                          <button onClick={() => handleResolveReport(report.id, 'resolved')} className="flex-1 px-3 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg text-xs font-bold">
-                            Đã xử lý
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-
         </div>
-      </div>
+      </main>
     </div>
   );
 };
 
 export default AdminPage;
-
