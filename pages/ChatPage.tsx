@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { supabase } from '../services/supabase';
 import { useSearchParams, useNavigate } from 'react-router-dom';
@@ -6,7 +6,8 @@ import { useToast } from '../contexts/ToastContext';
 import { 
   Send, Image as ImageIcon, Phone, ArrowLeft, Loader2, ShoppingBag, 
   CheckCircle2, Search, MessageCircle, MoreVertical, X, AlertCircle,
-  Truck, DollarSign, XCircle, User, Flag, Trash, MapPin, Smile, CheckCheck 
+  Truck, DollarSign, XCircle, User, Flag, Trash, MapPin, Smile, CheckCheck,
+  ChevronDown, ExternalLink, Maximize2
 } from 'lucide-react'; 
 import { playMessageSound } from '../utils/audio';
 
@@ -15,14 +16,15 @@ import { playMessageSound } from '../utils/audio';
 // ============================================================================
 const VisualEngine = () => (
   <style>{`
-    .chat-scrollbar::-webkit-scrollbar { width: 5px; }
+    .chat-scrollbar::-webkit-scrollbar { width: 6px; }
     .chat-scrollbar::-webkit-scrollbar-track { background: transparent; }
     .chat-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 10px; }
+    .chat-scrollbar::-webkit-scrollbar-thumb:hover { background: #94A3B8; }
     
     .msg-bubble { 
       max-width: 75%; padding: 10px 14px; border-radius: 18px; 
       position: relative; font-size: 14px; line-height: 1.5; word-wrap: break-word; 
-      box-shadow: 0 1px 2px rgba(0,0,0,0.05);
+      box-shadow: 0 1px 2px rgba(0,0,0,0.05); transition: all 0.2s;
     }
     .msg-me { 
       background: linear-gradient(135deg, #00418E 0%, #0065D1 100%); 
@@ -49,16 +51,15 @@ const VisualEngine = () => (
 
     .context-menu {
       position: absolute; background: white; border: 1px solid #e2e8f0; 
-      border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); z-index: 50;
-      min-width: 150px; overflow: hidden;
+      border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.15); z-index: 50;
+      min-width: 160px; overflow: hidden; animation: fadeIn 0.1s ease-out;
     }
     .context-item {
-      padding: 10px 14px; font-size: 13px; color: #ef4444; font-weight: 500;
+      padding: 10px 14px; font-size: 13px; color: #ef4444; font-weight: 600;
       display: flex; items-center; gap: 8px; cursor: pointer; transition: background 0.2s;
     }
     .context-item:hover { background: #fef2f2; }
 
-    /* Dropdown Menu Style */
     .dropdown-menu {
       position: absolute; top: 100%; right: 0; margin-top: 8px;
       background: white; border: 1px solid #E2E8F0; border-radius: 12px;
@@ -74,11 +75,27 @@ const VisualEngine = () => (
     .dropdown-item:hover { background: #F8FAFC; color: #00418E; }
     .dropdown-item.danger { color: #EF4444; }
     .dropdown-item.danger:hover { background: #FEF2F2; }
+
+    .date-divider {
+      display: flex; align-items: center; justify-content: center; margin: 20px 0;
+    }
+    .date-divider span {
+      background: #E2E8F0; color: #64748B; font-size: 11px; font-weight: 600;
+      padding: 4px 12px; border-radius: 12px;
+    }
   `}</style>
 );
 
 const QUICK_REPLIES = ["Sản phẩm còn mới không?", "Có bớt giá không bạn?", "Giao dịch ở H6 nhé?", "Cho mình xem thêm ảnh thật"];
 const COMMON_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "😡"];
+
+// --- IMAGE LIGHTBOX COMPONENT ---
+const ImageModal = ({ src, onClose }: { src: string, onClose: () => void }) => (
+  <div className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200" onClick={onClose}>
+    <button className="absolute top-4 right-4 text-white/70 hover:text-white p-2 transition-colors"><X size={32}/></button>
+    <img src={src} className="max-w-full max-h-[90vh] rounded-lg object-contain shadow-2xl scale-100 animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}/>
+  </div>
+);
 
 const ChatPage: React.FC = () => {
   const { user } = useAuth(); 
@@ -105,11 +122,14 @@ const ChatPage: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [partnerTyping, setPartnerTyping] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
+  const [previewImage, setPreviewImage] = useState<string | null>(null);
+  const [showScrollBtn, setShowScrollBtn] = useState(false);
   
   // Context Menu State
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, msgId: string } | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<any>(null);
@@ -164,6 +184,18 @@ const ChatPage: React.FC = () => {
 
     return () => { supabase.removeChannel(channel); };
   }, [activeConversation]);
+
+  // Handle Scroll Button Visibility
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const handleScroll = () => {
+        const { scrollTop, scrollHeight, clientHeight } = container;
+        setShowScrollBtn(scrollHeight - scrollTop - clientHeight > 300);
+    };
+    container.addEventListener('scroll', handleScroll);
+    return () => container.removeEventListener('scroll', handleScroll);
+  }, []);
 
   // Close menus on click outside
   useEffect(() => {
@@ -268,7 +300,7 @@ const ChatPage: React.FC = () => {
           const { data } = supabase.storage.from('chat-images').getPublicUrl(fileName);
           await handleSendMessage(undefined, data.publicUrl, 'image');
       } catch (err) {
-          addToast("Lỗi gửi ảnh", "error");
+          addToast("Lỗi gửi ảnh (Check bucket public)", "error");
       } finally {
           setUploading(false);
       }
@@ -291,7 +323,6 @@ const ChatPage: React.FC = () => {
       setContextMenu(null);
   };
 
-  // --- DEFINING MISSING FUNCTIONS (Fixed) ---
   const handleUnpinProduct = async () => {
       if (!activeConversation) return;
       await supabase.from('conversations').update({ current_product_id: null }).eq('id', activeConversation);
@@ -334,27 +365,47 @@ const ChatPage: React.FC = () => {
 
   const filteredConversations = conversations.filter(c => c.partnerName?.toLowerCase().includes(searchTerm.toLowerCase()));
 
-  // Render Helpers
+  // Helpers
+  const formatMessageDate = (dateStr: string) => {
+      const d = new Date(dateStr);
+      const now = new Date();
+      if(d.toDateString() === now.toDateString()) return "Hôm nay";
+      const yesterday = new Date(now); yesterday.setDate(now.getDate()-1);
+      if(d.toDateString() === yesterday.toDateString()) return "Hôm qua";
+      return d.toLocaleDateString('vi-VN');
+  }
+
   const renderMessageContent = (msg: any) => {
-      if (msg.type === 'image') return <img src={msg.content} className="rounded-lg max-w-[200px] cursor-pointer" onClick={() => window.open(msg.content, '_blank')}/>;
+      if (msg.type === 'image') return (
+        <div className="relative group cursor-pointer" onClick={() => setPreviewImage(msg.content)}>
+            <img src={msg.content} className="rounded-lg max-w-[200px] border border-white/20 transition-transform group-hover:scale-[1.02]"/>
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors rounded-lg flex items-center justify-center opacity-0 group-hover:opacity-100">
+                <Maximize2 size={20} className="text-white drop-shadow-md"/>
+            </div>
+        </div>
+      );
       if (msg.type === 'location') return (
-          <a href={msg.content} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-blue-100 underline hover:text-white">
-              <MapPin size={16}/> Vị trí hiện tại
+          <a href={msg.content} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-blue-100 underline hover:text-white font-medium">
+              <MapPin size={16}/> Vị trí hiện tại <ExternalLink size={12}/>
           </a>
       );
-      return <p>{msg.content}</p>;
+      // Auto Linkify
+      const urlRegex = /(https?:\/\/[^\s]+)/g;
+      const parts = msg.content.split(urlRegex);
+      return <p>{parts.map((part: string, i: number) => part.match(urlRegex) ? <a key={i} href={part} target="_blank" rel="noreferrer" className="text-blue-200 hover:underline">{part}</a> : part)}</p>;
   };
 
   return (
     <div className="max-w-7xl mx-auto h-[calc(100vh-64px)] flex bg-[#F1F5F9] font-sans overflow-hidden">
       <VisualEngine />
+      {previewImage && <ImageModal src={previewImage} onClose={() => setPreviewImage(null)} />}
       
       {/* SIDEBAR */}
       <div className={`w-full md:w-[360px] bg-white border-r border-slate-200 flex flex-col ${activeConversation ? 'hidden md:flex' : 'flex'}`}>
          <div className="p-4 border-b border-slate-100 bg-white z-10">
             <h2 className="font-black text-2xl mb-4 text-[#00418E]">Tin nhắn</h2>
             <div className="relative">
-               <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Tìm kiếm..." className="w-full bg-slate-100 rounded-xl px-4 py-2.5 pl-10 text-sm outline-none focus:ring-2 focus:ring-[#00418E]/20"/>
+               <input value={searchTerm} onChange={e => setSearchTerm(e.target.value)} placeholder="Tìm kiếm..." className="w-full bg-slate-100 rounded-xl px-4 py-2.5 pl-10 text-sm outline-none focus:ring-2 focus:ring-[#00418E]/20 transition-all"/>
                <Search className="absolute left-3 top-3 text-slate-400" size={16}/>
             </div>
          </div>
@@ -364,7 +415,7 @@ const ChatPage: React.FC = () => {
                   <img src={conv.partnerAvatar || 'https://via.placeholder.com/50'} className="w-12 h-12 rounded-full object-cover border border-slate-200 bg-white"/>
                   <div className="flex-1 min-w-0 flex flex-col justify-center">
                       <p className={`font-bold text-sm truncate ${activeConversation === conv.id ? 'text-[#00418E]' : 'text-slate-800'}`}>{conv.partnerName}</p>
-                      <p className="text-xs text-slate-500 truncate mt-0.5">{conv.last_message || "Nhấn để xem tin nhắn"}</p>
+                      <p className="text-xs text-slate-500 truncate mt-0.5 font-medium">{conv.last_message || "Bắt đầu trò chuyện"}</p>
                   </div>
                   <span className="text-[10px] text-slate-400 whitespace-nowrap">{conv.updated_at ? new Date(conv.updated_at).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'}) : ''}</span>
                </div>
@@ -436,45 +487,56 @@ const ChatPage: React.FC = () => {
                      </div>
 
                      <div className="flex gap-2 mt-3">
-                        {isBuyer && targetProduct.status === 'available' && <button onClick={() => handleDealAction('request')} disabled={isProcessing} className="flex-1 bg-[#00418E] text-white py-3 rounded-xl font-bold text-sm shadow-sm flex justify-center items-center gap-2 active:scale-95"><ShoppingBag size={16}/> Yêu cầu mua</button>}
-                        {isSeller && targetProduct.status === 'available' && <button onClick={() => handleDealAction('confirm')} disabled={isProcessing} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold text-sm shadow-sm flex justify-center items-center gap-2 active:scale-95"><CheckCircle2 size={18}/> Xác nhận bán</button>}
-                        {isSeller && targetProduct.status === 'pending' && <><button onClick={() => handleDealAction('finish')} className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold text-sm shadow-sm"><DollarSign size={16} className="inline mr-1"/> Đã giao</button><button onClick={() => handleDealAction('cancel')} className="px-4 bg-slate-200 text-slate-700 rounded-xl font-bold text-sm"><XCircle size={16}/></button></>}
+                        {isBuyer && targetProduct.status === 'available' && <button onClick={() => handleDealAction('request')} disabled={isProcessing} className="flex-1 bg-[#00418E] text-white py-3 rounded-xl font-bold text-sm shadow-sm flex justify-center items-center gap-2 active:scale-95 transition-all hover:bg-[#00306b]"><ShoppingBag size={16}/> Yêu cầu mua</button>}
+                        {isSeller && targetProduct.status === 'available' && <button onClick={() => handleDealAction('confirm')} disabled={isProcessing} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold text-sm shadow-sm flex justify-center items-center gap-2 active:scale-95 transition-all hover:bg-green-700"><CheckCircle2 size={18}/> Xác nhận bán</button>}
+                        {isSeller && targetProduct.status === 'pending' && <><button onClick={() => handleDealAction('finish')} className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold text-sm shadow-sm transition-all hover:bg-blue-700"><DollarSign size={16} className="inline mr-1"/> Đã giao</button><button onClick={() => handleDealAction('cancel')} className="px-4 bg-slate-200 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-300 transition-all"><XCircle size={16}/></button></>}
                         {isBuyer && targetProduct.status === 'pending' && <div className="flex-1 bg-orange-50 text-orange-700 py-3 rounded-xl font-bold text-xs text-center border border-orange-200 flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin"/> Đang chờ xác nhận...</div>}
-                        {targetProduct.status === 'sold' && <div className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-xl font-bold text-xs text-center border border-slate-200 flex justify-center items-center gap-2"><Truck size={16}/> Hoàn tất</div>}
+                        {targetProduct.status === 'sold' && <div className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-xl font-bold text-xs text-center border border-slate-200 flex justify-center items-center gap-2"><Truck size={16}/> Giao dịch đã hoàn tất</div>}
                      </div>
                   </div>
                )}
 
                {/* MESSAGES */}
-               <div className="flex-1 overflow-y-auto p-4 space-y-3 chat-scrollbar bg-[#F8FAFC]">
+               <div className="flex-1 overflow-y-auto p-4 space-y-3 chat-scrollbar bg-[#F8FAFC]" ref={containerRef}>
                   {messages.map((msg, idx) => {
                       const isMe = msg.sender_id === user?.id;
                       const isSystem = msg.content?.includes("TÔI MUỐN MUA") || msg.content?.includes("ĐÃ XÁC NHẬN") || msg.content?.includes("GIAO DỊCH") || msg.content?.includes("ĐÃ HỦY");
                       
-                      if (isSystem) return (<div key={idx} className="flex justify-center my-6"><div className="bg-slate-100 border border-slate-200 text-slate-600 px-4 py-2 rounded-full text-xs font-bold shadow-sm flex items-center gap-2"><AlertCircle size={12} className="text-[#00418E]"/><span className="whitespace-pre-wrap text-center">{msg.content}</span></div></div>);
-                      
+                      // Date Grouping
+                      const prevMsg = messages[idx-1];
+                      const showDate = !prevMsg || new Date(msg.created_at).toDateString() !== new Date(prevMsg.created_at).toDateString();
+
                       return (
-                         <div key={idx} className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-slide-in group relative`}>
-                            {!isMe && <img src={partnerProfile?.avatar_url} className="w-8 h-8 rounded-full mr-2 self-end border border-slate-200 bg-white"/>}
-                            
-                            <div 
-                                className={`msg-bubble ${isMe ? 'msg-me' : 'msg-you'} ${msg.type === 'image' ? 'msg-image' : ''}`}
-                                onContextMenu={(e) => {
-                                    if(isMe) {
-                                        e.preventDefault();
-                                        setContextMenu({ x: e.clientX, y: e.clientY, msgId: msg.id });
-                                    }
-                                }}
-                            >
-                               {renderMessageContent(msg)}
-                               <div className={`text-[10px] mt-1 flex items-center justify-end gap-1 ${isMe ? 'text-blue-100' : 'text-slate-400'} ${msg.type === 'image' ? 'hidden' : ''}`}>
-                                  {new Date(msg.created_at).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'})}
-                                  {isMe && <CheckCheck size={12} />}
-                               </div>
-                            </div>
-                         </div>
+                         <React.Fragment key={idx}>
+                             {showDate && <div className="date-divider"><span>{formatMessageDate(msg.created_at)}</span></div>}
+                             
+                             {isSystem ? (
+                                 <div className="flex justify-center my-6"><div className="bg-slate-100 border border-slate-200 text-slate-600 px-4 py-2 rounded-full text-xs font-bold shadow-sm flex items-center gap-2"><AlertCircle size={12} className="text-[#00418E]"/><span className="whitespace-pre-wrap text-center">{msg.content}</span></div></div>
+                             ) : (
+                                 <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-slide-in group relative`}>
+                                    {!isMe && <img src={partnerProfile?.avatar_url} className="w-8 h-8 rounded-full mr-2 self-end border border-slate-200 bg-white"/>}
+                                    
+                                    <div 
+                                        className={`msg-bubble ${isMe ? 'msg-me' : 'msg-you'} ${msg.type === 'image' ? 'msg-image' : ''}`}
+                                        onContextMenu={(e) => {
+                                            if(isMe) {
+                                                e.preventDefault();
+                                                setContextMenu({ x: e.clientX, y: e.clientY, msgId: msg.id });
+                                            }
+                                        }}
+                                    >
+                                       {renderMessageContent(msg)}
+                                       <div className={`text-[10px] mt-1 flex items-center justify-end gap-1 ${isMe ? 'text-blue-100' : 'text-slate-400'} ${msg.type === 'image' ? 'hidden' : ''}`}>
+                                          {new Date(msg.created_at).toLocaleTimeString('vi-VN', {hour:'2-digit', minute:'2-digit'})}
+                                          {isMe && <CheckCheck size={12} />}
+                                       </div>
+                                    </div>
+                                 </div>
+                             )}
+                         </React.Fragment>
                       );
                   })}
+                  
                   {partnerTyping && (
                      <div className="flex gap-2 items-end">
                         <img src={partnerProfile?.avatar_url} className="w-6 h-6 rounded-full" />
@@ -485,7 +547,14 @@ const ChatPage: React.FC = () => {
                   )}
                   <div ref={scrollRef} className="h-2"/>
                   
-                  {/* Context Menu for Delete */}
+                  {/* Scroll Down Button */}
+                  {showScrollBtn && (
+                      <button onClick={scrollToBottom} className="fixed bottom-24 right-8 bg-white p-3 rounded-full shadow-lg border border-slate-200 text-[#00418E] animate-bounce z-40 hover:bg-blue-50">
+                          <ChevronDown size={20} />
+                      </button>
+                  )}
+
+                  {/* Context Menu */}
                   {contextMenu && (
                       <div className="context-menu" style={{ top: contextMenu.y, left: contextMenu.x }}>
                           <div className="context-item" onClick={() => handleDeleteMessage(contextMenu.msgId)}>
@@ -521,11 +590,11 @@ const ChatPage: React.FC = () => {
                       
                       <button type="submit" disabled={!newMessage.trim()} className="p-3 bg-[#00418E] hover:bg-[#00306b] text-white rounded-full disabled:opacity-50 shadow-md transition-all active:scale-95"><Send size={18}/></button>
 
-                      {/* Simple Emoji Picker */}
+                      {/* Emoji Picker */}
                       {showEmojiPicker && (
-                          <div className="absolute bottom-16 right-16 bg-white border border-slate-200 rounded-xl shadow-lg p-2 grid grid-cols-6 gap-2 emoji-btn animate-slide-in">
+                          <div className="absolute bottom-16 right-16 bg-white border border-slate-200 rounded-xl shadow-lg p-2 grid grid-cols-6 gap-2 emoji-btn animate-slide-in z-50">
                               {COMMON_EMOJIS.map(e => (
-                                  <button key={e} type="button" onClick={() => setNewMessage(prev => prev + e)} className="text-xl hover:bg-slate-100 p-1 rounded">{e}</button>
+                                  <button key={e} type="button" onClick={() => setNewMessage(prev => prev + e)} className="text-xl hover:bg-slate-100 p-1 rounded transition-colors">{e}</button>
                               ))}
                           </div>
                       )}
