@@ -5,7 +5,7 @@ import {
   Search, LogOut, CheckCircle, Trash2, 
   Shield, Ban, Eye, ChevronLeft, ChevronRight,
   Activity, Calendar, ArrowUpRight, ArrowDown, ArrowUp,
-  TrendingUp, XCircle, AlertCircle, X, Clock, Download, Filter
+  TrendingUp, XCircle, AlertCircle, X, Download, Filter
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -82,6 +82,7 @@ const getBanLabel = (dateString: string | null) => {
 };
 
 const exportToCSV = (data: any[], filename: string) => {
+  if (!data || data.length === 0) return;
   const csvContent = "data:text/csv;charset=utf-8," + 
     Object.keys(data[0]).join(",") + "\n" + 
     data.map(row => Object.values(row).map(v => `"${v}"`).join(",")).join("\n");
@@ -226,7 +227,6 @@ const AdminPage = () => {
   const [page, setPage] = useState(0);
   const [searchTerm, setSearchTerm] = useState("");
   
-  // NEW: Sorting & Filtering
   const [sortConfig, setSortConfig] = useState<{ key: string, direction: 'asc' | 'desc' }>({ key: 'created_at', direction: 'desc' });
   const [statusFilter, setStatusFilter] = useState<string>('all');
 
@@ -240,7 +240,6 @@ const AdminPage = () => {
     }
   }, [user, isAdmin, loading]);
 
-  // --- ACTIONS ---
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
@@ -252,7 +251,6 @@ const AdminPage = () => {
 
       setStats({ totalUsers: uCount || 0, totalProducts: pCount || 0, pendingReports: rCount || 0, revenue: totalVal });
 
-      // Mock Chart & Activity (Simulated for visualization)
       const today = new Date();
       const chart = Array.from({length: 7}, (_, i) => {
         const d = new Date(today); d.setDate(d.getDate() - (6-i));
@@ -275,7 +273,6 @@ const AdminPage = () => {
     const from = page * ITEMS_PER_PAGE;
     const to = from + ITEMS_PER_PAGE - 1;
     try {
-      // USERS
       if (activeTab === 'users') {
         let q = supabase.from('profiles').select('*').order(sortConfig.key, { ascending: sortConfig.direction === 'asc' });
         if (searchTerm) q = q.ilike('email', `%${searchTerm}%`);
@@ -283,7 +280,6 @@ const AdminPage = () => {
         const { data } = await q.range(from, to);
         setUsers(data as UserData[] || []);
       } 
-      // PRODUCTS
       else if (activeTab === 'products') {
         let q = supabase.from('products').select('*, seller:profiles(name)').order(sortConfig.key, { ascending: sortConfig.direction === 'asc' });
         if (searchTerm) q = q.ilike('title', `%${searchTerm}%`);
@@ -291,7 +287,6 @@ const AdminPage = () => {
         const { data } = await q.range(from, to);
         setProducts(data || []);
       } 
-      // REPORTS
       else if (activeTab === 'reports') {
         const { data } = await supabase.from('reports').select('*, reporter:profiles!reporter_id(name), product:products(id, title)').order('created_at', { ascending: false }).range(from, to);
         setReports(data || []);
@@ -304,7 +299,6 @@ const AdminPage = () => {
     else fetchTableData();
   }, [activeTab, page, searchTerm, sortConfig, statusFilter]);
 
-  // Handlers
   const handleSort = (key: string) => {
     setSortConfig(current => ({ key, direction: current.key === key && current.direction === 'asc' ? 'desc' : 'asc' }));
   };
@@ -376,7 +370,7 @@ const AdminPage = () => {
             </button>
           ))}
         </div>
-        <div className="p-4 border-t border-slate-700/50"><button onClick={() => navigate('/')} className="sidebar-link w-full rounded-lg text-slate-400 hover:text-white justify-center border border-slate-600 hover:border-slate-400"><LogOut size={16} /> Thoát</button></div>
+        <div className="p-4 border-t border-slate-700/50"><button onClick={() => navigate('/')} className="sidebar-link w-full rounded-lg text-slate-400 hover:text-white justify-center border border-slate-600 hover:border-slate-400"><LogOut size={16} /> Về trang chủ</button></div>
       </aside>
 
       {/* CONTENT */}
@@ -397,7 +391,7 @@ const AdminPage = () => {
               </div>
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 <div className="lg:col-span-2 bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-                  <div className="flex justify-between items-center mb-8"><h3 className="font-bold text-slate-800 flex items-center gap-2"><Activity size={18} className="text-blue-500"/> Tăng trưởng tuần qua</h3></div>
+                  <div className="flex justify-between items-center mb-8"><h3 className="font-bold text-slate-800 flex items-center gap-2"><Activity size={18} className="text-blue-500"/> Hoạt động 7 ngày qua</h3></div>
                   <div className="h-64 flex items-end justify-between gap-4 px-2">
                     {chartData.map((d, i) => (
                       <div key={i} className="flex-1 flex flex-col justify-end gap-1 group relative">
@@ -409,7 +403,7 @@ const AdminPage = () => {
                   </div>
                 </div>
                 <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
-                  <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2"><Calendar size={18} className="text-orange-500"/> Hoạt động mới</h3>
+                  <h3 className="font-bold text-slate-800 mb-6 flex items-center gap-2"><Calendar size={18} className="text-orange-500"/> Mới cập nhật</h3>
                   <div className="space-y-6 overflow-y-auto flex-1 pr-2">
                     {activities.map((act) => (
                       <div key={act.id} className="flex gap-3 items-start">
@@ -541,12 +535,5 @@ const AdminPage = () => {
     </div>
   );
 };
-
-// Helper components missing in previous snippets
-const TableSkeleton = () => (
-  <div className="w-full animate-pulse">
-    {[...Array(5)].map((_, i) => <div key={i} className="skeleton-row rounded-lg"></div>)}
-  </div>
-);
 
 export default AdminPage;
