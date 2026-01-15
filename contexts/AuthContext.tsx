@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useRef } from 'react';
 import { supabase } from '../services/supabase';
 import { User } from '../types';
-import { ShieldAlert, LogOut, Lock, Clock, AlertTriangle, Mail, ChevronRight } from 'lucide-react';
+import { ShieldAlert, LogOut, Clock, AlertTriangle, Mail } from 'lucide-react';
 
 // --- TYPES ---
 interface DBProfile {
@@ -10,11 +10,11 @@ interface DBProfile {
   email?: string;
   avatar_url: string | null;
   role: string;
-  is_banned: boolean;
+  // is_banned: boolean; // Bỏ cái này, dùng thời gian để quyết định
   verified_status: string;
   student_code: string | null;
   ban_reason?: string;
-  ban_until?: string | null;
+  banned_until?: string | null; // SỬA: Dùng banned_until cho khớp Admin
 }
 
 interface AuthContextType {
@@ -24,95 +24,59 @@ interface AuthContextType {
   isRestricted: boolean;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string, name: string, studentId: string) => Promise<{ error: any }>;
-  // Đã sửa lại kiểu trả về để khớp với Supabase v2
   signOut: () => Promise<{ error: any }>; 
   resetPassword: (email: string) => Promise<{ error: any }>;
   updatePassword: (newPassword: string) => Promise<{ error: any }>;
 }
 
-// --- PROFESSIONAL BANNED OVERLAY ---
+// --- BANNED OVERLAY COMPONENT ---
 const BannedOverlay = ({ info, onLogout }: { info: { reason: string; until: string | null }, onLogout: () => void }) => {
+  // Logic hiển thị thời gian còn lại
   const isPermanent = !info.until || new Date(info.until).getFullYear() > 2100;
   
   return (
-    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#0F172A]/90 backdrop-blur-xl p-4 animate-in fade-in duration-500">
-      <div className="w-full max-w-lg bg-white rounded-[2rem] shadow-2xl overflow-hidden border border-white/10 ring-1 ring-black/5 relative">
-        {/* Header Decor */}
-        <div className="absolute top-0 left-0 w-full h-2 bg-gradient-to-r from-red-500 via-orange-500 to-red-500"></div>
-        <div className="absolute -top-20 -right-20 w-40 h-40 bg-red-500/10 rounded-full blur-3xl"></div>
+    <div className="fixed inset-0 z-[9999] flex items-center justify-center bg-[#0F172A]/95 backdrop-blur-md p-4 animate-in fade-in zoom-in duration-300">
+      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden relative">
+        <div className="bg-red-500 h-2 w-full absolute top-0"></div>
         
-        <div className="p-8 md:p-10 text-center">
-          {/* Icon Animation */}
-          <div className="relative mx-auto mb-6 w-24 h-24">
-            <div className="absolute inset-0 bg-red-100 rounded-full animate-ping opacity-20"></div>
-            <div className="relative bg-red-50 w-full h-full rounded-full flex items-center justify-center border border-red-100 shadow-inner">
-              <ShieldAlert size={48} className="text-red-600 drop-shadow-sm" />
-            </div>
+        <div className="p-8 text-center">
+          <div className="mx-auto w-20 h-20 bg-red-50 rounded-full flex items-center justify-center mb-6 animate-pulse">
+            <ShieldAlert size={40} className="text-red-600" />
           </div>
 
-          <h2 className="text-3xl font-black text-slate-900 mb-3 tracking-tight">Tài khoản bị hạn chế</h2>
-          <p className="text-slate-500 text-lg leading-relaxed mb-8">
-            Chúng tôi rất tiếc, nhưng tài khoản của bạn hiện không thể truy cập vào hệ thống.
+          <h2 className="text-2xl font-black text-slate-900 mb-2">Tài khoản bị tạm khóa</h2>
+          <p className="text-slate-500 text-sm mb-8 leading-relaxed">
+            Hệ thống phát hiện hoạt động vi phạm tiêu chuẩn cộng đồng từ tài khoản của bạn.
           </p>
-        
-          <div className="space-y-4 mb-8 text-left">
-            {/* Reason Card */}
-            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex gap-4 transition-transform hover:scale-[1.02]">
-              <div className="bg-white p-2.5 rounded-xl shadow-sm border border-slate-100 h-fit text-orange-500">
-                <AlertTriangle size={20} />
-              </div>
+          
+          <div className="bg-slate-50 rounded-2xl p-4 mb-6 border border-slate-100 text-left space-y-3">
+            <div className="flex items-start gap-3">
+              <AlertTriangle size={18} className="text-orange-500 shrink-0 mt-0.5"/>
               <div>
-                <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Lý do vi phạm</span>
-                <span className="block font-bold text-slate-800 text-sm md:text-base">
-                  {info.reason || "Vi phạm tiêu chuẩn cộng đồng"}
-                </span>
+                <span className="text-xs font-bold text-slate-400 uppercase block">Lý do</span>
+                <span className="text-sm font-bold text-slate-800">{info.reason}</span>
               </div>
             </div>
-
-            {/* Time Card */}
-            <div className="bg-slate-50 p-5 rounded-2xl border border-slate-100 flex gap-4 transition-transform hover:scale-[1.02]">
-              <div className="bg-white p-2.5 rounded-xl shadow-sm border border-slate-100 h-fit text-blue-500">
-                <Clock size={20} />
-              </div>
+            <div className="h-px bg-slate-200 w-full"></div>
+            <div className="flex items-start gap-3">
+              <Clock size={18} className="text-blue-500 shrink-0 mt-0.5"/>
               <div>
-                <span className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Thời gian mở khóa</span>
-                <span className="block font-bold text-slate-800 text-sm md:text-base">
-                  {isPermanent ? (
-                    <span className="text-red-600">Vĩnh viễn</span>
-                  ) : (
-                    new Date(info.until!).toLocaleDateString('vi-VN', { 
-                      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' 
-                    })
-                  )}
+                <span className="text-xs font-bold text-slate-400 uppercase block">Mở khóa vào lúc</span>
+                <span className="text-sm font-bold text-slate-800">
+                  {isPermanent ? "Vĩnh viễn" : new Date(info.until!).toLocaleString('vi-VN')}
                 </span>
               </div>
             </div>
           </div>
 
-          {/* Actions */}
-          <div className="flex flex-col gap-3">
-            <button 
-              onClick={onLogout}
-              className="w-full py-4 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-bold text-sm transition-all shadow-lg hover:shadow-slate-900/20 flex items-center justify-center gap-2 group"
-            >
-              <LogOut size={18} className="text-slate-400 group-hover:text-white transition-colors" /> 
-              Đăng xuất tài khoản
+          <div className="space-y-3">
+            <button onClick={onLogout} className="w-full py-3 bg-slate-900 text-white rounded-xl font-bold text-sm hover:bg-slate-800 transition-all flex items-center justify-center gap-2">
+              <LogOut size={16}/> Đăng xuất ngay
             </button>
-            
-            <a 
-              href="mailto:support@hcmut.edu.vn?subject=Khieu_nai_khoa_tai_khoan"
-              className="w-full py-4 bg-white border border-slate-200 text-slate-600 hover:text-[#00418E] hover:border-blue-200 hover:bg-blue-50 rounded-xl font-bold text-sm transition-all flex items-center justify-center gap-2"
-            >
-              <Mail size={18} /> Gửi khiếu nại
+            <a href="mailto:support@bkmart.vn" className="w-full py-3 bg-white border border-slate-200 text-slate-600 rounded-xl font-bold text-sm hover:bg-slate-50 transition-all flex items-center justify-center gap-2">
+              <Mail size={16}/> Khiếu nại
             </a>
           </div>
-        </div>
-        
-        {/* Footer */}
-        <div className="bg-slate-50 py-3 px-8 text-center border-t border-slate-100">
-           <p className="text-[10px] text-slate-400 font-medium uppercase tracking-widest">
-             BK Book Exchange Security
-           </p>
         </div>
       </div>
     </div>
@@ -127,12 +91,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isRestricted, setIsRestricted] = useState(false);
-  
-  // State quản lý thông tin Ban
   const [bannedInfo, setBannedInfo] = useState<{ reason: string; until: string | null } | null>(null);
-  
   const mounted = useRef(false);
 
+  // Hàm xử lý Profile và Check Ban
   const fetchProfile = async (sessionUser: any) => {
     try {
       let { data, error } = await supabase
@@ -141,79 +103,68 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         .eq('id', sessionUser.id)
         .maybeSingle();
 
-      // Auto-create Profile if missing (Fail-safe)
+      // Tự động tạo profile nếu chưa có (Fallback)
       if (!data) {
-        console.warn("Profile chưa tồn tại. Đang khởi tạo...");
         const meta = sessionUser.user_metadata || {};
-        const displayName = meta.full_name || meta.name || sessionUser.email?.split('@')[0] || 'User';
-        
         const newProfile = {
           id: sessionUser.id,
-          name: displayName,
+          name: meta.full_name || meta.name || sessionUser.email?.split('@')[0],
           email: sessionUser.email,
           student_code: meta.student_code || null,
           avatar_url: meta.avatar_url,
           role: 'user',
           verified_status: 'unverified',
-          is_banned: false
         };
-
-        const { data: created, error: createErr } = await supabase.from('profiles').insert(newProfile).select().single();
-        if (createErr) {
-          // Nếu tạo lỗi, logout để tránh kẹt
-          await supabase.auth.signOut();
-          setUser(null);
-          setLoading(false);
-          return;
-        }
+        const { data: created } = await supabase.from('profiles').insert(newProfile).select().single();
         data = created;
       }
 
       if (data && mounted.current) {
         const profile = data as unknown as DBProfile;
 
-        // --- KIỂM TRA BAN ---
-        if (profile.is_banned) {
-          await supabase.auth.signOut(); // Force logout logic
-          setUser(null);
-          setIsAdmin(false);
-          setLoading(false);
-          
-          // Hiện Overlay thông báo
-          setBannedInfo({
-            reason: profile.ban_reason || 'Vi phạm chính sách cộng đồng',
-            until: profile.ban_until || null
-          });
-          return;
-        }
+        // --- 🔴 LOGIC CHECK BAN QUAN TRỌNG ---
+        if (profile.banned_until) {
+          const banDate = new Date(profile.banned_until);
+          const now = new Date();
 
-        // Reset nếu user sạch
+          if (banDate > now) {
+            // Nếu thời gian khóa > hiện tại => BỊ BAN
+            setBannedInfo({
+              reason: profile.ban_reason || 'Vi phạm quy định sàn',
+              until: profile.banned_until
+            });
+            
+            // Xóa user khỏi state để chặn truy cập, nhưng KHÔNG gọi signOut ngay
+            // để giữ session cho việc hiển thị Overlay
+            setUser(null); 
+            setIsAdmin(false);
+            setLoading(false);
+            return; 
+          }
+        }
+        // -------------------------------------
+
+        // Nếu không bị ban (hoặc đã hết hạn)
         setBannedInfo(null);
 
         const userRole = profile.role === 'admin' ? 'admin' : 'user';
-        const finalName = profile.name || 'User';
         
         setUser({
           id: profile.id,
           email: sessionUser.email,
-          name: finalName,
+          name: profile.name || 'User',
           studentId: profile.student_code || '', 
           avatar: profile.avatar_url || '',
           isVerified: profile.verified_status === 'verified',
           role: userRole,
-          banned: profile.is_banned,
-          banUntil: profile.ban_until
+          banned: false, // Tại đây chắc chắn không bị ban
+          banUntil: null
         });
         
         setIsAdmin(userRole === 'admin');
-        setIsRestricted(false); 
       }
-    } catch (error: any) {
-      console.error("Lỗi Auth:", error);
-      if (error?.message?.includes("Refresh Token")) {
-         await supabase.auth.signOut();
-         setUser(null);
-      }
+    } catch (error) {
+      console.error("Auth Error:", error);
       if (mounted.current) setUser(null);
     } finally {
       if (mounted.current) setLoading(false);
@@ -222,20 +173,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     mounted.current = true;
+    
+    // Check session lúc khởi động
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session?.user) fetchProfile(session.user);
       else setLoading(false);
     });
 
+    // Lắng nghe thay đổi (Login, Logout)
     const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
       if (mounted.current) {
-        if ((event === 'SIGNED_IN' || event === 'USER_UPDATED' || event === 'TOKEN_REFRESHED') && session?.user) {
+        if (session?.user) {
           fetchProfile(session.user);
-        } else if (event === 'SIGNED_OUT') {
+        } else {
           setUser(null);
           setIsAdmin(false);
           setLoading(false);
-          // Không clear bannedInfo ở đây để giữ overlay nếu cần
+          setBannedInfo(null); // Clear ban info khi logout thật
         }
       }
     });
@@ -249,10 +203,11 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const handleLogout = async () => {
     await supabase.auth.signOut();
     setBannedInfo(null);
+    setUser(null);
     window.location.href = '/'; 
   };
 
-  // --- EXPORTED FUNCTIONS ---
+  // Các hàm Auth cơ bản
   const signIn = async (email: string, password: string) => supabase.auth.signInWithPassword({ email, password });
   
   const signUp = async (email: string, password: string, name: string, studentId: string) => {
@@ -265,19 +220,18 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signOut = async () => await supabase.auth.signOut(); 
-  
-  const resetPassword = async (email: string) => supabase.auth.resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/#/reset-password` });
-  
+  const resetPassword = async (email: string) => supabase.auth.resetPasswordForEmail(email);
   const updatePassword = async (newPassword: string) => supabase.auth.updateUser({ password: newPassword });
 
   return (
     <AuthContext.Provider value={{ user, loading, isAdmin, isRestricted, signIn, signUp, signOut, resetPassword, updatePassword }}>
+      {/* ƯU TIÊN HIỂN THỊ OVERLAY NẾU BỊ BAN */}
       {bannedInfo ? (
         <BannedOverlay info={bannedInfo} onLogout={handleLogout} />
       ) : (
         !loading ? children : (
           <div className="h-screen flex items-center justify-center bg-white">
-            <div className="animate-spin rounded-full h-10 w-10 border-b-2 border-[#00418E]"></div>
+            <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
           </div>
         )
       )}
