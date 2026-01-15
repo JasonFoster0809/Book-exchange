@@ -14,7 +14,7 @@ interface DBProfile {
   verified_status: string;
   student_code: string | null;
   ban_reason?: string;
-  banned_until?: string | null; // Cột quan trọng để check ban
+  banned_until?: string | null;
 }
 
 interface AuthContextType {
@@ -22,9 +22,10 @@ interface AuthContextType {
   user: User | null;
   loading: boolean;
   isAdmin: boolean;
+  isRestricted: boolean; // <--- ĐÃ THÊM THUỘC TÍNH NÀY (Fix lỗi PostItemPage)
   signIn: (email: string, password: string) => Promise<{ error: any }>;
   signUp: (email: string, password: string, name: string, studentId: string) => Promise<{ error: any }>;
-  signOut: () => Promise<{ error: any }>;
+  signOut: () => Promise<{ error: any }>; 
   resetPassword: (email: string) => Promise<{ error: any }>;
   updatePassword: (newPassword: string) => Promise<{ error: any }>;
 }
@@ -93,6 +94,9 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // State quản lý thông tin bị khóa
   const [bannedInfo, setBannedInfo] = useState<{ reason: string; until: string | null } | null>(null);
   
+  // Tính toán isRestricted dựa trên bannedInfo (Fix lỗi PostItemPage)
+  const isRestricted = !!bannedInfo;
+
   const mounted = useRef(false);
 
   // 1. Hàm lấy Profile & Check Ban
@@ -100,14 +104,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     try {
       const userId = sessionData.user.id;
       
-      // Lấy profile từ DB
       let { data, error } = await supabase
         .from('profiles')
         .select('*')
         .eq('id', userId)
         .maybeSingle();
 
-      // Nếu chưa có profile -> Tự tạo (Auto-create)
+      // Auto-create profile if missing
       if (!data && !error) {
         const meta = sessionData.user.user_metadata || {};
         const newProfile = {
@@ -125,43 +128,43 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (data && mounted.current) {
         const profile = data as unknown as DBProfile;
 
-        // --- CHECK BAN LOGIC ---
+        // --- CHECK BAN ---
         if (profile.banned_until) {
           const banDate = new Date(profile.banned_until);
           const now = new Date();
 
           if (banDate > now) {
-            // Nếu thời gian khóa > hiện tại => BỊ BAN
             setBannedInfo({
               reason: profile.ban_reason || 'Vi phạm chính sách',
               until: profile.banned_until
             });
             
-            // Xóa quyền truy cập ngay lập tức
             setUser(null); 
             setIsAdmin(false);
             setLoading(false);
-            return; // Dừng, không set User nữa
+            return;
           }
         }
-        // -----------------------
+        // ----------------
 
-        // Nếu sạch -> Set User vào State
         setBannedInfo(null);
         
+        // FIX: Ép kiểu role từ string sang union type 'user' | 'admin'
+        const safeRole = (profile.role === 'admin' ? 'admin' : 'user') as 'user' | 'admin';
+
         setUser({
           id: profile.id,
-          email: sessionData.user.email,
+          email: sessionData.user.email || '',
           name: profile.name || 'User',
           studentId: profile.student_code || '', 
           avatar: profile.avatar_url || '',
           isVerified: profile.verified_status === 'verified',
-          role: profile.role,
+          role: safeRole,
           banned: false,
           banUntil: null
         });
         
-        setIsAdmin(profile.role === 'admin');
+        setIsAdmin(safeRole === 'admin');
       }
     } catch (error) {
       console.error("Auth Fetch Error:", error);
@@ -174,7 +177,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     mounted.current = true;
 
-    // Lấy session ban đầu
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setSession(session);
@@ -184,7 +186,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     });
 
-    // Lắng nghe thay đổi (Login/Logout)
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (mounted.current) {
         setSession(session);
@@ -206,12 +207,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   // 3. Auth Actions
+  // FIX: Trả về { error } để khớp với Interface Promise<{ error: any }>
   const handleLogout = async () => {
-    await supabase.auth.signOut();
+    const { error } = await supabase.auth.signOut();
     setBannedInfo(null);
     setUser(null);
     setSession(null);
     window.location.href = '/'; 
+    return { error };
   };
 
   const signIn = async (e: string, p: string) => supabase.auth.signInWithPassword({ email: e, password: p });
@@ -228,17 +231,15 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const updatePassword = async (p: string) => supabase.auth.updateUser({ password: p });
 
   return (
-    <AuthContext.Provider value={{ session, user, loading, isAdmin, signIn, signUp, signOut, resetPassword, updatePassword }}>
-      {/* ƯU TIÊN 1: Hiển thị màn hình khóa nếu bị ban */}
+    <AuthContext.Provider value={{ session, user, loading, isAdmin, isRestricted, signIn, signUp, signOut, resetPassword, updatePassword }}>
       {bannedInfo ? (
         <BannedOverlay info={bannedInfo} onLogout={handleLogout} />
       ) : (
-        /* ƯU TIÊN 2: Hiển thị loading hoặc app */
-        loading ? (
+        !loading ? children : (
           <div className="h-screen flex items-center justify-center bg-white">
             <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
           </div>
-        ) : children
+        )
       )}
     </AuthContext.Provider>
   );
