@@ -6,7 +6,7 @@ import {
   Clock, MapPin, SlidersHorizontal, 
   X, ArrowRight, Grid, Filter, Ghost, Activity,
   ChevronDown, Sparkles, Smartphone, Mail, Share2, 
-  MessageCircle, ThumbsUp, ArrowUp
+  MessageCircle, ThumbsUp, ArrowUp, Eye, Smile // <--- Đã thêm Eye và Smile
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { Product } from "../types";
