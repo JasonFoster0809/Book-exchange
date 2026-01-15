@@ -1,10 +1,13 @@
 import path from 'path';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite'
+import tailwindcss from '@tailwindcss/vite';
 
 export default defineConfig(() => {
   return {
+    // Thêm dòng này để fix lỗi 404 khi load file tĩnh
+    base: './', 
+    
     server: {
       port: 3000,
       host: '0.0.0.0',
