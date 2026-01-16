@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { useParams, useNavigate, Link } from "react-router-dom";
+import { useParams, useNavigate } from "react-router-dom";
 import {
   Heart, MessageCircle, Share2, ArrowLeft, Eye, MapPin,
   Clock, Star, Box, ShieldCheck, Calendar, ArrowRight,
-  Loader2, AlertTriangle, User as UserIcon, CheckCircle2, Flag, Edit3,
+  Loader2, AlertTriangle, CheckCircle2, Flag, Edit3,
   MessageSquare, Send, Trash, X, Check, ZoomIn
 } from "lucide-react";
 import { supabase } from "../services/supabase";
@@ -13,7 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { Product } from "../types";
 
 // ============================================================================
-// 1. VISUAL ENGINE (Đã nâng cấp Z-Index và Modal)
+// 1. VISUAL ENGINE (Styles & Animations)
 // ============================================================================
 const VisualEngine = () => (
   <style>{`
@@ -55,11 +55,11 @@ const VisualEngine = () => (
 
     .hide-scrollbar::-webkit-scrollbar { display: none; }
 
-    /* Modal Backdrop - Z-Index cao nhất để đè lên Navbar */
+    /* Modal Backdrop - Highest Z-Index */
     .modal-backdrop {
-      background: rgba(0, 0, 0, 0.95); /* Nền tối hơn */
+      background: rgba(0, 0, 0, 0.9);
       backdrop-filter: blur(8px);
-      position: fixed; inset: 0; z-index: 9999; /* Đè lên tất cả */
+      position: fixed; inset: 0; z-index: 9999;
       display: flex; align-items: center; justify-content: center;
       animation: fadeIn 0.2s ease-out;
     }
@@ -108,11 +108,11 @@ const formatCurrency = (amount: number) => new Intl.NumberFormat('vi-VN', { styl
 // 3. SUB-COMPONENTS
 // ============================================================================
 
-// --- Image Lightbox (ĐÃ FIX ZOOM TO) ---
+// --- Image Lightbox ---
 const ImageLightbox = ({ src, onClose }: { src: string, onClose: () => void }) => (
   <div className="modal-backdrop" onClick={onClose}>
     {/* Close Button */}
-    <button className="absolute top-4 right-4 text-white/70 hover:text-white transition-colors p-3 bg-white/10 hover:bg-white/20 rounded-full z-50 backdrop-blur-md border border-white/10">
+    <button className="absolute top-4 right-4 text-white/70 hover:text-white transition-colors p-3 bg-white/10 hover:bg-white/20 rounded-full z-[10000] backdrop-blur-md border border-white/10">
       <X size={28}/>
     </button>
     
@@ -120,9 +120,15 @@ const ImageLightbox = ({ src, onClose }: { src: string, onClose: () => void }) =
     <div className="w-full h-full flex items-center justify-center p-4">
       <img 
         src={src} 
-        className="animate-zoom-in rounded-lg shadow-2xl object-contain max-h-[95vh] max-w-[95vw] w-auto h-auto min-h-[50vh] min-w-[50vw]" // Thêm min-h/min-w để không bị bé tí
-        style={{ maxHeight: '95vh', maxWidth: '95vw' }} // Fallback
+        className="animate-zoom-in rounded-lg shadow-2xl object-contain"
+        style={{ 
+          maxHeight: '90vh', 
+          maxWidth: '90vw',
+          minHeight: '40vh', // Ensure visibility for small aspect ratios
+          minWidth: '40vw'
+        }} 
         onClick={e => e.stopPropagation()} 
+        alt="Full preview"
       />
     </div>
   </div>
@@ -167,6 +173,7 @@ const ProductDetailPage: React.FC = () => {
 
   const [product, setProduct] = useState<ProductDetail | null>(null);
   const [comments, setComments] = useState<Comment[]>([]);
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const [relatedProducts, setRelatedProducts] = useState<Product[]>([]);
   
   const [loading, setLoading] = useState(true);
@@ -197,7 +204,7 @@ const ProductDetailPage: React.FC = () => {
         const mappedProduct: ProductDetail = {
           ...pData,
           sellerId: pData.seller_id,
-          seller: pData.profiles,
+          seller: pData.profiles, // Supabase returns object for single relation
           images: pData.images || [],
           postedAt: pData.created_at,
           tradeMethod: pData.trade_method,
@@ -205,10 +212,12 @@ const ProductDetailPage: React.FC = () => {
         };
         setProduct(mappedProduct);
         
+        // Increase View Count
         supabase.rpc("increment_view_count", { product_id: id }).then(() => {
              setProduct(prev => prev ? ({...prev, view_count: (prev.view_count || 0) + 1}) : null);
         });
 
+        // Fetch Related Products
         if (pData.category) {
           const { data: related } = await supabase
             .from('products')
@@ -220,12 +229,13 @@ const ProductDetailPage: React.FC = () => {
           if (related) setRelatedProducts(related as Product[]);
         }
 
+        // Check Like Status
         if (currentUser) {
           const { data: sData } = await supabase.from("saved_products").select("id").eq("user_id", currentUser.id).eq("product_id", id).maybeSingle();
           if (sData) setIsLiked(true);
         }
       } catch (err) {
-        addToast(t('market.no_product'), "error");
+        addToast(t('market.no_product') || "Không tìm thấy sản phẩm", "error");
         navigate("/market");
       } finally {
         setLoading(false);
@@ -233,13 +243,14 @@ const ProductDetailPage: React.FC = () => {
     };
     fetchData();
 
+    // Subscribe to Product Updates (Realtime)
     if (id) {
         const ch = supabase.channel(`view_${id}`).on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products', filter: `id=eq.${id}` }, 
           (payload) => setProduct(prev => prev ? { ...prev, ...payload.new } : null)
         ).subscribe();
         return () => { supabase.removeChannel(ch); }
     }
-  }, [id, currentUser]);
+  }, [id, currentUser, addToast, navigate, t]);
 
   // --- FETCH COMMENTS ---
   useEffect(() => {
@@ -249,6 +260,8 @@ const ProductDetailPage: React.FC = () => {
       if (data) setComments(data as any);
     };
     fetchComments();
+    
+    // Subscribe to Comments
     const ch = supabase.channel(`comments_${id}`).on('postgres_changes', { event: '*', schema: 'public', table: 'comments', filter: `product_id=eq.${id}` }, () => fetchComments()).subscribe();
     return () => { supabase.removeChannel(ch); };
   }, [id]);
@@ -269,8 +282,8 @@ const ProductDetailPage: React.FC = () => {
       });
       if (error) throw error;
 
+      // Notification Logic
       const actorName = currentUser.name || currentUser.email?.split('@')[0] || "Người dùng";
-
       if (product.sellerId !== currentUser.id) {
         await supabase.from('notifications').insert({
           user_id: product.sellerId, actor_id: currentUser.id, type: 'comment',
@@ -279,8 +292,8 @@ const ProductDetailPage: React.FC = () => {
       }
       if (replyTo && replyTo.user_id !== currentUser.id && replyTo.user_id !== product.sellerId) {
          await supabase.from('notifications').insert({
-            user_id: replyTo.user_id, actor_id: currentUser.id, type: 'comment',
-            title: '↩️ Phản hồi mới', content: `${actorName} đã trả lời bình luận của bạn.`, link: `/product/${product.id}`
+           user_id: replyTo.user_id, actor_id: currentUser.id, type: 'comment',
+           title: '↩️ Phản hồi mới', content: `${actorName} đã trả lời bình luận của bạn.`, link: `/product/${product.id}`
          });
       }
 
@@ -338,7 +351,7 @@ const ProductDetailPage: React.FC = () => {
         <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4">
           <button onClick={() => navigate(-1)} className="group flex items-center gap-2 rounded-full py-2 pr-4 pl-2 hover:bg-slate-100/50 transition-colors">
             <div className="bg-white p-1.5 rounded-full shadow-sm group-hover:scale-110 transition-transform"><ArrowLeft size={18} className="text-slate-700"/></div>
-            <span className="font-bold text-sm text-slate-700 hidden sm:block">{t('product.back')}</span>
+            <span className="font-bold text-sm text-slate-700 hidden sm:block">{t('product.back') || 'Quay lại'}</span>
           </button>
           
           <span className="font-bold text-slate-800 line-clamp-1 max-w-[200px] sm:max-w-md opacity-0 sm:opacity-100 transition-opacity">{product.title}</span>
@@ -391,7 +404,7 @@ const ProductDetailPage: React.FC = () => {
               <div className="flex gap-3 overflow-x-auto pb-2 hide-scrollbar snap-x">
                 {product.images.map((img, i) => (
                   <button key={i} onClick={() => setActiveImg(i)} className={`relative w-20 h-20 flex-shrink-0 rounded-2xl overflow-hidden border-2 transition-all cursor-pointer ${activeImg === i ? 'border-[#00418E] shadow-md scale-105' : 'border-transparent opacity-60 hover:opacity-100'}`}>
-                    <img src={img} className="w-full h-full object-cover"/>
+                    <img src={img} className="w-full h-full object-cover" alt={`thumb-${i}`}/>
                   </button>
                 ))}
               </div>
@@ -399,17 +412,18 @@ const ProductDetailPage: React.FC = () => {
           </div>
 
           <div className="glass-panel p-8 rounded-[2rem]">
-            <h3 className="font-bold text-lg mb-6 flex items-center gap-2 text-slate-800"><ShieldCheck className="text-[#00418E]" size={20}/> {t('product.description_title')}</h3>
+            <h3 className="font-bold text-lg mb-6 flex items-center gap-2 text-slate-800"><ShieldCheck className="text-[#00418E]" size={20}/> {t('product.description_title') || "Mô tả sản phẩm"}</h3>
             <div className="prose prose-sm max-w-none text-slate-600 leading-relaxed whitespace-pre-wrap font-medium">
-              {product.description || t('product.no_description')}
+              {product.description || t('product.no_description') || "Người bán không cung cấp mô tả."}
             </div>
           </div>
 
+          {/* COMMENTS SECTION */}
           <div className="glass-panel p-8 rounded-[2rem]">
             <h3 className="font-bold text-lg mb-6 flex items-center gap-2 text-slate-800"><MessageSquare className="text-[#00418E]" size={20}/> Bình luận ({comments.length})</h3>
             <form onSubmit={handlePostComment} className="flex gap-3 mb-8">
               <div className="flex-shrink-0">
-                <img src={currentUser?.avatar || `https://ui-avatars.com/api/?name=${currentUser?.name || 'Me'}`} className="w-10 h-10 rounded-full bg-slate-200 border border-white shadow-sm"/>
+                <img src={currentUser?.avatar || `https://ui-avatars.com/api/?name=${currentUser?.name || 'Me'}`} className="w-10 h-10 rounded-full bg-slate-200 border border-white shadow-sm" alt="Me"/>
               </div>
               <div className="flex-1">
                 {replyTo && (
@@ -429,7 +443,7 @@ const ProductDetailPage: React.FC = () => {
             <div className="space-y-6">
               {comments.map(comment => (
                 <div key={comment.id} className="group flex gap-3">
-                  <img src={comment.user?.avatar_url || `https://ui-avatars.com/api/?name=${comment.user?.name}`} className="w-9 h-9 rounded-full bg-slate-200 border border-white shadow-sm flex-shrink-0"/>
+                  <img src={comment.user?.avatar_url || `https://ui-avatars.com/api/?name=${comment.user?.name}`} className="w-9 h-9 rounded-full bg-slate-200 border border-white shadow-sm flex-shrink-0" alt="User"/>
                   <div>
                     <div className="comment-bubble px-4 py-2.5">
                       <div className="flex items-center gap-2 mb-0.5">
@@ -446,6 +460,7 @@ const ProductDetailPage: React.FC = () => {
           </div>
         </div>
 
+        {/* RIGHT COLUMN */}
         <div className="lg:col-span-5 space-y-6 animate-enter" style={{animationDelay: '100ms'}}>
           <div className="glass-panel p-8 rounded-[2.5rem] lg:sticky lg:top-24 border-t-4 border-t-[#00418E]">
             <div className="flex justify-between items-start mb-6">
@@ -458,37 +473,37 @@ const ProductDetailPage: React.FC = () => {
 
             <div className="grid grid-cols-2 gap-3 mb-8">
               <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm">
-                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.condition')}</p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.condition') || "Tình trạng"}</p>
                 <p className="font-bold text-sm text-slate-700 flex gap-2 items-center"><Star size={14} className="text-yellow-500 fill-yellow-500"/> {product.condition}</p>
               </div>
               <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm">
-                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.trade_method')}</p>
-                <p className="font-bold text-sm text-slate-700 flex gap-2 items-center"><Box size={14} className="text-blue-500"/> {product.tradeMethod === 'direct' ? t('product.method.direct') : t('product.method.shipping')}</p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.trade_method') || "Giao dịch"}</p>
+                <p className="font-bold text-sm text-slate-700 flex gap-2 items-center"><Box size={14} className="text-blue-500"/> {product.tradeMethod === 'direct' ? t('product.method.direct') || "Trực tiếp" : t('product.method.shipping') || "Ship COD"}</p>
               </div>
               <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm">
-                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.location')}</p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.location') || "Khu vực"}</p>
                 <p className="font-bold text-sm text-slate-700 flex gap-2 items-center"><MapPin size={14} className="text-red-500"/> {product.location}</p>
               </div>
               <div className="p-3 bg-white/60 rounded-2xl border border-white shadow-sm">
-                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.posted_date')}</p>
+                <p className="text-[10px] text-slate-400 font-bold uppercase mb-1">{t('product.posted_date') || "Ngày đăng"}</p>
                 <p className="font-bold text-sm text-slate-700 flex gap-2 items-center"><Calendar size={14} className="text-slate-500"/> {new Date(product.postedAt).toLocaleDateString('vi-VN')}</p>
               </div>
             </div>
 
             <div className="group flex items-center gap-4 p-4 bg-white/50 border border-white rounded-2xl mb-8 cursor-pointer hover:bg-white hover:shadow-md transition-all" onClick={() => navigate(`/profile/${product.seller?.id}`)}>
               <div className="relative">
-                <img src={product.seller?.avatar_url || `https://ui-avatars.com/api/?name=${product.seller?.name || 'User'}&background=random`} className="w-14 h-14 rounded-full border-2 border-white shadow-sm object-cover"/>
+                <img src={product.seller?.avatar_url || `https://ui-avatars.com/api/?name=${product.seller?.name || 'User'}&background=random`} className="w-14 h-14 rounded-full border-2 border-white shadow-sm object-cover" alt="Seller"/>
                 {product.seller?.verified_status === 'verified' && <div className="absolute -bottom-1 -right-1 bg-blue-500 text-white p-0.5 rounded-full border-2 border-white"><CheckCircle2 size={12}/></div>}
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-0.5">
                   <h4 className="font-bold text-slate-900 truncate">{product.seller?.name || "User"}</h4>
                   <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${isOwner ? 'bg-green-100 text-green-700 border-green-200' : 'bg-blue-100 text-blue-700 border-blue-200'}`}>
-                    {isOwner ? t('product.owner_role') : t('product.seller_role')}
+                    {isOwner ? (t('product.owner_role') || "Tôi") : (t('product.seller_role') || "Người bán")}
                   </span>
                 </div>
                 <div className="flex items-center gap-2 text-xs text-slate-500">
-                  {product.seller?.student_code && <span className="font-mono bg-slate-100 px-1.5 rounded">{t('product.student_id')}: {product.seller.student_code}</span>}
+                  {product.seller?.student_code && <span className="font-mono bg-slate-100 px-1.5 rounded">{t('product.student_id') || "MSSV"}: {product.seller.student_code}</span>}
                 </div>
               </div>
               <div className="p-2 bg-slate-100 rounded-full text-slate-400 group-hover:text-[#00418E] group-hover:bg-blue-50 transition-colors"><ArrowRight size={18}/></div>
@@ -497,16 +512,16 @@ const ProductDetailPage: React.FC = () => {
             <div className="flex flex-col gap-3">
               {isOwner ? (
                 <button onClick={() => navigate(`/edit-item/${product.id}`)} className="w-full bg-slate-800 text-white py-4 rounded-2xl font-bold shadow-lg hover:bg-slate-900 transition-all flex items-center justify-center gap-2 text-lg">
-                  <Edit3 size={20}/> {t('product.edit_post')}
+                  <Edit3 size={20}/> {t('product.edit_post') || "Chỉnh sửa bài đăng"}
                 </button>
               ) : (
                 <button onClick={startChat} className="w-full bg-gradient-to-r from-[#00418E] to-[#0065D1] text-white py-4 rounded-2xl font-bold shadow-lg shadow-blue-900/20 hover:shadow-blue-900/30 hover:scale-[1.02] active:scale-[0.98] transition-all flex items-center justify-center gap-2 text-lg">
-                  <MessageCircle size={24}/> {t('product.contact_seller')}
+                  <MessageCircle size={24}/> {t('product.contact_seller') || "Liên hệ người bán"}
                 </button>
               )}
               {!isOwner && (
                 <button onClick={() => setShowReport(true)} className="w-full bg-white text-slate-600 border border-slate-200 py-3 rounded-2xl font-bold hover:bg-red-50 hover:text-red-600 hover:border-red-100 transition-colors text-sm flex items-center justify-center gap-2">
-                  <Flag size={16}/> {t('product.report_post')}
+                  <Flag size={16}/> {t('product.report_post') || "Báo cáo tin này"}
                 </button>
               )}
             </div>
