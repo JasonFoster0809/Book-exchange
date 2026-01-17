@@ -200,8 +200,10 @@ const ProductDetailPage: React.FC = () => {
         };
         setProduct(mappedProduct);
 
-        // Tăng view & Check like
-        supabase.rpc("increment_view", { product_id: id }).catch(() => {});
+        // Tăng view (Đã sửa lỗi .catch bằng await)
+        await supabase.rpc("increment_view", { product_id: id });
+
+        // Check like
         if (currentUser) {
           const { data: sData } = await supabase.from("saved_products").select("id").eq("user_id", currentUser.id).eq("product_id", id).maybeSingle();
           if (sData) setIsLiked(true);
