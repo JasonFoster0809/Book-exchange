@@ -5,23 +5,11 @@ import { supabase } from "../services/supabase";
 import { useToast } from "../contexts/ToastContext";
 import {
   ShieldCheck, LogOut, MessageCircle, Star, Edit3, X,
-  UserPlus, UserCheck, Zap, School, ShieldAlert, Loader2,
-  Calendar, Package, ShoppingBag, Camera, Upload, MapPin,
-  Settings, Share2
+  UserPlus, Zap, School, ShieldAlert, Loader2,
+  Calendar, Package, ShoppingBag
 } from "lucide-react";
-import { Product, User, Review } from "../types";
+import { Product, User, Review } from "../types"; // Dùng trực tiếp User từ types
 import ProductCard from "../components/ProductCard";
-
-// --- TYPES EXTENSION ---
-interface ExtendedUser extends User {
-  bio?: string;
-  major?: string;
-  academicYear?: string;
-  joinedAt?: string;
-  coverUrl?: string;
-  lastSeen?: string;
-  banUntil?: string | null;
-}
 
 // --- VISUAL ENGINE ---
 const VisualEngine = () => (
@@ -72,7 +60,8 @@ const ProfilePage: React.FC = () => {
   const targetUserId = isOwnProfile ? currentUser?.id : id;
 
   // --- STATES ---
-  const [profileUser, setProfileUser] = useState<ExtendedUser | null>(null);
+  // FIX: Dùng User thay vì ExtendedUser
+  const [profileUser, setProfileUser] = useState<User | null>(null);
   const [userProducts, setUserProducts] = useState<Product[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [averageRating, setAverageRating] = useState<number>(0);
@@ -87,19 +76,12 @@ const ProfilePage: React.FC = () => {
   const [editMajor, setEditMajor] = useState("");
   const [editYear, setEditYear] = useState("");
   const [editAvatarFile, setEditAvatarFile] = useState<File | null>(null);
-  const [previewAvatar, setPreviewAvatar] = useState<string | null>(null);
   const [editCoverFile, setEditCoverFile] = useState<File | null>(null);
-  const [previewCover, setPreviewCover] = useState<string | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
   // Verify & Review States
   const [verifyModalOpen, setVerifyModalOpen] = useState(false);
-  const [uploadingVerify, setUploadingVerify] = useState(false);
   const [verificationStatus, setVerificationStatus] = useState<string>("none");
-  
-  const [newRating, setNewRating] = useState(5);
-  const [newComment, setNewComment] = useState("");
-  const [submittingReview, setSubmittingReview] = useState(false);
 
   // --- HELPERS ---
   const formatJoinedDate = (dateString?: string) => {
@@ -147,6 +129,7 @@ const ProfilePage: React.FC = () => {
 
         if (profileError) throw profileError;
 
+        // FIX: Map đầy đủ trường banned và studentId
         setProfileUser({
           id: profileData.id,
           name: profileData.name || "Người dùng ẩn danh",
@@ -161,11 +144,11 @@ const ProfilePage: React.FC = () => {
           academicYear: profileData.academic_year || "",
           joinedAt: profileData.created_at,
           lastSeen: profileData.last_seen,
-          banUntil: profileData.ban_until,
+          banUntil: profileData.banned_until,
+          banned: !!profileData.banned_until && new Date(profileData.banned_until) > new Date() // <--- FIX LỖI TS2345
         });
 
-        // 2. Fetch Products (Chắc chắn lấy được tin)
-        // Lưu ý: Nếu xem profile người khác, chỉ hiện tin 'available'. Nếu xem của mình, hiện hết.
+        // 2. Fetch Products
         let prodQuery = supabase
           .from("products")
           .select("*")
@@ -179,7 +162,6 @@ const ProfilePage: React.FC = () => {
         const { data: prodData } = await prodQuery;
         
         if (prodData) {
-          // Manual map để tránh lỗi relation nếu chưa setup
           const mappedProducts = prodData.map((item: any) => ({
             id: item.id,
             title: item.title,
@@ -190,16 +172,16 @@ const ProfilePage: React.FC = () => {
             condition: item.condition,
             status: item.status,
             tradeMethod: item.trade_method,
+            location: item.location_name || 'TP.HCM', // <--- FIX LỖI TS2322 (Thiếu location)
             sellerId: item.seller_id,
             postedAt: item.created_at,
             view_count: item.view_count || 0,
-            seller: profileData // Gán luôn profile đã fetch ở trên
+            seller: profileData // Gán profileData vào để tránh lỗi undefined
           }));
           setUserProducts(mappedProducts as any);
         }
 
         // 3. Fetch Reviews
-        // Thử join, nếu lỗi thì fetch chay
         try {
           const { data: reviewData, error: rError } = await supabase
             .from("reviews")
@@ -276,7 +258,7 @@ const ProfilePage: React.FC = () => {
   if (loading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-[#00418E]" size={40}/></div>;
   if (!profileUser) return <div className="py-20 text-center text-slate-500">Người dùng không tồn tại</div>;
 
-  const isBanned = profileUser.banUntil && new Date(profileUser.banUntil) > new Date();
+  const isBanned = profileUser.banned;
 
   return (
     <div className="min-h-screen pb-20 font-sans text-slate-800">
