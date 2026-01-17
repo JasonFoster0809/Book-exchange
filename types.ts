@@ -16,10 +16,14 @@ export enum TradeMethod {
   BOTH = 'flexible'
 }
 
+// FIX: Thêm đầy đủ các trạng thái Cũ/Mới để tương thích code cũ
 export enum ProductCondition {
   NEW = 'new',
+  LIKE_NEW = 'like_new',
   USED = 'used',
-  LIKE_NEW = 'like_new'
+  GOOD = 'good', // Legacy support
+  FAIR = 'fair', // Legacy support
+  POOR = 'poor'  // Legacy support
 }
 
 export enum ProductStatus {
@@ -54,7 +58,7 @@ export interface User {
   banned: boolean;     
   banUntil: string | null; 
   
-  // Thông tin bổ sung (Đã thêm để fix lỗi AuthContext)
+  // Thông tin bổ sung (Fix lỗi AuthContext)
   bio?: string;
   major?: string;
   academicYear?: string;
@@ -73,7 +77,7 @@ export interface DBProfile {
   
   role: string;
   student_code: string | null; 
-  verified_status: string; // 'unverified' | 'pending' | ...
+  verified_status: string; 
   
   bio?: string | null;
   major?: string | null;
@@ -83,6 +87,10 @@ export interface DBProfile {
   last_seen?: string;
   banned_until?: string | null;
   ban_reason?: string | null;
+  
+  // Stats
+  rating?: number;
+  completed_trades?: number;
 }
 
 export interface VerificationRequest {
@@ -117,12 +125,17 @@ export interface Product {
   tradeMethod: string;
   location: string;
   
-  // Meta data (Mapped fields for UI)
+  // Meta data (UI)
   sellerId: string;
   postedAt: string;
   view_count: number;
 
-  // Raw DB fields (Optional - để tránh lỗi khi fetch raw)
+  // FIX: Các trường UI bổ sung (Optional)
+  isLookingToBuy?: boolean;
+  isLiked?: boolean;
+  buyerId?: string;
+  
+  // DB raw fields (Optional)
   seller_id?: string;
   created_at?: string;
   location_name?: string;
@@ -136,6 +149,12 @@ export interface Product {
     verified_status: string;
     student_code?: string;
     last_seen?: string;
+    
+    // FIX: Thêm các trường thống kê để ProductCard không bị lỗi
+    rating?: number;
+    completed_trades?: number;
+    ban_until?: string | null;
+    is_verified?: boolean; // Legacy support
   };
 }
 
@@ -180,7 +199,7 @@ export interface Report {
   status: 'pending' | 'resolved' | 'dismissed';
   createdAt: string;
   
-  // Relations (Optional)
+  // Relations
   reporter?: DBProfile;
   product?: Product;
 }
