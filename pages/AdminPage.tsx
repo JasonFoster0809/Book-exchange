@@ -4,7 +4,7 @@ import {
   LayoutDashboard, Users, Package, AlertTriangle, 
   Search, LogOut, CheckCircle, Trash2, 
   Shield, Ban, Eye, ChevronLeft, ChevronRight,
-  Activity, TrendingUp, X, DollarSign, AlertCircle, Calendar
+  X, DollarSign, AlertCircle
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
@@ -15,12 +15,10 @@ import { useToast } from "../contexts/ToastContext";
 // ============================================================================
 const ITEMS_PER_PAGE = 10;
 
-// Helper an toàn: Lấy dữ liệu nested mà không bị lỗi crash
+// Helper: Lấy dữ liệu nested an toàn (tránh lỗi undefined/null)
 const safeGet = (data: any, field: string, fallback = "N/A") => {
   if (!data) return fallback;
-  // Trường hợp Supabase trả về mảng (relation 1-n)
   if (Array.isArray(data) && data.length > 0) return data[0]?.[field] || fallback;
-  // Trường hợp Supabase trả về object (relation 1-1)
   if (typeof data === 'object') return data?.[field] || fallback;
   return fallback;
 };
@@ -29,14 +27,14 @@ const formatCurrency = (amount: number) =>
   new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
 
 const formatDate = (dateString: string) => 
-  new Date(dateString).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  new Date(dateString).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 
 const getBanStatus = (bannedUntil: string | null) => {
   if (!bannedUntil) return { label: 'Hoạt động', color: 'bg-emerald-100 text-emerald-700 border-emerald-200', isBanned: false };
   const now = new Date();
   const banDate = new Date(bannedUntil);
   if (banDate > now) {
-    const diff = Math.ceil(Math.abs(banDate.getTime() - now.getTime()) / (86400000));
+    const diff = Math.ceil((banDate.getTime() - now.getTime()) / (86400000));
     return { 
       label: diff > 3650 ? 'Vĩnh viễn' : `Khóa ${diff} ngày`, 
       color: 'bg-rose-100 text-rose-700 border-rose-200',
@@ -73,7 +71,8 @@ const VisualEngine = () => (
     .search-input { width: 100%; padding: 10px 16px 10px 44px; border: 1px solid var(--border); border-radius: 10px; outline: none; font-size: 14px; transition: all 0.2s; }
     .search-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1); }
 
-    .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.5); backdrop-filter: blur(4px); z-index: 50; display: flex; align-items: center; justify-content: center; }
+    .modal-overlay { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 50; display: flex; align-items: center; justify-content: center; animation: fadeIn 0.2s; }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     .modal-content { background: #fff; border-radius: 16px; width: 100%; max-width: 420px; box-shadow: 0 20px 25px -5px rgba(0,0,0,0.1); overflow: hidden; animation: scaleIn 0.2s; }
     @keyframes scaleIn { from { transform: scale(0.95); opacity: 0; } to { transform: scale(1); opacity: 1; } }
     
@@ -87,7 +86,7 @@ const VisualEngine = () => (
 // ============================================================================
 
 const StatCard = ({ title, value, icon: Icon, colorClass }: any) => (
-  <div className="stat-card flex items-start justify-between">
+  <div className="stat-card flex items-start justify-between hover:translate-y-[-2px] transition-transform duration-300">
     <div><p className="text-slate-500 text-xs font-bold uppercase tracking-wider mb-2">{title}</p><h3 className="text-3xl font-black text-slate-800">{value}</h3></div>
     <div className={`p-3 rounded-xl ${colorClass} bg-opacity-10 text-opacity-100`}><Icon size={24} /></div>
   </div>
@@ -105,7 +104,7 @@ const ConfirmDialog = ({ isOpen, title, message, type, onConfirm, onClose }: any
         <p className="text-slate-500 text-sm mb-8">{message}</p>
         <div className="flex gap-3">
           <button onClick={onClose} className="flex-1 py-2.5 border border-slate-300 rounded-lg font-bold text-slate-600 hover:bg-slate-50">Hủy</button>
-          <button onClick={onConfirm} className={`flex-1 py-2.5 rounded-lg font-bold text-white shadow-lg ${type === 'danger' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>Xác nhận</button>
+          <button onClick={() => { onConfirm(); onClose(); }} className={`flex-1 py-2.5 rounded-lg font-bold text-white shadow-lg ${type === 'danger' ? 'bg-red-600 hover:bg-red-700' : 'bg-blue-600 hover:bg-blue-700'}`}>Xác nhận</button>
         </div>
       </div>
     </div>
@@ -125,7 +124,7 @@ const BanDialog = ({ isOpen, userName, onConfirm, onClose }: any) => {
           <p className="text-sm text-slate-500 mb-4">Chọn thời gian khóa cho <strong>{userName}</strong>:</p>
           <div className="grid grid-cols-2 gap-3 mb-6">
             {[{l:"1 Ngày", v:1}, {l:"3 Ngày", v:3}, {l:"1 Tuần", v:7}, {l:"1 Tháng", v:30}, {l:"Vĩnh viễn", v:3650}].map((opt) => (
-              <button key={opt.v} onClick={() => onConfirm(opt.v)} className="py-2.5 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:border-red-500 hover:text-red-600 hover:bg-red-50 transition-all">{opt.l}</button>
+              <button key={opt.v} onClick={() => { onConfirm(opt.v); onClose(); }} className="py-2.5 border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:border-red-500 hover:text-red-600 hover:bg-red-50 transition-all">{opt.l}</button>
             ))}
           </div>
           <button onClick={onClose} className="w-full text-center text-xs font-bold text-slate-400 hover:text-slate-600 uppercase tracking-wide">Hủy bỏ thao tác</button>
@@ -153,14 +152,15 @@ const AdminPage = () => {
   const [modal, setModal] = useState({ isOpen: false, title: "", message: "", type: "info", onConfirm: () => {} });
   const [banModal, setBanModal] = useState({ isOpen: false, userId: null, userName: "" });
 
-  // Security Check
+  // Security Check (Nếu cần kích hoạt, bỏ comment)
+  /*
   useEffect(() => {
     if (!user || !isAdmin) {
-      // Uncomment dòng dưới khi chạy thật
-      // addToast("Bạn không có quyền Admin!", "error");
-      // navigate("/");
+      addToast("Bạn không có quyền truy cập!", "error");
+      navigate("/");
     }
-  }, [user, isAdmin]);
+  }, [user, isAdmin, navigate]);
+  */
 
   // Fetch Stats (Dashboard)
   const fetchStats = async () => {
@@ -190,13 +190,11 @@ const AdminPage = () => {
         query = supabase.from('profiles').select('*').order('created_at', { ascending: false }).range(from, to);
         if (search) query = query.ilike('email', `%${search}%`);
       } 
-      // PRODUCTS (Try join, fallback handled in UI)
+      // PRODUCTS
       else if (activeTab === 'products') {
-        // Cố gắng join với profiles để lấy tên người bán
-        // Lưu ý: Nếu Database chưa setup Foreign Key, đoạn 'seller:profiles(name)' sẽ gây lỗi.
-        // Ở đây mình dùng try/catch để xử lý.
+        // Lưu ý: Cần Foreign Key 'products.seller_id' -> 'profiles.id'
         query = supabase.from('products')
-          .select('*, seller:profiles(name)') // Cần Foreign Key ở Supabase
+          .select('*, seller:profiles(name, email)') 
           .order('created_at', { ascending: false }).range(from, to);
         
         if (search) query = query.ilike('title', `%${search}%`);
@@ -204,7 +202,7 @@ const AdminPage = () => {
       // REPORTS
       else if (activeTab === 'reports') {
         query = supabase.from('reports')
-          .select('*, reporter:profiles!reporter_id(name), product:products(id, title)') // Cần Foreign Key
+          .select('*, reporter:profiles!reporter_id(name), product:products(id, title)') 
           .order('created_at', { ascending: false }).range(from, to);
       }
 
@@ -215,14 +213,14 @@ const AdminPage = () => {
       }
     } catch (err: any) {
       console.error("Lỗi tải dữ liệu:", err);
-      // Fallback nếu lỗi 400 (do chưa setup relation)
-      if (err.code === "42P01" || err.code === "PGRST200") { // Mã lỗi Supabase/Postgres thường gặp
-         addToast("Lỗi cấu trúc Database: Vui lòng chạy lệnh SQL sửa lỗi.", "error");
+      // Xử lý lỗi nếu chưa setup Foreign Key
+      if (err.code === "PGRST200" || err.code === "42P01") {
+         addToast("Lỗi Database: Chưa liên kết bảng (Foreign Key).", "error");
       }
     } finally {
       setLoading(false);
     }
-  }, [activeTab, page, search]);
+  }, [activeTab, page, search, addToast]);
 
   useEffect(() => {
     if (activeTab === 'dashboard') fetchStats();
@@ -230,33 +228,32 @@ const AdminPage = () => {
   }, [activeTab, page, search, fetchDataList]);
 
   // Handlers
-  const handleBan = (id: string, days: number | null) => {
-    setBanModal({ ...banModal, isOpen: false });
+  const handleBan = async (id: string, days: number | null) => {
     const banUntil = days ? new Date(Date.now() + days * 86400000).toISOString() : null;
-    supabase.from('profiles').update({ banned_until: banUntil }).eq('id', id).then(() => {
+    try {
+      await supabase.from('profiles').update({ banned_until: banUntil }).eq('id', id);
       addToast(days ? "Đã khóa tài khoản" : "Đã mở khóa", "success");
       fetchDataList();
-    });
+    } catch (e) { addToast("Lỗi cập nhật", "error"); }
   };
 
-  const deleteItem = (id: string, table: 'products' | 'reports') => {
-    setModal({ ...modal, isOpen: false });
-    supabase.from(table).delete().eq('id', id).then(() => {
+  const deleteItem = async (id: string, table: 'products' | 'reports') => {
+    try {
+      await supabase.from(table).delete().eq('id', id);
       addToast("Đã xóa thành công", "success");
       fetchDataList();
-    });
+    } catch (e) { addToast("Lỗi xóa dữ liệu", "error"); }
   };
 
-  const resolveReport = (id: string, status: string) => {
-    setModal({ ...modal, isOpen: false });
-    supabase.from('reports').update({ status }).eq('id', id).then(() => {
-      addToast("Đã cập nhật báo cáo", "success");
+  const resolveReport = async (id: string, status: string) => {
+    try {
+      await supabase.from('reports').update({ status }).eq('id', id);
+      addToast("Đã cập nhật trạng thái", "success");
       fetchDataList();
-    });
+    } catch (e) { addToast("Lỗi cập nhật", "error"); }
   };
 
-  if (!isAdmin) return null;
-
+  // --- RENDER ---
   return (
     <div className="admin-layout">
       <VisualEngine />
@@ -283,7 +280,7 @@ const AdminPage = () => {
           ))}
         </nav>
         <div className="p-4 border-t border-slate-700/50">
-          <button onClick={() => navigate('/')} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 text-sm font-bold">
+          <button onClick={() => navigate('/')} className="w-full flex items-center justify-center gap-2 py-3 rounded-lg border border-slate-600 text-slate-400 hover:text-white hover:border-slate-400 text-sm font-bold transition-colors">
             <LogOut size={16}/> Về trang chủ
           </button>
         </div>
@@ -295,8 +292,8 @@ const AdminPage = () => {
           <h2 className="text-xl font-bold text-slate-800 capitalize">{activeTab === 'dashboard' ? 'Dashboard' : `Quản lý ${activeTab}`}</h2>
           <div className="flex items-center gap-3">
             <div className="text-right hidden md:block">
-              <p className="text-sm font-bold text-slate-700">{user?.name}</p>
-              <p className="text-xs text-slate-500 font-bold text-blue-600">Admin</p>
+              <p className="text-sm font-bold text-slate-700">{user?.name || 'Admin'}</p>
+              <p className="text-xs text-slate-500 font-bold text-blue-600">Super Admin</p>
             </div>
             <img src={user?.avatar || "https://ui-avatars.com/api/?name=Admin"} className="w-9 h-9 rounded-full border border-slate-200"/>
           </div>
@@ -319,8 +316,8 @@ const AdminPage = () => {
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => setPage(Math.max(0, page - 1))} disabled={page === 0} className="p-2 bg-white border rounded-lg hover:bg-slate-50 disabled:opacity-50"><ChevronLeft size={18}/></button>
-                  <span className="px-4 py-2 bg-white border rounded-lg text-sm font-bold text-slate-600">Trang {page + 1}</span>
-                  <button onClick={() => setPage(page + 1)} className="p-2 bg-white border rounded-lg hover:bg-slate-50"><ChevronRight size={18}/></button>
+                  <span className="px-4 py-2 bg-white border rounded-lg text-sm font-bold text-slate-600 flex items-center">Trang {page + 1}</span>
+                  <button onClick={() => setPage(page + 1)} disabled={dataList.length < ITEMS_PER_PAGE} className="p-2 bg-white border rounded-lg hover:bg-slate-50 disabled:opacity-50"><ChevronRight size={18}/></button>
                 </div>
               </div>
 
@@ -347,7 +344,7 @@ const AdminPage = () => {
                             <td><span className={`text-xs font-bold px-2.5 py-1 rounded-full border ${color}`}>{label}</span></td>
                             <td className="text-right">
                               {u.role !== 'admin' && (
-                                <button onClick={() => isBanned ? handleBan(u.id, null) : setBanModal({ isOpen: true, userId: u.id, userName: u.name })} className={`p-2 rounded-lg ${isBanned ? 'text-emerald-600 bg-emerald-50' : 'text-rose-600 bg-rose-50'}`}>
+                                <button onClick={() => isBanned ? handleBan(u.id, null) : setBanModal({ isOpen: true, userId: u.id, userName: u.name })} className={`p-2 rounded-lg transition-colors ${isBanned ? 'text-emerald-600 bg-emerald-50 hover:bg-emerald-100' : 'text-rose-600 bg-rose-50 hover:bg-rose-100'}`}>
                                   {isBanned ? <CheckCircle size={18}/> : <Ban size={18}/>}
                                 </button>
                               )}
@@ -360,12 +357,11 @@ const AdminPage = () => {
                         <tr key={p.id}>
                           <td className="font-bold max-w-xs truncate">{p.title}</td>
                           <td className="font-mono font-bold text-blue-600">{formatCurrency(p.price)}</td>
-                          {/* SỬ DỤNG HÀM SAFEGET ĐỂ TRÁNH LỖI */}
                           <td>{safeGet(p.seller, 'name', 'Ẩn danh')}</td>
                           <td>{formatDate(p.created_at)}</td>
                           <td className="text-right flex justify-end gap-2">
-                            <button onClick={() => window.open(`/product/${p.id}`, '_blank')} className="p-2 text-blue-500 bg-blue-50 rounded-lg"><Eye size={18}/></button>
-                            <button onClick={() => setModal({ isOpen: true, title: "Xóa tin?", message: "Không thể hoàn tác.", type: 'danger', onConfirm: () => deleteItem(p.id, 'products') })} className="p-2 text-rose-500 bg-rose-50 rounded-lg"><Trash2 size={18}/></button>
+                            <button onClick={() => window.open(`#/product/${p.id}`, '_blank')} className="p-2 text-blue-500 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors"><Eye size={18}/></button>
+                            <button onClick={() => setModal({ isOpen: true, title: "Xóa tin?", message: "Hành động này không thể hoàn tác.", type: 'danger', onConfirm: () => deleteItem(p.id, 'products') })} className="p-2 text-rose-500 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors"><Trash2 size={18}/></button>
                           </td>
                         </tr>
                       ))}
@@ -373,14 +369,14 @@ const AdminPage = () => {
                       {activeTab === 'reports' && dataList.map((r: any) => (
                         <tr key={r.id}>
                           <td className="font-bold text-rose-600">{r.reason}</td>
-                          <td>{safeGet(r.reporter, 'name')}</td>
-                          <td><a href={`/product/${r.product?.id}`} target="_blank" className="text-blue-600 hover:underline">{safeGet(r.product, 'title', 'Sản phẩm đã xóa')}</a></td>
-                          <td><span className={`text-xs font-bold px-2 py-1 rounded-full ${r.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-emerald-100 text-emerald-700'}`}>{r.status}</span></td>
+                          <td>{safeGet(r.reporter, 'name', 'Ẩn danh')}</td>
+                          <td><a href={`#/product/${r.product?.id}`} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline">{safeGet(r.product, 'title', 'SP đã xóa')}</a></td>
+                          <td><span className={`text-xs font-bold px-2 py-1 rounded-full ${r.status === 'pending' ? 'bg-yellow-100 text-yellow-700' : 'bg-emerald-100 text-emerald-700'}`}>{r.status === 'pending' ? 'Chờ xử lý' : 'Đã xong'}</span></td>
                           <td className="text-right flex justify-end gap-2">
                             {r.status === 'pending' && (
                               <>
-                                <button onClick={() => setModal({ isOpen: true, title: "Xóa bài?", message: "Bài viết sẽ bị xóa vĩnh viễn.", type: 'danger', onConfirm: () => deleteItem(r.product?.id, 'products') })} className="p-1.5 bg-rose-50 text-rose-600 rounded"><Trash2 size={16}/></button>
-                                <button onClick={() => setModal({ isOpen: true, title: "Đã xử lý?", message: "Đánh dấu là xong.", type: 'success', onConfirm: () => resolveReport(r.id, 'resolved') })} className="p-1.5 bg-emerald-50 text-emerald-600 rounded"><CheckCircle size={16}/></button>
+                                <button onClick={() => setModal({ isOpen: true, title: "Xóa bài viết?", message: "Bài viết bị tố cáo sẽ bị xóa vĩnh viễn.", type: 'danger', onConfirm: () => deleteItem(r.product?.id, 'products') })} className="p-2 bg-rose-50 text-rose-600 hover:bg-rose-100 rounded transition-colors"><Trash2 size={16}/></button>
+                                <button onClick={() => setModal({ isOpen: true, title: "Đánh dấu đã xong?", message: "Xác nhận đã xử lý báo cáo này.", type: 'success', onConfirm: () => resolveReport(r.id, 'resolved') })} className="p-2 bg-emerald-50 text-emerald-600 hover:bg-emerald-100 rounded transition-colors"><CheckCircle size={16}/></button>
                               </>
                             )}
                           </td>
@@ -389,7 +385,7 @@ const AdminPage = () => {
                     </tbody>
                   </table>
                 )}
-                {!loading && dataList.length === 0 && <div className="p-12 text-center text-slate-400">Không có dữ liệu.</div>}
+                {!loading && dataList.length === 0 && <div className="p-12 text-center text-slate-400">Không có dữ liệu hiển thị.</div>}
               </div>
             </div>
           )}
