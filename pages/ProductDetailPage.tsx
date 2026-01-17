@@ -261,7 +261,8 @@ const ProductDetailPage: React.FC = () => {
   const startChat = () => {
     if (!currentUser) return navigate("/auth");
     if (currentUser.id === product?.sellerId) return addToast("Đây là sản phẩm của bạn!", "info");
-    navigate(`/chat/${product?.sellerId}`);
+    // Chuyển hướng kèm productId để biết đang hỏi mua cái gì
+    navigate(`/chat?partnerId=${product?.sellerId}&productId=${product?.id}`);
   };
 
   if (loading) return <div className="h-screen flex items-center justify-center"><Loader2 className="animate-spin text-[#00418E]" size={40}/></div>;
@@ -410,7 +411,6 @@ const ProductDetailPage: React.FC = () => {
                   <MessageCircle size={20}/> Chat với người bán
                 </button>
               )}
-              {/* Đã xóa nút Gọi điện ở đây */}
               
               {!isOwner && (
                 <button onClick={() => setShowReport(true)} className="w-full py-3 border border-slate-200 text-slate-600 rounded-xl font-bold text-sm hover:bg-red-50 hover:text-red-500 hover:border-red-100 transition-colors flex items-center justify-center gap-2">
@@ -427,20 +427,20 @@ const ProductDetailPage: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 pb-20 mt-8 border-t border-slate-200 pt-12">
            <h3 className="text-2xl font-black text-slate-800 mb-8 flex items-center gap-2"><ShoppingBag className="text-[#00418E]"/> Có thể bạn cũng thích</h3>
            <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-              {relatedProducts.map(item => (
-                <div key={item.id} onClick={() => navigate(`/product/${item.id}`)} className="bg-white rounded-2xl border border-slate-200 p-3 cursor-pointer hover:shadow-lg hover:border-blue-200 transition-all">
-                   <div className="aspect-square bg-slate-100 rounded-xl overflow-hidden mb-3">
-                      <img src={Array.isArray(item.images) ? item.images[0] : (item.images || '')} className="w-full h-full object-cover"/>
-                   </div>
-                   <h4 className="font-bold text-sm text-slate-800 line-clamp-2 h-10 mb-2">{item.title}</h4>
-                   <p className="font-black text-[#00418E]">{item.price === 0 ? "FREE" : formatCurrency(item.price)}</p>
-                </div>
-              ))}
+             {relatedProducts.map(item => (
+               <div key={item.id} onClick={() => navigate(`/product/${item.id}`)} className="bg-white rounded-2xl border border-slate-200 p-3 cursor-pointer hover:shadow-lg hover:border-blue-200 transition-all">
+                  <div className="aspect-square bg-slate-100 rounded-xl overflow-hidden mb-3">
+                     <img src={Array.isArray(item.images) ? item.images[0] : (item.images || '')} className="w-full h-full object-cover"/>
+                  </div>
+                  <h4 className="font-bold text-sm text-slate-800 line-clamp-2 h-10 mb-2">{item.title}</h4>
+                  <p className="font-black text-[#00418E]">{item.price === 0 ? "FREE" : formatCurrency(item.price)}</p>
+               </div>
+             ))}
            </div>
         </div>
       )}
 
-      {/* MOBILE STICKY BAR (Đã xóa nút gọi) */}
+      {/* MOBILE STICKY BAR */}
       <div className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 p-4 z-30 flex gap-3 pb-safe shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
         {isOwner ? (
            <button onClick={() => navigate(`/edit-item/${product.id}`)} className="flex-1 bg-slate-800 text-white py-3 rounded-xl font-bold flex justify-center items-center gap-2">
