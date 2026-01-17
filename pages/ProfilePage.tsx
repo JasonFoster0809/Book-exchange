@@ -10,7 +10,7 @@ import {
 } from "lucide-react";
 import { Product, User, Review } from "../types";
 import ProductCard from "../components/ProductCard";
-import CloneAvatar from "../assets/avatar.jpg";
+// import CloneAvatar from "../assets/avatar.jpg"; // Đảm bảo đường dẫn đúng hoặc dùng link placeholder
 
 // --- TYPES EXTENSION ---
 interface ExtendedUser extends User {
@@ -106,13 +106,37 @@ const ProfilePage: React.FC = () => {
     return `Tham gia ${new Date(dateString).toLocaleDateString('vi-VN', { month: 'long', year: 'numeric' })}`;
   };
 
+  // ✅ FIX: Hàm hiển thị thời gian thông minh hơn
   const formatLastSeen = (timestamp?: string) => {
     if (!timestamp) return "Offline";
-    const diff = Math.floor((new Date().getTime() - new Date(timestamp).getTime()) / 1000);
-    if (diff < 60) return "Vừa truy cập";
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diff = Math.floor((now.getTime() - date.getTime()) / 1000); // giây
+
+    // Nếu < 5 phút (300 giây) -> Đang hoạt động
+    if (diff < 300) return "Đang hoạt động";
     if (diff < 3600) return `Hoạt động ${Math.floor(diff / 60)} phút trước`;
-    return `Hoạt động ${Math.floor(diff / 3600)} giờ trước`;
+    if (diff < 86400) return `Hoạt động ${Math.floor(diff / 3600)} giờ trước`;
+    if (diff < 2592000) return `Hoạt động ${Math.floor(diff / 86400)} ngày trước`;
+    
+    return `Lần cuối: ${date.toLocaleDateString('vi-VN')}`;
   };
+
+  // ✅ FIX: Tự động cập nhật thời gian Online khi người dùng lướt web
+  useEffect(() => {
+    if (currentUser) {
+      const updatePresence = async () => {
+        await supabase.from('profiles')
+          .update({ last_seen: new Date().toISOString() })
+          .eq('id', currentUser.id);
+      };
+      updatePresence();
+      
+      // Cập nhật mỗi 5 phút nếu vẫn ở trang này
+      const interval = setInterval(updatePresence, 300000);
+      return () => clearInterval(interval);
+    }
+  }, [currentUser]);
 
   // --- FETCH DATA ---
   useEffect(() => {
@@ -134,7 +158,7 @@ const ProfilePage: React.FC = () => {
           name: profileData.name || "Người dùng",
           email: profileData.email,
           studentId: profileData.student_code || "",
-          avatar: profileData.avatar_url || CloneAvatar,
+          avatar: profileData.avatar_url || "https://ui-avatars.com/api/?background=random", // Fallback avatar
           coverUrl: profileData.cover_url,
           isVerified: profileData.verified_status === 'verified',
           role: profileData.role as any,
@@ -188,7 +212,7 @@ const ProfilePage: React.FC = () => {
             id: r.id,
             reviewerId: r.reviewer_id,
             reviewerName: r.reviewer?.name || "Ẩn danh",
-            reviewerAvatar: r.reviewer?.avatar_url || CloneAvatar,
+            reviewerAvatar: r.reviewer?.avatar_url || "https://ui-avatars.com/api/?background=random",
             rating: r.rating,
             comment: r.comment,
             createdAt: r.created_at,
@@ -390,7 +414,12 @@ const ProfilePage: React.FC = () => {
               <div className="flex flex-wrap justify-center md:justify-start gap-y-2 gap-x-5 text-sm font-medium text-slate-500 mb-4">
                 <span className="flex items-center gap-1.5 bg-white/50 px-2 py-1 rounded-lg border border-white/50"><School size={16} className="text-[#00418E]"/> {profileUser.major || "Sinh viên Bách Khoa"} {profileUser.academicYear ? `- ${profileUser.academicYear}` : ""}</span>
                 <span className="flex items-center gap-1.5"><Calendar size={16}/> {formatJoinedDate(profileUser.joinedAt)}</span>
-                <span className="flex items-center gap-1.5 text-green-600"><Zap size={16} className="fill-current"/> {formatLastSeen(profileUser.lastSeen)}</span>
+                
+                {/* --- HIỂN THỊ TRẠNG THÁI --- */}
+                <span className={`flex items-center gap-1.5 ${formatLastSeen(profileUser.lastSeen) === "Đang hoạt động" ? "text-green-600 font-bold" : "text-slate-500"}`}>
+                    <Zap size={16} className={formatLastSeen(profileUser.lastSeen) === "Đang hoạt động" ? "fill-green-500 animate-pulse" : "fill-slate-300"}/> 
+                    {formatLastSeen(profileUser.lastSeen)}
+                </span>
               </div>
 
               {profileUser.bio && (
@@ -422,7 +451,7 @@ const ProfilePage: React.FC = () => {
                 </>
               ) : (
                 <>
-                  <Link to={`/chat?partnerId=${profileUser.id}`} className="flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white bg-[#00418E] hover:bg-[#00306b] shadow-lg shadow-blue-900/20 transition-all active:scale-95">
+                  <Link to={`/chat/${profileUser.id}`} className="flex items-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white bg-[#00418E] hover:bg-[#00306b] shadow-lg shadow-blue-900/20 transition-all active:scale-95">
                     <MessageCircle size={18}/> Nhắn tin
                   </Link>
                   <button 
@@ -476,7 +505,7 @@ const ProfilePage: React.FC = () => {
               <h3 className="font-bold text-lg mb-1 relative z-10 flex items-center gap-2"><ShieldCheck size={20}/> Thành viên uy tín</h3>
               <p className="text-blue-100 text-sm mb-4 relative z-10 opacity-90">Đã xác thực thông tin sinh viên.</p>
               <div className="inline-flex items-center gap-2 bg-white/20 px-3 py-1.5 rounded-lg text-xs font-bold backdrop-blur-sm border border-white/20">
-                 VERIFIED STUDENT
+                  VERIFIED STUDENT
               </div>
             </div>
           ) : isOwnProfile && (
@@ -522,7 +551,7 @@ const ProfilePage: React.FC = () => {
                 ) : (
                   <div className="py-24 text-center text-slate-400">
                     <div className="w-20 h-20 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4">
-                       <ShoppingBag size={32} className="opacity-40"/>
+                        <ShoppingBag size={32} className="opacity-40"/>
                     </div>
                     <p className="font-medium">Chưa có sản phẩm nào được đăng bán.</p>
                     {isOwnProfile && <Link to="/post-item" className="text-sm font-bold text-[#00418E] mt-2 inline-block hover:underline">Đăng tin ngay</Link>}
