@@ -1,269 +1,335 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
-import { useToast } from "../contexts/ToastContext";
-import {
-  Mail, Lock, User, ArrowRight, Loader2,
-  GraduationCap, BookOpen, CheckCircle2, AlertCircle
+import { 
+  Mail, Lock, User, ArrowRight, Loader2, 
+  Chrome, CheckCircle, ArrowLeft, Star 
 } from "lucide-react";
+import { supabase } from "../services/supabase";
+import { useToast } from "../contexts/ToastContext";
 
-// --- STYLES ---
+// ============================================================================
+// 1. VISUAL ENGINE (CSS STYLES)
+// ============================================================================
 const VisualEngine = () => (
   <style>{`
     :root { --primary: #00418E; }
-    body { background-color: #F8FAFC; }
+    body { background-color: #F8FAFC; margin: 0; font-family: 'Inter', sans-serif; }
     
-    .auth-input {
-      width: 100%;
-      padding: 14px 16px 14px 48px;
-      border-radius: 12px;
-      border: 1px solid #E2E8F0;
-      background: #F8FAFC;
-      font-weight: 500;
-      transition: all 0.2s;
-      outline: none;
+    .auth-container { min-height: 100vh; display: flex; overflow: hidden; }
+    
+    /* LEFT SIDE (ARTWORK) */
+    .auth-art {
+      flex: 1.2; 
+      background: linear-gradient(135deg, #00418E 0%, #002147 100%);
+      position: relative; 
+      overflow: hidden; 
+      display: none; 
+      flex-direction: column;
+      justify-content: center; 
+      padding: 4rem; 
+      color: white;
     }
-    .auth-input:focus {
-      background: #FFFFFF;
-      border-color: var(--primary);
+    .auth-art::before {
+      content: ''; position: absolute; top: -20%; right: -20%; width: 600px; height: 600px;
+      background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 60%);
+      border-radius: 50%;
+    }
+    .auth-art::after {
+      content: ''; position: absolute; bottom: -10%; left: -10%; width: 400px; height: 400px;
+      background: radial-gradient(circle, rgba(0, 229, 255, 0.15) 0%, transparent 60%);
+      border-radius: 50%;
+    }
+    @media (min-width: 1024px) { .auth-art { display: flex; } }
+
+    /* RIGHT SIDE (FORM) */
+    .auth-form-wrapper {
+      flex: 1; display: flex; align-items: center; justify-content: center;
+      background: white; padding: 2rem; position: relative;
+    }
+    
+    .input-group { position: relative; margin-bottom: 1.25rem; transition: all 0.2s; }
+    
+    .input-icon {
+      position: absolute; left: 16px; top: 50%; transform: translateY(-50%);
+      color: #94a3b8; transition: color 0.2s; pointer-events: none;
+    }
+    
+    .custom-input {
+      width: 100%; padding: 14px 16px 14px 48px;
+      border: 1px solid #e2e8f0; border-radius: 12px;
+      font-size: 15px; outline: none; transition: all 0.2s;
+      background: #f8fafc; color: #1e293b;
+    }
+    .custom-input:focus {
+      border-color: #00418E; background: white;
       box-shadow: 0 0 0 4px rgba(0, 65, 142, 0.1);
     }
-    
-    .auth-btn {
-      position: relative;
-      overflow: hidden;
-      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    .custom-input:focus ~ .input-icon { color: #00418E; }
+
+    .btn-primary {
+      width: 100%; padding: 14px; border-radius: 12px;
+      background: #00418E; color: white; font-weight: 700;
+      display: flex; align-items: center; justify-content: center; gap: 8px;
+      transition: all 0.2s; box-shadow: 0 4px 6px -1px rgba(0, 65, 142, 0.2);
+      border: none; cursor: pointer;
     }
-    .auth-btn:active { transform: scale(0.98); }
-    
-    .animate-fade-in { animation: fadeIn 0.5s ease-out forwards; }
+    .btn-primary:hover { background: #00306b; transform: translateY(-1px); }
+    .btn-primary:active { transform: translateY(0); }
+    .btn-primary:disabled { opacity: 0.7; cursor: not-allowed; }
+
+    .social-btn {
+      flex: 1; padding: 12px; border-radius: 12px;
+      border: 1px solid #e2e8f0; background: white;
+      font-weight: 600; color: #475569; display: flex; align-items: center; justify-content: center; gap: 8px;
+      transition: all 0.2s; cursor: pointer;
+    }
+    .social-btn:hover { background: #f8fafc; border-color: #cbd5e1; }
+
+    .glass-card {
+      background: rgba(255,255,255,0.1); backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.2); border-radius: 16px; padding: 20px;
+    }
+
+    .animate-fade-in { animation: fadeIn 0.4s ease-out; }
     @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
   `}</style>
 );
 
-const AuthPage: React.FC = () => {
+// ============================================================================
+// 2. MAIN COMPONENT
+// ============================================================================
+const AuthPage = () => {
   const navigate = useNavigate();
-  const { signIn, signUp } = useAuth();
   const { addToast } = useToast();
-
-  const [isLogin, setIsLogin] = useState(true);
-  const [loading, setLoading] = useState(false);
   
-  // Form State
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [name, setName] = useState("");
-  const [studentId, setStudentId] = useState("");
+  // State quản lý chế độ hiển thị và dữ liệu form
+  const [mode, setMode] = useState<'login' | 'signup' | 'forgot'>('login');
+  const [loading, setLoading] = useState(false);
+  const [formData, setFormData] = useState({ name: "", email: "", password: "" });
 
+  // --- XỬ LÝ LOGIC ---
   const handleAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      if (isLogin) {
-        // --- LOGIC ĐĂNG NHẬP ---
-        const { error } = await signIn(email, password);
+      // 1. ĐĂNG NHẬP
+      if (mode === 'login') {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: formData.email,
+          password: formData.password,
+        });
         if (error) throw error;
-        addToast("Chào mừng trở lại! 👋", "success");
-        navigate("/");
-      } else {
-        // --- LOGIC ĐĂNG KÝ ---
-        if (!email.endsWith("@hcmut.edu.vn") && !email.endsWith("@bachkhoa.edu.vn")) {
-           // Có thể mở rộng cho gmail thường nếu muốn, nhưng đây là ví dụ check mail BK
-           // addToast("Khuyên dùng email sinh viên (@hcmut.edu.vn)", "info");
+        addToast("Chào mừng trở lại!", "success");
+        navigate('/');
+      } 
+      
+      // 2. ĐĂNG KÝ
+      else if (mode === 'signup') {
+        const { data, error } = await supabase.auth.signUp({
+          email: formData.email,
+          password: formData.password,
+          options: {
+            data: { full_name: formData.name }
+          }
+        });
+        if (error) throw error;
+        
+        // Tạo profile ngay lập tức để tránh lỗi dữ liệu
+        if (data.user) {
+          const { error: profileError } = await supabase.from('profiles').insert({
+            id: data.user.id,
+            email: formData.email,
+            name: formData.name,
+            role: 'user'
+          });
+          // Nếu profile đã tồn tại (lỗi duplicate), bỏ qua lỗi này
+          if (profileError && profileError.code !== '23505') {
+             console.error("Lỗi tạo profile:", profileError);
+          }
         }
         
-        if (!name || !studentId) {
-          throw new Error("Vui lòng điền đầy đủ Tên và MSSV");
-        }
-
-        const { error } = await signUp(email, password, name, studentId);
+        addToast("Đăng ký thành công! Vui lòng kiểm tra email xác nhận.", "success");
+        setMode('login');
+      }
+      
+      // 3. QUÊN MẬT KHẨU
+      else if (mode === 'forgot') {
+        const { error } = await supabase.auth.resetPasswordForEmail(formData.email, {
+          redirectTo: `${window.location.origin}/reset-password`,
+        });
         if (error) throw error;
-        
-        addToast("Đăng ký thành công! Đang đăng nhập...", "success");
-        navigate("/");
+        addToast("Đã gửi link khôi phục vào email của bạn!", "success");
+        setMode('login');
       }
     } catch (err: any) {
-      console.error(err);
-      let msg = err.message;
-      if (msg.includes("Invalid login")) msg = "Sai email hoặc mật khẩu.";
-      if (msg.includes("already registered")) msg = "Email này đã được sử dụng.";
-      addToast(msg, "error");
+      addToast(err.message || "Có lỗi xảy ra, vui lòng thử lại", "error");
     } finally {
       setLoading(false);
     }
   };
 
+  const handleGoogleLogin = async () => {
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          queryParams: { access_type: 'offline', prompt: 'consent' },
+          redirectTo: window.location.origin
+        }
+      });
+      if (error) throw error;
+    } catch (error: any) {
+      addToast("Lỗi đăng nhập Google: " + error.message, "error");
+    }
+  };
+
   return (
-    <div className="min-h-screen flex font-sans text-slate-800 bg-white">
+    <div className="auth-container">
       <VisualEngine />
 
-      {/* --- LEFT COLUMN: BRANDING & IMAGE --- */}
-      <div className="hidden lg:flex w-1/2 bg-[#00418E] relative overflow-hidden flex-col justify-between p-12 text-white">
-        <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1541339907198-e021fc9d13f1?q=80&w=1000&auto=format&fit=crop')] bg-cover bg-center opacity-20 mix-blend-overlay"></div>
-        <div className="absolute inset-0 bg-gradient-to-b from-[#00418E]/80 to-[#00204a]/90"></div>
-        
-        {/* Decorative Circles */}
-        <div className="absolute top-[-10%] right-[-10%] w-96 h-96 bg-blue-400/20 rounded-full blur-3xl"></div>
-        <div className="absolute bottom-[-10%] left-[-10%] w-96 h-96 bg-cyan-400/20 rounded-full blur-3xl"></div>
-
-        <div className="relative z-10">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 bg-white/10 backdrop-blur rounded-xl flex items-center justify-center border border-white/20">
-              <BookOpen size={24} className="text-white"/>
-            </div>
-            <span className="text-xl font-bold tracking-wide">BK BOOK EXCHANGE</span>
+      {/* --- PHẦN TRÁI (ARTWORK & GIỚI THIỆU) --- */}
+      <div className="auth-art">
+        <div className="relative z-10 max-w-xl">
+          <div className="mb-8 inline-flex items-center gap-2 bg-white/10 px-4 py-2 rounded-full backdrop-blur-md border border-white/20">
+            <CheckCircle size={16} className="text-[#4ade80]"/> 
+            <span className="text-sm font-bold tracking-wide">Cộng đồng Sinh viên Bách Khoa</span>
           </div>
-        </div>
-
-        <div className="relative z-10 max-w-lg">
-          <h1 className="text-5xl font-black mb-6 leading-tight">
-            Nơi trao đổi tri thức <br/>
-            <span className="text-[#00B0F0]">Sinh viên Bách Khoa</span>
+          
+          <h1 className="text-6xl font-black mb-6 leading-tight tracking-tight">
+            Trao đổi giáo trình <br/> 
+            <span className="text-transparent bg-clip-text bg-gradient-to-r from-blue-200 to-cyan-200">
+              Kết nối đam mê.
+            </span>
           </h1>
-          <p className="text-lg text-blue-100/80 mb-8 leading-relaxed">
-            Tham gia cộng đồng hơn 5,000 sinh viên. Mua bán giáo trình cũ, chia sẻ tài liệu và kết nối với những người bạn cùng chí hướng.
+          
+          <p className="text-blue-100 text-lg leading-relaxed mb-10 opacity-90 max-w-lg">
+            Nền tảng mua bán, trao đổi đồ dùng học tập độc quyền dành riêng cho sinh viên. 
+            Tiết kiệm chi phí, giao dịch an toàn ngay tại trường.
           </p>
-          <div className="flex gap-4">
-            <div className="flex items-center gap-2 bg-white/10 backdrop-blur px-4 py-2 rounded-lg border border-white/10">
-              <CheckCircle2 size={16} className="text-[#00B0F0]"/> <span>Uy tín</span>
+          
+          <div className="grid grid-cols-2 gap-4">
+            <div className="glass-card">
+              <div className="flex items-center gap-2 mb-2">
+                <Star className="text-yellow-400 fill-yellow-400" size={20}/>
+                <h3 className="font-bold text-2xl">5.000+</h3>
+              </div>
+              <p className="text-sm text-blue-200 font-medium">Sinh viên tin dùng</p>
             </div>
-            <div className="flex items-center gap-2 bg-white/10 backdrop-blur px-4 py-2 rounded-lg border border-white/10">
-              <CheckCircle2 size={16} className="text-[#00B0F0]"/> <span>Tiện lợi</span>
-            </div>
-            <div className="flex items-center gap-2 bg-white/10 backdrop-blur px-4 py-2 rounded-lg border border-white/10">
-              <CheckCircle2 size={16} className="text-[#00B0F0]"/> <span>Miễn phí</span>
+            <div className="glass-card">
+              <div className="flex items-center gap-2 mb-2">
+                <CheckCircle className="text-green-400" size={20}/>
+                <h3 className="font-bold text-2xl">12.000+</h3>
+              </div>
+              <p className="text-sm text-blue-200 font-medium">Giao dịch thành công</p>
             </div>
           </div>
-        </div>
-
-        <div className="relative z-10 text-sm text-blue-200/60">
-          © 2024 BK Book Exchange. Built for HCMUT Students.
         </div>
       </div>
 
-      {/* --- RIGHT COLUMN: FORM --- */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 sm:p-12 relative">
-        <div className="max-w-[420px] w-full animate-fade-in">
-          
-          {/* Mobile Header (Only visible on small screens) */}
-          <div className="lg:hidden mb-8 text-center">
-            <div className="w-12 h-12 bg-[#00418E] rounded-xl flex items-center justify-center text-white mx-auto mb-4">
-              <BookOpen size={24}/>
-            </div>
-            <h2 className="text-2xl font-bold text-[#00418E]">BK Book Exchange</h2>
-          </div>
+      {/* --- PHẦN PHẢI (FORM ĐĂNG NHẬP) --- */}
+      <div className="auth-form-wrapper">
+        <button 
+          onClick={() => navigate('/')} 
+          className="absolute top-6 left-6 p-2 rounded-full hover:bg-slate-100 text-slate-500 transition-colors"
+          title="Về trang chủ"
+        >
+          <ArrowLeft size={24}/>
+        </button>
 
-          <div className="text-center mb-8">
+        <div className="w-full max-w-md animate-fade-in">
+          <div className="text-center mb-10">
             <h2 className="text-3xl font-black text-slate-900 mb-2">
-              {isLogin ? "Chào mừng trở lại!" : "Tạo tài khoản mới"}
+              {mode === 'login' ? 'Chào mừng trở lại!' : mode === 'signup' ? 'Tạo tài khoản mới' : 'Khôi phục mật khẩu'}
             </h2>
             <p className="text-slate-500">
-              {isLogin ? "Nhập thông tin để tiếp tục." : "Bắt đầu hành trình trao đổi sách ngay hôm nay."}
+              {mode === 'login' 
+                ? 'Nhập thông tin để tiếp tục truy cập.' 
+                : mode === 'signup' 
+                  ? 'Tham gia cộng đồng sinh viên ngay hôm nay.' 
+                  : 'Nhập email để nhận hướng dẫn lấy lại mật khẩu.'}
             </p>
           </div>
 
-          {/* Toggle Switch */}
-          <div className="flex bg-slate-100 p-1 rounded-xl mb-8">
-            <button
-              onClick={() => setIsLogin(true)}
-              className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${isLogin ? 'bg-white text-[#00418E] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-              Đăng nhập
-            </button>
-            <button
-              onClick={() => setIsLogin(false)}
-              className={`flex-1 py-2.5 rounded-lg text-sm font-bold transition-all ${!isLogin ? 'bg-white text-[#00418E] shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
-            >
-              Đăng ký
-            </button>
-          </div>
+          <form onSubmit={handleAuth}>
+            {mode === 'signup' && (
+              <div className="input-group">
+                <input 
+                  type="text" 
+                  placeholder="Họ và tên của bạn" 
+                  className="custom-input" 
+                  required
+                  value={formData.name} 
+                  onChange={e => setFormData({...formData, name: e.target.value})}
+                />
+                <User className="input-icon" size={20}/>
+              </div>
+            )}
 
-          {/* Form */}
-          <form onSubmit={handleAuth} className="space-y-5">
-            {!isLogin && (
+            <div className="input-group">
+              <input 
+                type="email" 
+                placeholder="Địa chỉ Email (ưu tiên email SV)" 
+                className="custom-input" 
+                required
+                value={formData.email} 
+                onChange={e => setFormData({...formData, email: e.target.value})}
+              />
+              <Mail className="input-icon" size={20}/>
+            </div>
+
+            {mode !== 'forgot' && (
+              <div className="input-group">
+                <input 
+                  type="password" 
+                  placeholder="Mật khẩu (tối thiểu 6 ký tự)" 
+                  className="custom-input" 
+                  required 
+                  minLength={6}
+                  value={formData.password} 
+                  onChange={e => setFormData({...formData, password: e.target.value})}
+                />
+                <Lock className="input-icon" size={20}/>
+              </div>
+            )}
+
+            {mode === 'login' && (
+              <div className="flex justify-end mb-6">
+                <button type="button" onClick={() => setMode('forgot')} className="text-sm font-bold text-[#00418E] hover:underline">
+                  Quên mật khẩu?
+                </button>
+              </div>
+            )}
+
+            <button disabled={loading} className="btn-primary mb-8">
+              {loading ? <Loader2 className="animate-spin" size={20}/> : <ArrowRight size={20}/>}
+              {mode === 'login' ? 'Đăng nhập' : mode === 'signup' ? 'Đăng ký ngay' : 'Gửi link khôi phục'}
+            </button>
+
+            {mode !== 'forgot' && (
               <>
-                <div className="relative group">
-                  <User className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#00418E] transition-colors" size={20}/>
-                  <input
-                    required
-                    placeholder="Họ và tên"
-                    className="auth-input"
-                    value={name}
-                    onChange={e => setName(e.target.value)}
-                  />
+                <div className="relative mb-8">
+                  <div className="absolute inset-0 flex items-center"><div className="w-full border-t border-slate-200"></div></div>
+                  <div className="relative flex justify-center text-sm"><span className="px-4 bg-white text-slate-500 font-medium">Hoặc tiếp tục với</span></div>
                 </div>
-                <div className="relative group">
-                  <GraduationCap className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#00418E] transition-colors" size={20}/>
-                  <input
-                    required
-                    placeholder="Mã số sinh viên (MSSV)"
-                    className="auth-input"
-                    value={studentId}
-                    onChange={e => setStudentId(e.target.value)}
-                  />
+
+                <div className="flex gap-4 mb-8">
+                  <button type="button" onClick={handleGoogleLogin} className="social-btn group">
+                    <Chrome size={20} className="text-slate-500 group-hover:text-red-500 transition-colors"/> 
+                    <span>Google</span>
+                  </button>
                 </div>
               </>
             )}
-
-            <div className="relative group">
-              <Mail className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#00418E] transition-colors" size={20}/>
-              <input
-                required
-                type="email"
-                placeholder="Email (Khuyên dùng email SV)"
-                className="auth-input"
-                value={email}
-                onChange={e => setEmail(e.target.value)}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <div className="relative group">
-                <Lock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-[#00418E] transition-colors" size={20}/>
-                <input
-                  required
-                  type="password"
-                  placeholder="Mật khẩu"
-                  className="auth-input"
-                  value={password}
-                  onChange={e => setPassword(e.target.value)}
-                />
-              </div>
-              {isLogin && (
-                <div className="flex justify-end">
-                  <button type="button" onClick={() => navigate('/reset-password')} className="text-xs font-bold text-[#00418E] hover:underline">
-                    Quên mật khẩu?
-                  </button>
-                </div>
-              )}
-            </div>
-
-            <button
-              disabled={loading}
-              className="auth-btn w-full bg-[#00418E] hover:bg-[#00306b] text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-blue-900/20 flex items-center justify-center gap-2"
-            >
-              {loading ? (
-                <Loader2 className="animate-spin" />
-              ) : (
-                <>
-                  {isLogin ? "Đăng Nhập" : "Đăng Ký Ngay"} <ArrowRight size={20}/>
-                </>
-              )}
-            </button>
           </form>
 
-          {/* Social / Footer */}
-          <div className="mt-8 text-center">
-            <p className="text-slate-400 text-xs mb-4">Hoặc tiếp tục với</p>
-            <div className="flex gap-3 justify-center">
-              <button className="p-3 rounded-full border border-slate-200 hover:bg-slate-50 transition-colors" title="Google (Coming soon)">
-                <svg className="w-5 h-5" viewBox="0 0 24 24"><path d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" fill="#4285F4"/><path d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" fill="#34A853"/><path d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" fill="#FBBC05"/><path d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" fill="#EA4335"/></svg>
-              </button>
-              {/* Thêm các icon khác nếu cần */}
-            </div>
+          <div className="text-center text-sm font-medium text-slate-600">
+            {mode === 'login' ? (
+              <>Chưa có tài khoản? <button onClick={() => setMode('signup')} className="text-[#00418E] font-bold hover:underline ml-1">Đăng ký ngay</button></>
+            ) : (
+              <>Đã có tài khoản? <button onClick={() => setMode('login')} className="text-[#00418E] font-bold hover:underline ml-1">Đăng nhập</button></>
+            )}
           </div>
-
         </div>
       </div>
     </div>
