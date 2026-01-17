@@ -252,6 +252,13 @@ const ChatPage: React.FC = () => {
                 setTargetProduct({ ...targetProduct, ...payload.new });
             }
         })
+        .on('broadcast', { event: 'typing' }, (payload) => {
+            if (payload.payload.userId !== user?.id) {
+                setPartnerTyping(true);
+                clearTimeout(typingTimeoutRef.current);
+                typingTimeoutRef.current = setTimeout(() => setPartnerTyping(false), 2000);
+            }
+        })
         .subscribe();
 
     return () => { supabase.removeChannel(channel); };
@@ -313,6 +320,9 @@ const ChatPage: React.FC = () => {
 
   const handleTyping = (e: any) => {
       setNewMessage(e.target.value);
+      if (activeConversation) {
+          supabase.channel(`chat_room:${activeConversation}`).send({ type: 'broadcast', event: 'typing', payload: { userId: user?.id } });
+      }
   };
 
   const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -331,7 +341,7 @@ const ChatPage: React.FC = () => {
   const handleSendLocation = () => {
       if (!navigator.geolocation) return addToast("Trình duyệt không hỗ trợ vị trí", "error");
       navigator.geolocation.getCurrentPosition((pos) => {
-          const link = `http://maps.google.com/?q=${pos.coords.latitude},${pos.coords.longitude}`;
+          const link = `http://googleusercontent.com/maps.google.com/3{pos.coords.latitude},${pos.coords.longitude}`;
           handleSendMessage(undefined, link, 'location');
       }, () => addToast("Không thể lấy vị trí", "error"));
   };
@@ -415,7 +425,10 @@ const ChatPage: React.FC = () => {
          <div className="flex-1 overflow-y-auto chat-scrollbar">
             {loadingConv ? <div className="flex justify-center pt-10"><Loader2 className="animate-spin text-slate-400"/></div> : filteredConversations.length === 0 ? <div className="text-center pt-10 px-6"><MessageCircle className="mx-auto text-slate-200 mb-2" size={48}/><p className="text-slate-400 text-sm">Chưa có tin nhắn nào.</p></div> : filteredConversations.map(conv => (
                <div key={conv.id} onClick={() => handleSelectConversation(conv.id, conv.partnerId)} className={`p-4 flex gap-3 cursor-pointer hover:bg-slate-50 transition-colors border-b border-slate-50 ${activeConversation === conv.id ? 'bg-blue-50/50 border-l-4 border-l-[#00418E]' : 'border-l-4 border-l-transparent'}`}>
-                  <img src={conv.partnerAvatar || 'https://via.placeholder.com/50'} className="w-12 h-12 rounded-full object-cover border border-slate-200 bg-white"/>
+                  <img 
+                    src={conv.partnerAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(conv.partnerName || 'User')}&background=random`} 
+                    className="w-12 h-12 rounded-full object-cover border border-slate-200 bg-white"
+                  />
                   <div className="flex-1 min-w-0 flex flex-col justify-center">
                       <div className="flex justify-between items-center">
                           <p className={`font-bold text-sm truncate ${activeConversation === conv.id ? 'text-[#00418E]' : 'text-slate-800'}`}>{conv.partnerName}</p>
@@ -446,7 +459,10 @@ const ChatPage: React.FC = () => {
                       {partnerProfile && (
                          <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate(`/profile/${partnerProfile.id}`)}>
                             <div className="relative">
-                                <img src={partnerProfile.avatar_url || 'https://via.placeholder.com/40'} className="w-10 h-10 rounded-full border border-slate-200 object-cover"/>
+                                <img 
+                                  src={partnerProfile.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(partnerProfile.name)}&background=random`} 
+                                  className="w-10 h-10 rounded-full border border-slate-200 object-cover"
+                                />
                                 <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
                             </div>
                             <div>
@@ -486,7 +502,7 @@ const ChatPage: React.FC = () => {
                   <div className="transaction-card p-4 animate-slide-in">
                       <div className="flex gap-4 items-start bg-white p-3 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
                          <div className={`absolute top-0 left-0 bottom-0 w-1.5 ${targetProduct.status === 'sold' ? 'bg-slate-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}></div>
-                         <img src={targetProduct.images?.[0] || 'https://via.placeholder.com/80'} className="w-16 h-16 rounded-lg object-cover border border-slate-100 bg-slate-50 ml-2"/>
+                         <img src={targetProduct.images?.[0] || 'https://placehold.co/80'} className="w-16 h-16 rounded-lg object-cover border border-slate-100 bg-slate-50 ml-2"/>
                          <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
                                <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md text-white uppercase tracking-wider ${targetProduct.status === 'sold' ? 'bg-slate-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}>
@@ -523,7 +539,7 @@ const ChatPage: React.FC = () => {
                                   <div className="flex justify-center my-6"><div className="bg-slate-100 border border-slate-200 text-slate-600 px-4 py-2 rounded-full text-xs font-bold shadow-sm flex items-center gap-2"><AlertCircle size={12} className="text-[#00418E]"/><span className="whitespace-pre-wrap text-center">{msg.content}</span></div></div>
                               ) : (
                                   <div className={`flex ${isMe ? 'justify-end' : 'justify-start'} animate-slide-in group relative`}>
-                                      {!isMe && <img src={partnerProfile?.avatar_url} className="w-8 h-8 rounded-full mr-2 self-end border border-slate-200 bg-white"/>}
+                                      {!isMe && <img src={partnerProfile?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(partnerProfile?.name || 'U')}&background=random`} className="w-8 h-8 rounded-full mr-2 self-end border border-slate-200 bg-white"/>}
                                       <div 
                                           className={`msg-bubble ${isMe ? 'msg-me' : 'msg-you'} ${msg.type === 'image' ? 'msg-image' : ''}`}
                                           onContextMenu={(e) => {
@@ -546,7 +562,7 @@ const ChatPage: React.FC = () => {
                   })}
                   {partnerTyping && (
                       <div className="flex gap-2 items-end">
-                         <img src={partnerProfile?.avatar_url} className="w-6 h-6 rounded-full" />
+                         <img src={partnerProfile?.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(partnerProfile?.name || 'U')}&background=random`} className="w-6 h-6 rounded-full" />
                          <div className="bg-white border border-slate-100 px-4 py-3 rounded-2xl rounded-bl-sm flex gap-1 items-center shadow-sm">
                             <div className="typing-dot"></div><div className="typing-dot"></div><div className="typing-dot"></div>
                          </div>
