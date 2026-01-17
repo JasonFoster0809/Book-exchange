@@ -2,12 +2,6 @@
 // 1. ENUMS (DANH MỤC & TRẠNG THÁI)
 // ==========================================
 
-export enum Campus {
-  CS1 = 'Quận 10 (CS1)',
-  CS2 = 'Dĩ An (CS2)',
-  OTHER = 'Khác'
-}
-
 export enum ProductCategory {
   TEXTBOOK = 'textbook',
   ELECTRONICS = 'electronics', 
@@ -24,72 +18,71 @@ export enum TradeMethod {
 
 export enum ProductCondition {
   NEW = 'new',
-  LIKE_NEW = 'like_new',
-  GOOD = 'good',
-  FAIR = 'fair',
-  POOR = 'poor'
+  USED = 'used',
+  LIKE_NEW = 'like_new'
 }
 
 export enum ProductStatus {
   AVAILABLE = 'available',
   PENDING = 'pending', // Đang giao dịch
   SOLD = 'sold',       // Đã bán
-  HIDDEN = 'hidden'
+  BANNED = 'banned',   // Bị admin khóa
+  HIDDEN = 'hidden'    // Người dùng tự ẩn
 }
 
-export enum HuntStatus {
-  ACTIVE = 'active',
+export enum VerificationStatus {
+  UNVERIFIED = 'unverified',
   PENDING = 'pending',
-  COMPLETED = 'completed'
-}
-
-export enum SortOption {
-  NEWEST = "newest",
-  PRICE_ASC = "price_asc",
-  PRICE_DESC = "price_desc",
-  MOST_VIEWED = "most_viewed",
+  VERIFIED = 'verified',
+  REJECTED = 'rejected'
 }
 
 // ==========================================
-// 2. USER & PROFILE INTERFACES
+// 2. USER & AUTH INTERFACES
 // ==========================================
 
+// Interface dùng cho State của React (App State)
 export interface User {
   id: string;
-  email?: string;
+  email: string;
   name: string;
   avatar: string;
   role: 'user' | 'admin';
   
   studentId: string;   
   isVerified: boolean; 
-  banned?: boolean;    
-  banUntil?: string | null; 
+  banned: boolean;     
+  banUntil: string | null; 
   
-  rating?: number; 
-  completedTrades?: number;
+  // Thông tin bổ sung (Đã thêm để fix lỗi AuthContext)
+  bio?: string;
+  major?: string;
+  academicYear?: string;
+  coverUrl?: string;
+  joinedAt?: string;
+  lastSeen?: string;
 }
 
+// Interface dùng cho Dữ liệu thô từ Supabase (DB Schema)
 export interface DBProfile {
   id: string;
-  name: string | null;
   email?: string;
+  name: string | null;
   avatar_url: string | null;
   cover_url?: string | null;
+  
+  role: string;
+  student_code: string | null; 
+  verified_status: string; // 'unverified' | 'pending' | ...
+  
   bio?: string | null;
   major?: string | null;
   academic_year?: string | null;
   
-  student_code: string | null; 
-  verified_status: 'unverified' | 'pending' | 'verified' | 'rejected';
-  is_banned?: boolean;
-  ban_until?: string | null;
-  ban_reason?: string | null;
-  
-  role: 'user' | 'admin';
-  rating?: number;
-  completed_trades?: number; 
+  created_at: string;
   last_seen?: string;
+  banned_until?: string | null;
+  ban_reason?: string | null;
 }
 
 export interface VerificationRequest {
@@ -100,6 +93,8 @@ export interface VerificationRequest {
   status: 'pending' | 'approved' | 'rejected';
   admin_note?: string;
   created_at: string;
+  
+  // Relation
   profiles?: DBProfile; 
 }
 
@@ -112,39 +107,86 @@ export interface Product {
   title: string;
   description: string;
   price: number;
-  images: string[];
-  category: ProductCategory | string;
-  status: ProductStatus | string;
-  condition: ProductCondition | string;
+  images: string[]; // Luôn là mảng string
   
-  // DB Fields (Tương ứng với cột trong Supabase)
-  created_at?: string;      
-  seller_id?: string;       
-  location_name?: string;   
-  trade_method?: TradeMethod | string;
-  view_count?: number;
-  like_count?: number;
-  tags?: string[];
+  category: string;
+  condition: string;
+  status: string;
+  
+  // Thông tin giao dịch
+  tradeMethod: string;
+  location: string;
+  
+  // Meta data (Mapped fields for UI)
+  sellerId: string;
+  postedAt: string;
+  view_count: number;
 
-  // UI Fields (Đã map để dùng trong React Component)
-  sellerId: string;         
-  postedAt: string; // Map từ created_at
-  tradeMethod: TradeMethod | string; 
-  location?: string; // Map từ location_name
-  
-  isLookingToBuy?: boolean; 
-  buyerId?: string; // ID người mua (khi status = pending/sold)
-  campus?: Campus | string; 
-  
-  seller?: User | any;      // Object chứa thông tin người bán (join từ profiles)
-  profiles?: DBProfile;     
+  // Raw DB fields (Optional - để tránh lỗi khi fetch raw)
+  seller_id?: string;
+  created_at?: string;
+  location_name?: string;
+  trade_method?: string;
 
-  isLiked?: boolean;
-  isGoodPrice?: boolean;
+  // Relation (Thông tin người bán)
+  seller?: {
+    id: string;
+    name: string;
+    avatar_url: string;
+    verified_status: string;
+    student_code?: string;
+    last_seen?: string;
+  };
 }
 
 // ==========================================
-// 4. CHAT INTERFACES (CẬP NHẬT MỚI)
+// 4. SOCIAL & INTERACTION INTERFACES
+// ==========================================
+
+export interface Review {
+  id: string;
+  reviewerId: string;
+  revieweeId?: string;
+  rating: number;
+  comment: string;
+  createdAt: string;
+
+  // UI Helpers
+  reviewerName?: string;
+  reviewerAvatar?: string;
+}
+
+export interface Comment {
+  id: string;
+  productId: string;
+  userId: string;
+  content: string;
+  createdAt: string;
+  parentId?: string | null;
+
+  // Relation
+  user?: { 
+    name: string; 
+    avatar_url: string 
+  };
+  replies?: Comment[];
+}
+
+export interface Report {
+  id: string;
+  reporterId: string;
+  productId: string;
+  reason: string;
+  status: 'pending' | 'resolved' | 'dismissed';
+  createdAt: string;
+  
+  // Relations (Optional)
+  reporter?: DBProfile;
+  product?: Product;
+}
+
+// ==========================================
+// 5. CHAT INTERFACES
 // ==========================================
 
 export interface ChatMessage {
@@ -152,77 +194,24 @@ export interface ChatMessage {
   conversation_id: string;
   sender_id: string;
   content: string;
-  // Cập nhật: Thêm 'location' và 'system' để hỗ trợ tính năng mới
-  type: 'text' | 'image' | 'location' | 'system'; 
-  image_url?: string; // Optional: dùng cho legacy hoặc fallback
+  type: 'text' | 'image' | 'system'; 
+  is_read?: boolean;
   created_at: string;
 }
 
-export interface ChatSession {
+export interface ChatConversation {
   id: string;
   participant1: string;
   participant2: string;
+  updated_at: string;
   
-  // UI Fields (Map từ Profile đối phương)
-  partnerName?: string;
-  partnerAvatar?: string;
-  partnerId?: string;
-  
+  // UI Helpers
+  partner?: {
+    id: string;
+    name: string;
+    avatar_url: string;
+    last_seen?: string;
+  };
   last_message?: string;
   unread_count?: number;
-  updated_at?: string;
-  
-  // Cập nhật: ID sản phẩm đang được ghim/giao dịch trong cuộc hội thoại này
-  current_product_id?: string | null; 
-}
-
-// ==========================================
-// 5. OTHER INTERFACES
-// ==========================================
-
-export interface Review {
-  id: string;
-  reviewerId: string;
-  reviewerName: string;
-  reviewerAvatar: string;
-  rating: number;
-  comment: string;
-  createdAt: string;
-}
-
-export interface Comment {
-  id: string;
-  product_id: string;
-  user_id: string;
-  content: string;
-  created_at: string;
-  
-  productId?: string;
-  userId?: string;
-  userName?: string;
-  userAvatar?: string;
-  createdAt?: string;
-  
-  user?: { name: string; avatar_url: string };
-  parentId?: string | null;
-  replies?: Comment[];
-}
-
-export interface Report {
-  id: string;
-  product_id: string;
-  reporter_id: string;
-  reason: string;
-  status: 'pending' | 'resolved' | 'dismissed';
-  created_at: string;
-  product?: Product;
-  reporter?: DBProfile;
-}
-
-export interface Hunt {
-  id: string;
-  userId: string;
-  keyword: string;
-  status: HuntStatus | string;
-  createdAt: string;
 }
