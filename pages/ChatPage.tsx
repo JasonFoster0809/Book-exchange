@@ -7,7 +7,7 @@ import {
   Send, Image as ImageIcon, Phone, ArrowLeft, Loader2, ShoppingBag, 
   CheckCircle2, Search, MessageCircle, MoreVertical, X, AlertCircle,
   Truck, DollarSign, XCircle, User, Flag, Trash, MapPin, Smile, CheckCheck,
-  ExternalLink, Maximize2, ChevronDown
+  ExternalLink, Maximize2, ChevronDown, RefreshCw
 } from 'lucide-react'; 
 import { playMessageSound } from '../utils/audio';
 
@@ -126,6 +126,8 @@ const ChatPage: React.FC = () => {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, msgId: string } | null>(null);
 
+  // --- LOGIC PHÂN VAI (QUAN TRỌNG) ---
+  // Vai trò của User hiện tại đối với sản phẩm đang ghim
   const isSeller = user && targetProduct && user.id === targetProduct.seller_id;
   const isBuyer = user && targetProduct && user.id !== targetProduct.seller_id;
 
@@ -134,6 +136,22 @@ const ChatPage: React.FC = () => {
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<any>(null);
+
+  // --- HÀM TÍNH TOÁN LABEL CHO PARTNER ---
+  // Hàm này quyết định hiển thị "Người bán" hay "Người mua" trên đầu đoạn chat
+  const getPartnerRoleLabel = () => {
+    if (!targetProduct || !partnerProfile) return null;
+    
+    // Nếu Partner là người tạo ra sản phẩm này -> Họ là Người Bán
+    if (partnerProfile.id === targetProduct.seller_id) {
+        return { label: 'Người bán', color: 'bg-blue-100 text-blue-600' };
+    }
+    
+    // Ngược lại, nếu họ đang chat về sản phẩm này (mà không phải chủ) -> Họ là Người Mua
+    return { label: 'Người mua', color: 'bg-orange-100 text-orange-600' };
+  };
+
+  const partnerRole = getPartnerRoleLabel();
 
   // --- DATA FETCHING ---
   const fetchConversations = async () => {
@@ -223,7 +241,11 @@ const ChatPage: React.FC = () => {
   const handleSelectConversation = async (convId: string, partnerId: string) => {
       setActiveConversation(convId);
       fetchPartnerInfoInternal(partnerId);
+      
+      // Reset sản phẩm ghim về null trước, sau đó fetch cái mới (để tránh hiển thị sai)
       setTargetProduct(null); 
+      fetchPinnedProduct(convId);
+
       setConversations(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
       if(user) {
           await supabase.from('messages').update({ is_read: true }).eq('conversation_id', convId).neq('sender_id', user.id).eq('is_read', false);
@@ -233,6 +255,8 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     if (!activeConversation) return;
     fetchMessages(activeConversation);
+    
+    // Lưu ý: fetchPinnedProduct đã được gọi trong handleSelectConversation, nhưng gọi lại ở đây để chắc chắn khi mount
     if (!targetProduct) fetchPinnedProduct(activeConversation);
 
     const channel = supabase.channel(`chat_room:${activeConversation}`)
@@ -247,10 +271,20 @@ const ChatPage: React.FC = () => {
             }
             setTimeout(scrollToBottom, 100);
         })
+        // Lắng nghe thay đổi sản phẩm (để cập nhật trạng thái đã bán/đang giao dịch)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, (payload) => {
             if (targetProduct && payload.new.id === targetProduct.id) {
                 setTargetProduct({ ...targetProduct, ...payload.new });
             }
+        })
+        // Lắng nghe thay đổi hội thoại (ví dụ khi ghim sản phẩm mới)
+        .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `id=eq.${activeConversation}` }, (payload) => {
+             if (payload.new.current_product_id && payload.new.current_product_id !== targetProduct?.id) {
+                 fetchPinnedProduct(activeConversation); // Fetch lại sản phẩm mới được ghim
+             }
+             if (!payload.new.current_product_id) {
+                 setTargetProduct(null); // Gỡ ghim
+             }
         })
         .on('broadcast', { event: 'typing' }, (payload) => {
             if (payload.payload.userId !== user?.id) {
@@ -341,7 +375,7 @@ const ChatPage: React.FC = () => {
   const handleSendLocation = () => {
       if (!navigator.geolocation) return addToast("Trình duyệt không hỗ trợ vị trí", "error");
       navigator.geolocation.getCurrentPosition((pos) => {
-          const link = `http://googleusercontent.com/maps.google.com/3{pos.coords.latitude},${pos.coords.longitude}`;
+          const link = `http://googleusercontent.com/maps.google.com/5{pos.coords.latitude},${pos.coords.longitude}`;
           handleSendMessage(undefined, link, 'location');
       }, () => addToast("Không thể lấy vị trí", "error"));
   };
@@ -468,9 +502,10 @@ const ChatPage: React.FC = () => {
                             <div>
                                <div className="flex items-center gap-2">
                                  <h3 className="font-bold text-sm text-slate-800">{partnerProfile.name}</h3>
-                                 {targetProduct && (
-                                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${isBuyer ? 'bg-orange-100 text-orange-600' : 'bg-blue-100 text-blue-600'}`}>
-                                         {isBuyer ? 'Người bán' : 'Người mua'}
+                                 {/* --- FIX: Tag vai trò linh hoạt --- */}
+                                 {partnerRole && (
+                                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${partnerRole.color}`}>
+                                         {partnerRole.label}
                                      </span>
                                  )}
                                </div>
