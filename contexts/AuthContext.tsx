@@ -28,15 +28,15 @@ interface AuthContextType {
   isAdmin: boolean;
   isRestricted: boolean;
   signIn: (email: string, password: string) => Promise<{ error: any }>;
-  signInWithGoogle: () => Promise<{ error: any }>; // Mới
+  signInWithGoogle: () => Promise<{ error: any }>;
   signUp: (email: string, password: string, name: string, studentId: string) => Promise<{ error: any }>;
   signOut: () => Promise<{ error: any }>; 
   resetPassword: (email: string) => Promise<{ error: any }>;
   updatePassword: (newPassword: string) => Promise<{ error: any }>;
-  refreshProfile: () => Promise<void>; // Mới: Gọi khi update profile xong
+  refreshProfile: () => Promise<void>;
 }
 
-// --- VISUAL ENGINE (Styles cho màn hình khóa) ---
+// --- VISUAL ENGINE ---
 const VisualEngine = () => (
   <style>{`
     @keyframes shake {
@@ -115,20 +115,17 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
-  
-  // State quản lý thông tin bị khóa
   const [bannedInfo, setBannedInfo] = useState<{ reason: string; until: string | null } | null>(null);
   
-  // Tính toán isRestricted dựa trên bannedInfo
   const isRestricted = !!bannedInfo;
-
   const mounted = useRef(false);
   const { addToast } = useToast();
 
-  // 1. Hàm lấy Profile & Check Ban
+  // 1. Hàm lấy Profile & Check Ban & Đồng bộ Google
   const fetchProfile = async (sessionData: Session) => {
     try {
       const userId = sessionData.user.id;
+      const meta = sessionData.user.user_metadata;
       
       let { data, error } = await supabase
         .from('profiles')
@@ -136,22 +133,37 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         .eq('id', userId)
         .maybeSingle();
 
-      // LOGIC TỰ TẠO PROFILE NẾU ĐĂNG NHẬP GOOGLE LẦN ĐẦU
+      // --- LOGIC 1: TỰ TẠO PROFILE NẾU CHƯA CÓ (Lần đầu login Google) ---
       if (!data && !error) {
-        const meta = sessionData.user.user_metadata || {};
         const newProfile = {
           id: userId,
           name: meta.full_name || meta.name || sessionData.user.email?.split('@')[0],
           email: sessionData.user.email,
-          avatar_url: meta.avatar_url || meta.picture, // Lấy ảnh từ Google
+          avatar_url: meta.avatar_url || meta.picture,
           role: 'user',
           verified_status: 'unverified',
           created_at: new Date().toISOString()
         };
-        
-        console.log("Creating new profile for:", newProfile.email);
         const { data: created, error: createErr } = await supabase.from('profiles').insert(newProfile).select().single();
         if (!createErr) data = created;
+      }
+
+      // --- LOGIC 2: ĐỒNG BỘ AVATAR/TÊN TỪ GOOGLE (Nâng cấp) ---
+      if (data && sessionData.user.app_metadata.provider === 'google') {
+        const googleAvatar = meta.avatar_url || meta.picture;
+        const googleName = meta.full_name || meta.name;
+        
+        // Chỉ update nếu có sự thay đổi để tránh spam database
+        if ((googleAvatar && googleAvatar !== data.avatar_url) || (googleName && googleName !== data.name)) {
+           await supabase.from('profiles').update({
+             avatar_url: googleAvatar,
+             name: googleName
+           }).eq('id', userId);
+           
+           // Cập nhật lại data local để hiển thị ngay lập tức
+           data.avatar_url = googleAvatar;
+           data.name = googleName;
+        }
       }
 
       if (data && mounted.current) {
@@ -160,26 +172,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
         // --- CHECK BAN ---
         if (profile.banned_until) {
           const banDate = new Date(profile.banned_until);
-          const now = new Date();
-
-          if (banDate > now) {
+          if (banDate > new Date()) {
             setBannedInfo({
               reason: profile.ban_reason || 'Vi phạm chính sách cộng đồng',
               until: profile.banned_until
             });
-            setUser(null); 
-            setIsAdmin(false);
-            setLoading(false);
+            setUser(null); setIsAdmin(false); setLoading(false);
             return;
           }
         }
+        setBannedInfo(null);
         // ----------------
 
-        setBannedInfo(null);
-        
         const safeRole = (profile.role === 'admin' ? 'admin' : 'user') as 'user' | 'admin';
 
-        // Map DB Profile to App User Type
         setUser({
           id: profile.id,
           email: sessionData.user.email || '',
@@ -208,7 +214,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   useEffect(() => {
     mounted.current = true;
 
-    // Check session lúc khởi động
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (session) {
         setSession(session);
@@ -218,17 +223,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       }
     });
 
-    // Lắng nghe thay đổi auth
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       if (mounted.current) {
         setSession(session);
         if (session) {
           fetchProfile(session);
         } else {
-          setUser(null);
-          setIsAdmin(false);
-          setBannedInfo(null);
-          setLoading(false);
+          setUser(null); setIsAdmin(false); setBannedInfo(null); setLoading(false);
         }
       }
     });
@@ -242,21 +243,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   // 3. Auth Actions
   const handleLogout = async () => {
     const { error } = await supabase.auth.signOut();
-    setBannedInfo(null);
-    setUser(null);
-    setSession(null);
-    // window.location.href = '/'; 
+    setBannedInfo(null); setUser(null); setSession(null);
     return { error };
   };
 
   const signIn = async (e: string, p: string) => supabase.auth.signInWithPassword({ email: e, password: p });
   
   const signInWithGoogle = async () => {
+    // Tự động lấy URL hiện tại để quay về đúng nơi (Fix lỗi redirect khi deploy)
+    const redirectTo = window.location.origin; 
     return supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
         queryParams: { access_type: 'offline', prompt: 'consent' },
-        redirectTo: window.location.origin
+        redirectTo: redirectTo
       }
     });
   };
@@ -272,12 +272,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const resetPassword = async (e: string) => supabase.auth.resetPasswordForEmail(e);
   const updatePassword = async (p: string) => supabase.auth.updateUser({ password: p });
 
-  // MỚI: Hàm refresh profile thủ công (dùng sau khi edit profile)
+  // MỚI: Hàm refresh profile thủ công
   const refreshProfile = async () => {
     const { data: { session } } = await supabase.auth.getSession();
-    if (session) {
-      await fetchProfile(session);
-    }
+    if (session) await fetchProfile(session);
   };
 
   return (
@@ -301,4 +299,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
 export const useAuth = () => {
   const context = useContext(AuthContext);
-  if (
+  if (context === undefined) throw new Error("useAuth must be used within an AuthProvider");
+  return context;
+};
