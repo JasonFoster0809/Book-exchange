@@ -7,7 +7,7 @@ import {
   Send, Image as ImageIcon, Phone, ArrowLeft, Loader2, ShoppingBag, 
   CheckCircle2, Search, MessageCircle, MoreVertical, X, AlertCircle,
   Truck, DollarSign, XCircle, User, Flag, Trash, MapPin, Smile, CheckCheck,
-  ExternalLink, Maximize2, ChevronDown, RefreshCw
+  ExternalLink, Maximize2, ChevronDown
 } from 'lucide-react'; 
 import { playMessageSound } from '../utils/audio';
 
@@ -126,8 +126,7 @@ const ChatPage: React.FC = () => {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, msgId: string } | null>(null);
 
-  // --- LOGIC PHÂN VAI (QUAN TRỌNG) ---
-  // Vai trò của User hiện tại đối với sản phẩm đang ghim
+  // Logic vai trò
   const isSeller = user && targetProduct && user.id === targetProduct.seller_id;
   const isBuyer = user && targetProduct && user.id !== targetProduct.seller_id;
 
@@ -137,23 +136,17 @@ const ChatPage: React.FC = () => {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<any>(null);
 
-  // --- HÀM TÍNH TOÁN LABEL CHO PARTNER ---
-  // Hàm này quyết định hiển thị "Người bán" hay "Người mua" trên đầu đoạn chat
+  // --- 1. TÍNH TOÁN VAI TRÒ ĐỐI PHƯƠNG ---
   const getPartnerRoleLabel = () => {
     if (!targetProduct || !partnerProfile) return null;
-    
-    // Nếu Partner là người tạo ra sản phẩm này -> Họ là Người Bán
     if (partnerProfile.id === targetProduct.seller_id) {
         return { label: 'Người bán', color: 'bg-blue-100 text-blue-600' };
     }
-    
-    // Ngược lại, nếu họ đang chat về sản phẩm này (mà không phải chủ) -> Họ là Người Mua
     return { label: 'Người mua', color: 'bg-orange-100 text-orange-600' };
   };
-
   const partnerRole = getPartnerRoleLabel();
 
-  // --- DATA FETCHING ---
+  // --- 2. DATA FETCHING ---
   const fetchConversations = async () => {
       setLoadingConv(true);
       if (!user) return;
@@ -200,7 +193,8 @@ const ChatPage: React.FC = () => {
     initChat();
   }, [partnerIdParam, productIdParam, user]);
 
-  // --- REALTIME ---
+  // --- 3. REALTIME (GLOBAL & CHAT ROOM) ---
+  // A. Global Updates (List & Badge)
   useEffect(() => {
     if (!user) return;
     const channel = supabase.channel('global_chat_updates')
@@ -233,33 +227,17 @@ const ChatPage: React.FC = () => {
           }
       })
       .subscribe();
-
     return () => { supabase.removeChannel(channel); };
   }, [user, activeConversation]);
 
-  // --- CHAT ROOM LOGIC ---
-  const handleSelectConversation = async (convId: string, partnerId: string) => {
-      setActiveConversation(convId);
-      fetchPartnerInfoInternal(partnerId);
-      
-      // Reset sản phẩm ghim về null trước, sau đó fetch cái mới (để tránh hiển thị sai)
-      setTargetProduct(null); 
-      fetchPinnedProduct(convId);
-
-      setConversations(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
-      if(user) {
-          await supabase.from('messages').update({ is_read: true }).eq('conversation_id', convId).neq('sender_id', user.id).eq('is_read', false);
-      }
-  };
-
+  // B. Chat Room Updates (Messages & Pinned Product)
   useEffect(() => {
     if (!activeConversation) return;
     fetchMessages(activeConversation);
-    
-    // Lưu ý: fetchPinnedProduct đã được gọi trong handleSelectConversation, nhưng gọi lại ở đây để chắc chắn khi mount
     if (!targetProduct) fetchPinnedProduct(activeConversation);
 
     const channel = supabase.channel(`chat_room:${activeConversation}`)
+        // 1. Tin nhắn mới
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversation}` }, (payload) => {
             const newMsg = payload.new;
             setMessages(prev => {
@@ -271,19 +249,22 @@ const ChatPage: React.FC = () => {
             }
             setTimeout(scrollToBottom, 100);
         })
-        // Lắng nghe thay đổi sản phẩm (để cập nhật trạng thái đã bán/đang giao dịch)
+        // 2. Cập nhật trạng thái sản phẩm (Sold/Pending)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, (payload) => {
             if (targetProduct && payload.new.id === targetProduct.id) {
                 setTargetProduct({ ...targetProduct, ...payload.new });
             }
         })
-        // Lắng nghe thay đổi hội thoại (ví dụ khi ghim sản phẩm mới)
+        // 3. Cập nhật ghim sản phẩm (Quan trọng cho việc xóa ghim)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `id=eq.${activeConversation}` }, (payload) => {
-             if (payload.new.current_product_id && payload.new.current_product_id !== targetProduct?.id) {
-                 fetchPinnedProduct(activeConversation); // Fetch lại sản phẩm mới được ghim
-             }
-             if (!payload.new.current_product_id) {
-                 setTargetProduct(null); // Gỡ ghim
+             const newPid = payload.new.current_product_id;
+             // Nếu bị xóa ghim (null) -> Ẩn card
+             if (!newPid) {
+                 setTargetProduct(null);
+             } 
+             // Nếu ghim sản phẩm mới -> Fetch lại
+             else if (newPid !== targetProduct?.id) {
+                 fetchPinnedProduct(activeConversation);
              }
         })
         .on('broadcast', { event: 'typing' }, (payload) => {
@@ -299,6 +280,20 @@ const ChatPage: React.FC = () => {
   }, [activeConversation]);
 
   // --- HELPERS ---
+  const handleSelectConversation = async (convId: string, partnerId: string) => {
+      setActiveConversation(convId);
+      fetchPartnerInfoInternal(partnerId);
+      
+      // Reset & Fetch Pinned Product
+      setTargetProduct(null);
+      fetchPinnedProduct(convId);
+
+      setConversations(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
+      if(user) {
+          await supabase.from('messages').update({ is_read: true }).eq('conversation_id', convId).neq('sender_id', user.id).eq('is_read', false);
+      }
+  };
+
   const checkAndCreateConversation = async (pId: string, prodId: string | null) => {
       if (!user) return;
       let convId = null;
@@ -339,6 +334,7 @@ const ChatPage: React.FC = () => {
       if (data) setPartnerProfile(data);
   };
 
+  // --- ACTIONS ---
   const handleSendMessage = async (e?: React.FormEvent, content: string = newMessage, type: 'text' | 'image' | 'location' = 'text') => {
       e?.preventDefault();
       if ((!content.trim() && type === 'text') || !activeConversation || !user) return;
@@ -375,7 +371,7 @@ const ChatPage: React.FC = () => {
   const handleSendLocation = () => {
       if (!navigator.geolocation) return addToast("Trình duyệt không hỗ trợ vị trí", "error");
       navigator.geolocation.getCurrentPosition((pos) => {
-          const link = `http://googleusercontent.com/maps.google.com/5{pos.coords.latitude},${pos.coords.longitude}`;
+          const link = `http://googleusercontent.com/maps.google.com/6{pos.coords.latitude},${pos.coords.longitude}`;
           handleSendMessage(undefined, link, 'location');
       }, () => addToast("Không thể lấy vị trí", "error"));
   };
@@ -389,7 +385,9 @@ const ChatPage: React.FC = () => {
   const handleUnpinProduct = async () => {
       if (!activeConversation) return;
       await supabase.from('conversations').update({ current_product_id: null }).eq('id', activeConversation);
-      setTargetProduct(null); setIsMenuOpen(false); addToast("Đã gỡ ghim", "info");
+      // setTargetProduct(null); // Không cần set tay, realtime sẽ lo
+      setIsMenuOpen(false); 
+      addToast("Đã gỡ ghim", "info");
   };
 
   const handleViewProfile = () => {
@@ -397,6 +395,7 @@ const ChatPage: React.FC = () => {
       setIsMenuOpen(false);
   }
 
+  // --- DEAL LOGIC (QUAN TRỌNG) ---
   const handleDealAction = async (action: string) => {
       if (!targetProduct || !activeConversation) return;
       setIsProcessing(true);
@@ -404,18 +403,31 @@ const ChatPage: React.FC = () => {
           if (action === 'request') {
               await handleSendMessage(undefined, `👋 TÔI MUỐN MUA MÓN NÀY!\nBạn xác nhận giao dịch nhé?`);
               addToast("Đã gửi yêu cầu", "success");
+
           } else if (action === 'confirm') {
               await supabase.from('products').update({ status: 'pending', buyer_id: partnerProfile.id }).eq('id', targetProduct.id);
               await handleSendMessage(undefined, `✅ ĐÃ XÁC NHẬN BÁN!\nSản phẩm đang được giữ cho bạn.`);
               setTargetProduct({ ...targetProduct, status: 'pending' });
+
           } else if (action === 'finish') {
+              // 1. Cập nhật sản phẩm thành ĐÃ BÁN
               await supabase.from('products').update({ status: 'sold' }).eq('id', targetProduct.id);
+              // 2. Gửi tin nhắn
               await handleSendMessage(undefined, `🎉 GIAO DỊCH THÀNH CÔNG!\nCảm ơn bạn đã ủng hộ.`);
-              setTargetProduct({ ...targetProduct, status: 'sold' });
+              // 3. Xóa ghim khỏi cuộc hội thoại (Ẩn Card)
+              await supabase.from('conversations').update({ current_product_id: null }).eq('id', activeConversation);
+              setTargetProduct(null); // Update UI ngay cho mượt
+              addToast("Giao dịch hoàn tất", "success");
+
           } else if (action === 'cancel') {
+              // 1. Khôi phục sản phẩm
               await supabase.from('products').update({ status: 'available', buyer_id: null }).eq('id', targetProduct.id);
+              // 2. Thông báo
               await handleSendMessage(undefined, `⚠️ ĐÃ HỦY GIAO DỊCH.`);
-              setTargetProduct({ ...targetProduct, status: 'available', buyer_id: null });
+              // 3. Tùy chọn: Xóa ghim luôn (cho đỡ rác)
+              await supabase.from('conversations').update({ current_product_id: null }).eq('id', activeConversation);
+              setTargetProduct(null);
+              addToast("Đã hủy giao dịch", "info");
           }
       } catch(e) { console.error(e); } finally { setIsProcessing(false); }
   };
@@ -459,6 +471,7 @@ const ChatPage: React.FC = () => {
          <div className="flex-1 overflow-y-auto chat-scrollbar">
             {loadingConv ? <div className="flex justify-center pt-10"><Loader2 className="animate-spin text-slate-400"/></div> : filteredConversations.length === 0 ? <div className="text-center pt-10 px-6"><MessageCircle className="mx-auto text-slate-200 mb-2" size={48}/><p className="text-slate-400 text-sm">Chưa có tin nhắn nào.</p></div> : filteredConversations.map(conv => (
                <div key={conv.id} onClick={() => handleSelectConversation(conv.id, conv.partnerId)} className={`p-4 flex gap-3 cursor-pointer hover:bg-slate-50 transition-colors border-b border-slate-50 ${activeConversation === conv.id ? 'bg-blue-50/50 border-l-4 border-l-[#00418E]' : 'border-l-4 border-l-transparent'}`}>
+                  {/* FIX ẢNH 404 */}
                   <img 
                     src={conv.partnerAvatar || `https://ui-avatars.com/api/?name=${encodeURIComponent(conv.partnerName || 'User')}&background=random`} 
                     className="w-12 h-12 rounded-full object-cover border border-slate-200 bg-white"
@@ -493,6 +506,7 @@ const ChatPage: React.FC = () => {
                       {partnerProfile && (
                          <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate(`/profile/${partnerProfile.id}`)}>
                             <div className="relative">
+                                {/* FIX ẢNH 404 */}
                                 <img 
                                   src={partnerProfile.avatar_url || `https://ui-avatars.com/api/?name=${encodeURIComponent(partnerProfile.name)}&background=random`} 
                                   className="w-10 h-10 rounded-full border border-slate-200 object-cover"
@@ -502,7 +516,7 @@ const ChatPage: React.FC = () => {
                             <div>
                                <div className="flex items-center gap-2">
                                  <h3 className="font-bold text-sm text-slate-800">{partnerProfile.name}</h3>
-                                 {/* --- FIX: Tag vai trò linh hoạt --- */}
+                                 {/* --- TAG VAI TRÒ DYNAMIC --- */}
                                  {partnerRole && (
                                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${partnerRole.color}`}>
                                          {partnerRole.label}
@@ -537,6 +551,7 @@ const ChatPage: React.FC = () => {
                   <div className="transaction-card p-4 animate-slide-in">
                       <div className="flex gap-4 items-start bg-white p-3 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
                          <div className={`absolute top-0 left-0 bottom-0 w-1.5 ${targetProduct.status === 'sold' ? 'bg-slate-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}></div>
+                         {/* FIX PLACEHOLDER ERROR */}
                          <img src={targetProduct.images?.[0] || 'https://placehold.co/80'} className="w-16 h-16 rounded-lg object-cover border border-slate-100 bg-slate-50 ml-2"/>
                          <div className="flex-1 min-w-0">
                             <div className="flex items-center gap-2 mb-1">
