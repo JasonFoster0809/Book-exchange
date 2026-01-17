@@ -4,18 +4,18 @@ import {
   LayoutDashboard, Users, Package, AlertTriangle, 
   Search, LogOut, CheckCircle, Trash2, 
   Shield, Ban, Eye, ChevronLeft, ChevronRight,
-  X, DollarSign, AlertCircle
+  X, DollarSign, AlertCircle, ImageOff
 } from "lucide-react";
 import { supabase } from "../services/supabase";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 
 // ============================================================================
-// 1. CONFIG & UTILS
+// 1. CONFIG & UTILS (ĐÃ SỬA LỖI NaN)
 // ============================================================================
 const ITEMS_PER_PAGE = 10;
 
-// Helper: Lấy dữ liệu nested an toàn (tránh lỗi undefined/null)
+// Helper: Lấy dữ liệu nested an toàn
 const safeGet = (data: any, field: string, fallback = "N/A") => {
   if (!data) return fallback;
   if (Array.isArray(data) && data.length > 0) return data[0]?.[field] || fallback;
@@ -23,11 +23,22 @@ const safeGet = (data: any, field: string, fallback = "N/A") => {
   return fallback;
 };
 
-const formatCurrency = (amount: number) => 
-  new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(amount);
+// FIX LỖI NaN: Hàm format tiền tệ an toàn tuyệt đối
+const formatCurrency = (amount: any) => {
+  if (amount === null || amount === undefined || amount === "") return "0 ₫";
+  const num = Number(amount);
+  if (isNaN(num)) return "0 ₫"; // Nếu không phải số, trả về 0đ
+  return new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' }).format(num);
+};
 
-const formatDate = (dateString: string) => 
-  new Date(dateString).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const formatDate = (dateString: string) => {
+  if (!dateString) return "Unknown";
+  try {
+    return new Date(dateString).toLocaleDateString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  } catch {
+    return "Lỗi ngày";
+  }
+};
 
 const getBanStatus = (bannedUntil: string | null) => {
   if (!bannedUntil) return { label: 'Hoạt động', color: 'bg-emerald-100 text-emerald-700 border-emerald-200', isBanned: false };
@@ -152,29 +163,34 @@ const AdminPage = () => {
   const [modal, setModal] = useState({ isOpen: false, title: "", message: "", type: "info", onConfirm: () => {} });
   const [banModal, setBanModal] = useState({ isOpen: false, userId: null, userName: "" });
 
-  // Security Check (Nếu cần kích hoạt, bỏ comment)
-  /*
-  useEffect(() => {
-    if (!user || !isAdmin) {
-      addToast("Bạn không có quyền truy cập!", "error");
-      navigate("/");
-    }
-  }, [user, isAdmin, navigate]);
-  */
-
-  // Fetch Stats (Dashboard)
+  // Fetch Stats (Dashboard) - Fix lỗi NaN
   const fetchStats = async () => {
     setLoading(true);
     try {
-      const [u, p, r, price] = await Promise.all([
+      const [u, p, r, priceData] = await Promise.all([
         supabase.from('profiles').select('*', { count: 'exact', head: true }),
         supabase.from('products').select('*', { count: 'exact', head: true }),
         supabase.from('reports').select('*', { count: 'exact', head: true }).eq('status', 'pending'),
-        supabase.from('products').select('price').eq('status', 'available')
+        supabase.from('products').select('price').not('price', 'is', null) // Lấy giá để tính tổng
       ]);
-      const totalVal = price.data?.reduce((sum, item) => sum + (item.price || 0), 0) || 0;
-      setStats({ totalUsers: u.count || 0, totalProducts: p.count || 0, pendingReports: r.count || 0, marketValue: totalVal });
-    } catch (e) { console.error(e); } finally { setLoading(false); }
+
+      // Tính tổng doanh thu an toàn
+      const totalVal = priceData.data?.reduce((sum, item) => {
+        const val = Number(item.price);
+        return sum + (isNaN(val) ? 0 : val);
+      }, 0) || 0;
+
+      setStats({ 
+        totalUsers: u.count || 0, 
+        totalProducts: p.count || 0, 
+        pendingReports: r.count || 0, 
+        marketValue: totalVal 
+      });
+    } catch (e) { 
+      console.error(e); 
+    } finally { 
+      setLoading(false); 
+    }
   };
 
   // Fetch List Data
@@ -192,11 +208,9 @@ const AdminPage = () => {
       } 
       // PRODUCTS
       else if (activeTab === 'products') {
-        // Lưu ý: Cần Foreign Key 'products.seller_id' -> 'profiles.id'
         query = supabase.from('products')
           .select('*, seller:profiles(name, email)') 
           .order('created_at', { ascending: false }).range(from, to);
-        
         if (search) query = query.ilike('title', `%${search}%`);
       } 
       // REPORTS
@@ -213,7 +227,6 @@ const AdminPage = () => {
       }
     } catch (err: any) {
       console.error("Lỗi tải dữ liệu:", err);
-      // Xử lý lỗi nếu chưa setup Foreign Key
       if (err.code === "PGRST200" || err.code === "42P01") {
          addToast("Lỗi Database: Chưa liên kết bảng (Foreign Key).", "error");
       }
@@ -355,7 +368,19 @@ const AdminPage = () => {
 
                       {activeTab === 'products' && dataList.map((p: any) => (
                         <tr key={p.id}>
-                          <td className="font-bold max-w-xs truncate">{p.title}</td>
+                          <td className="p-4">
+                             <div className="flex items-center gap-3">
+                                {/* FIX LỖI ẢNH VÀ TÊN TRỐNG */}
+                                <img 
+                                   src={Array.isArray(p.images) && p.images.length > 0 ? p.images[0] : 'https://via.placeholder.com/40'} 
+                                   className="w-10 h-10 rounded-lg object-cover bg-slate-100 border border-slate-200"
+                                   onError={(e) => (e.currentTarget.src = 'https://via.placeholder.com/40')}
+                                />
+                                <span className={`font-bold line-clamp-1 max-w-[200px] ${!p.title ? 'text-red-400 italic' : 'text-slate-800'}`}>
+                                  {p.title || "(Sản phẩm lỗi - Không tên)"}
+                                </span>
+                             </div>
+                          </td>
                           <td className="font-mono font-bold text-blue-600">{formatCurrency(p.price)}</td>
                           <td>{safeGet(p.seller, 'name', 'Ẩn danh')}</td>
                           <td>{formatDate(p.created_at)}</td>
