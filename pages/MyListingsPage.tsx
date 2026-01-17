@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { 
-  Search, Sparkles, Filter, SlidersHorizontal, Clock, Tag, 
+  Search, Sparkles, Filter, SlidersHorizontal, Tag, 
   LayoutGrid, List as ListIcon, CheckCircle2, ShoppingBag, 
   HandCoins, Loader2, ChevronDown, Package 
 } from 'lucide-react';
 import ProductCard from '../components/ProductCard';
-import ProductSkeleton from '../components/ProductSkeleton'; 
 import { ProductCategory, Product, ProductStatus, ProductCondition } from '../types'; 
 import { supabase } from '../services/supabase';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
-import { useTranslation } from 'react-i18next';
+// Nếu chưa cài i18n, bạn có thể xóa dòng dưới và thay t('key') bằng text cứng
+import { useTranslation } from 'react-i18next'; 
 
 const PAGE_SIZE = 12;
 
@@ -29,9 +29,8 @@ const MyListingsPage: React.FC = () => {
   const [hasMore, setHasMore] = useState(true);
   const [isLoadingMore, setIsLoadingMore] = useState(false);
   
-  // Tabs: Tin Đang Bán / Tin Cần Mua
   const [activeTab, setActiveTab] = useState<'sell' | 'buy'>('sell');
-  const [hideSold, setHideSold] = useState(false); // Mặc định hiện cả tin đã bán để quản lý
+  const [hideSold, setHideSold] = useState(false);
   const [sortBy, setSortBy] = useState<'newest' | 'price_asc' | 'price_desc'>('newest');
   const [priceRange, setPriceRange] = useState<{min: string, max: string}>({ min: '', max: '' });
   const [filterCondition, setFilterCondition] = useState<string>('All');
@@ -41,13 +40,13 @@ const MyListingsPage: React.FC = () => {
 
   // Helper Labels
   const getCategoryLabel = (cat: string) => {
-      if (cat === 'All') return t('market.cat_all');
+      if (cat === 'All') return "Tất cả";
       switch (cat) {
-          case ProductCategory.TEXTBOOK: return t('market.cat_textbook');
-          case ProductCategory.ELECTRONICS: return t('market.cat_electronics');
-          case ProductCategory.SUPPLIES: return t('market.cat_supplies');
-          case ProductCategory.CLOTHING: return t('market.cat_clothing');
-          case ProductCategory.OTHER: return t('market.cat_other');
+          case ProductCategory.TEXTBOOK: return "Giáo trình";
+          case ProductCategory.ELECTRONICS: return "Điện tử";
+          case ProductCategory.SUPPLIES: return "Dụng cụ";
+          case ProductCategory.CLOTHING: return "Trang phục";
+          case ProductCategory.OTHER: return "Khác";
           default: return cat; 
       }
   };
@@ -56,6 +55,7 @@ const MyListingsPage: React.FC = () => {
       switch (cond) {
           case ProductCondition.NEW: return "Mới 100%";
           case ProductCondition.LIKE_NEW: return "Như mới";
+          case ProductCondition.USED: return "Đã dùng";
           case ProductCondition.GOOD: return "Tốt";
           case ProductCondition.FAIR: return "Khá";
           case ProductCondition.POOR: return "Cũ";
@@ -63,9 +63,9 @@ const MyListingsPage: React.FC = () => {
       }
   };
 
-  // --- FETCH DATA (Server-Side Filter) ---
+  // --- FETCH DATA ---
   const fetchProducts = useCallback(async (isLoadMore = false) => {
-    if (!user) return; // Bắt buộc phải đăng nhập
+    if (!user) return; 
 
     const from = isLoadMore ? (page + 1) * PAGE_SIZE : 0;
     const to = from + PAGE_SIZE - 1;
@@ -76,20 +76,16 @@ const MyListingsPage: React.FC = () => {
     try {
       let query = supabase
         .from('products')
-        // FIX 1: Lấy thông tin người bán (chính mình)
-        // FIX 2: verified_status thay vì is_verified
         .select('*, seller:profiles!seller_id (name, avatar_url, verified_status, rating, completed_trades)')
-        // FIX 3: CHỈ LẤY TIN CỦA TÔI
         .eq('seller_id', user.id)
         .range(from, to);
 
       // --- FILTERS ---
-      
       // 1. Tab Bán / Mua
       if (activeTab === 'buy') query = query.eq('is_looking_to_buy', true);
       else query = query.eq('is_looking_to_buy', false);
 
-      // 2. Ẩn tin đã bán (nếu user muốn)
+      // 2. Ẩn tin đã bán
       if (hideSold) query = query.neq('status', 'sold');
 
       // 3. Category
@@ -105,15 +101,16 @@ const MyListingsPage: React.FC = () => {
       // 6. Condition
       if (filterCondition !== 'All') query = query.eq('condition', filterCondition);
 
-      // 7. Sort (FIX 4: posted_at -> created_at)
+      // 7. Sort
       if (sortBy === 'price_asc') query = query.order('price', { ascending: true });
       else if (sortBy === 'price_desc') query = query.order('price', { ascending: false });
-      else query = query.order('created_at', { ascending: false }); // Chuẩn database
+      else query = query.order('created_at', { ascending: false });
 
       const { data: productData, error: productError } = await query;
 
       if (productError) throw productError;
 
+      // FIX: Map dữ liệu chuẩn theo Typescript mới
       const mappedProducts: Product[] = (productData || []).map((item: any) => ({
           id: item.id, 
           sellerId: item.seller_id, 
@@ -122,12 +119,16 @@ const MyListingsPage: React.FC = () => {
           price: item.price, 
           category: item.category, 
           condition: item.condition, 
-          images: item.images || [], 
+          // Fix: Xử lý ảnh an toàn
+          images: Array.isArray(item.images) ? item.images : (item.images ? [item.images] : []), 
           tradeMethod: item.trade_method, 
-          postedAt: item.created_at, // Map từ created_at
+          postedAt: item.created_at,
+          
+          // FIX QUAN TRỌNG: Thêm location để khớp với interface Product
+          location: item.location_name || 'TP.HCM', 
+          
           isLookingToBuy: item.is_looking_to_buy,
           status: item.status || ProductStatus.AVAILABLE,
-          isLiked: false, // My listings thì ko cần check like
           view_count: item.view_count || 0,
           seller: item.seller 
       }));
@@ -144,12 +145,12 @@ const MyListingsPage: React.FC = () => {
 
     } catch (err: any) {
       console.error(err);
-      addToast(t('market.error'), 'error');
+      addToast("Lỗi tải danh sách tin", 'error');
     } finally {
       setLoading(false);
       setIsLoadingMore(false);
     }
-  }, [user, page, activeTab, hideSold, selectedCategory, searchTerm, priceRange, filterCondition, sortBy, addToast, t]);
+  }, [user, page, activeTab, hideSold, selectedCategory, searchTerm, priceRange, filterCondition, sortBy, addToast]);
 
   // Reload khi bộ lọc thay đổi
   useEffect(() => {
@@ -169,9 +170,9 @@ const MyListingsPage: React.FC = () => {
           <hr className="border-gray-100"/>
           
           <div>
-              <h3 className="font-bold text-gray-900 mb-3 flex items-center text-sm uppercase tracking-wide"><Filter className="w-4 h-4 mr-2"/> {t('market.cat_all')}</h3>
+              <h3 className="font-bold text-gray-900 mb-3 flex items-center text-sm uppercase tracking-wide"><Filter className="w-4 h-4 mr-2"/> Danh mục</h3>
               <div className="space-y-1">
-                  <button onClick={() => {setSelectedCategory('All'); setPriceRange({min:'', max:''})}} className={`block w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${selectedCategory === 'All' && !priceRange.max ? 'bg-indigo-50 text-indigo-700 font-bold border-l-4 border-indigo-600' : 'text-gray-600 hover:bg-gray-50'}`}>{t('market.cat_all')}</button>
+                  <button onClick={() => {setSelectedCategory('All'); setPriceRange({min:'', max:''})}} className={`block w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${selectedCategory === 'All' ? 'bg-indigo-50 text-indigo-700 font-bold border-l-4 border-indigo-600' : 'text-gray-600 hover:bg-gray-50'}`}>Tất cả</button>
                   {Object.values(ProductCategory).map(cat => (
                       <button key={cat} onClick={() => setSelectedCategory(cat)} className={`block w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${selectedCategory === cat ? 'bg-indigo-50 text-indigo-700 font-bold border-l-4 border-indigo-600' : 'text-gray-600 hover:bg-gray-50'}`}>{getCategoryLabel(cat)}</button>
                   ))}
@@ -231,7 +232,7 @@ const MyListingsPage: React.FC = () => {
               </div>
 
               <div className="flex-1 w-full">
-                  {showMobileFilters && (<div className="lg:hidden mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-200 animate-fadeIn"><FilterPanel /></div>)}
+                  {showMobileFilters && (<div className="lg:hidden mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-200"><FilterPanel /></div>)}
 
                   <div className="mb-8 flex items-center justify-between">
                       <div className="flex items-center gap-2">
@@ -244,21 +245,22 @@ const MyListingsPage: React.FC = () => {
                               <button onClick={() => setViewMode('list')} className={`p-2 rounded-lg transition-all ${viewMode === 'list' ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-400'}`}><ListIcon className="w-4 h-4" /></button>
                           </div>
                           <select value={sortBy} onChange={(e) => setSortBy(e.target.value as any)} className="text-xs border-none rounded-xl bg-white font-black text-gray-700 py-2.5 pl-4 pr-10 shadow-sm cursor-pointer outline-none ring-1 ring-gray-200 focus:ring-2 focus:ring-indigo-500 transition-all appearance-none">
-                              <option value="newest">{t('market.sort_newest')}</option>
-                              <option value="price_asc">{t('market.sort_price_asc')}</option>
-                              <option value="price_desc">{t('market.sort_price_desc')}</option>
+                              <option value="newest">Mới nhất</option>
+                              <option value="price_asc">Giá tăng dần</option>
+                              <option value="price_desc">Giá giảm dần</option>
                           </select>
                       </div>
                   </div>
 
                   {loading && !isLoadingMore ? (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-8">
-                          {[1, 2, 3, 4, 5, 6].map((n) => <ProductSkeleton key={n} />)}
+                      <div className="flex justify-center items-center py-20">
+                          <Loader2 className="animate-spin text-indigo-600 w-10 h-10"/>
                       </div>
                   ) : (
                     <div className={viewMode === 'grid' ? "grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-8" : "flex flex-col gap-6"}>
                         {allProducts.map((product) => (
-                           <ProductCard key={product.id} product={product} viewMode={viewMode} />
+                           // FIX: Xóa prop viewMode vì ProductCard chưa hỗ trợ
+                           <ProductCard key={product.id} product={product} />
                         ))}
                     </div>
                   )}
