@@ -7,7 +7,7 @@ import {
   Send, Image as ImageIcon, Phone, ArrowLeft, Loader2, ShoppingBag, 
   CheckCircle2, Search, MessageCircle, MoreVertical, X, AlertCircle,
   Truck, DollarSign, XCircle, User, Flag, Trash, MapPin, Smile, CheckCheck,
-  ExternalLink, Maximize2, ChevronDown
+  ExternalLink, Maximize2, ChevronDown, Plus
 } from 'lucide-react'; 
 import { playMessageSound } from '../utils/audio';
 
@@ -36,9 +36,20 @@ const VisualEngine = () => (
     }
     .msg-image { padding: 4px; background: transparent; border: none; box-shadow: none; }
     
-    .transaction-card {
+    .transaction-list {
+      display: flex; gap: 12px; overflow-x: auto; padding: 12px;
       background: rgba(255, 255, 255, 0.95); border-bottom: 1px solid #E2E8F0; 
       z-index: 20; backdrop-filter: blur(12px);
+      scroll-snap-type: x mandatory;
+    }
+    .transaction-list::-webkit-scrollbar { height: 4px; }
+    .transaction-list::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+
+    .transaction-card {
+      min-width: 280px; max-width: 320px; scroll-snap-align: start;
+      background: white; border: 1px solid #E2E8F0; border-radius: 16px;
+      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);
+      position: relative; flex-shrink: 0;
     }
     
     .animate-slide-in { animation: slideIn 0.3s ease-out forwards; }
@@ -111,7 +122,9 @@ const ChatPage: React.FC = () => {
   const [activeConversation, setActiveConversation] = useState<string | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [partnerProfile, setPartnerProfile] = useState<any>(null);
-  const [targetProduct, setTargetProduct] = useState<any>(null); 
+  
+  // 🔥 NEW: Mảng sản phẩm đang ghim (Thay vì 1 cái)
+  const [pinnedProducts, setPinnedProducts] = useState<any[]>([]); 
   
   // UI State
   const [newMessage, setNewMessage] = useState('');
@@ -126,27 +139,13 @@ const ChatPage: React.FC = () => {
   const [showScrollBtn, setShowScrollBtn] = useState(false);
   const [contextMenu, setContextMenu] = useState<{ x: number, y: number, msgId: string } | null>(null);
 
-  // Logic vai trò
-  const isSeller = user && targetProduct && user.id === targetProduct.seller_id;
-  const isBuyer = user && targetProduct && user.id !== targetProduct.seller_id;
-
   const scrollRef = useRef<HTMLDivElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<any>(null);
 
-  // --- 1. TÍNH TOÁN VAI TRÒ ĐỐI PHƯƠNG ---
-  const getPartnerRoleLabel = () => {
-    if (!targetProduct || !partnerProfile) return null;
-    if (partnerProfile.id === targetProduct.seller_id) {
-        return { label: 'Người bán', color: 'bg-blue-100 text-blue-600' };
-    }
-    return { label: 'Người mua', color: 'bg-orange-100 text-orange-600' };
-  };
-  const partnerRole = getPartnerRoleLabel();
-
-  // --- 2. DATA FETCHING ---
+  // --- 1. DATA FETCHING ---
   const fetchConversations = async () => {
       setLoadingConv(true);
       if (!user) return;
@@ -184,17 +183,12 @@ const ChatPage: React.FC = () => {
   useEffect(() => {
     const initChat = async () => {
         if (!user || !partnerIdParam) return;
-        if (productIdParam) {
-            const { data } = await supabase.from('products').select('*').eq('id', productIdParam).single();
-            if (data) setTargetProduct(data);
-        }
         await checkAndCreateConversation(partnerIdParam, productIdParam);
     };
     initChat();
   }, [partnerIdParam, productIdParam, user]);
 
-  // --- 3. REALTIME (GLOBAL & CHAT ROOM) ---
-  // A. Global Updates (List & Badge)
+  // --- 2. REALTIME ---
   useEffect(() => {
     if (!user) return;
     const channel = supabase.channel('global_chat_updates')
@@ -230,41 +224,28 @@ const ChatPage: React.FC = () => {
     return () => { supabase.removeChannel(channel); };
   }, [user, activeConversation]);
 
-  // B. Chat Room Updates (Messages & Pinned Product)
+  // Chat Room Updates
   useEffect(() => {
     if (!activeConversation) return;
     fetchMessages(activeConversation);
-    if (!targetProduct) fetchPinnedProduct(activeConversation);
+    fetchPinnedProducts(activeConversation); // 🔥 Load danh sách ghim
 
     const channel = supabase.channel(`chat_room:${activeConversation}`)
-        // 1. Tin nhắn mới
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `conversation_id=eq.${activeConversation}` }, (payload) => {
             const newMsg = payload.new;
-            setMessages(prev => {
-                if (prev.some(m => m.id === newMsg.id)) return prev;
-                return [...prev, newMsg];
-            });
-            if (newMsg.sender_id !== user?.id) {
-                supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id);
-            }
+            setMessages(prev => [...prev, newMsg]);
+            if (newMsg.sender_id !== user?.id) supabase.from('messages').update({ is_read: true }).eq('id', newMsg.id);
             setTimeout(scrollToBottom, 100);
         })
-        // 2. Cập nhật trạng thái sản phẩm (Sold/Pending)
+        // 🔥 Cập nhật trạng thái từng sản phẩm (Sold/Pending)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'products' }, (payload) => {
-            if (targetProduct && payload.new.id === targetProduct.id) {
-                setTargetProduct({ ...targetProduct, ...payload.new });
-            }
+            setPinnedProducts(prev => prev.map(p => p.id === payload.new.id ? { ...p, ...payload.new } : p));
         })
-        // 3. Cập nhật ghim sản phẩm (Quan trọng cho việc xóa ghim)
+        // 🔥 Cập nhật danh sách ghim (Thêm/Bớt)
         .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'conversations', filter: `id=eq.${activeConversation}` }, (payload) => {
-             const newPid = payload.new.current_product_id;
-             // Nếu bị xóa ghim (null) -> Ẩn card
-             if (!newPid) {
-                 setTargetProduct(null);
-             } 
-             // Nếu ghim sản phẩm mới -> Fetch lại
-             else if (newPid !== targetProduct?.id) {
-                 fetchPinnedProduct(activeConversation);
+             const newIds = payload.new.pinned_product_ids || [];
+             if (newIds.length !== pinnedProducts.length) {
+                 fetchPinnedProducts(activeConversation);
              }
         })
         .on('broadcast', { event: 'typing' }, (payload) => {
@@ -283,10 +264,8 @@ const ChatPage: React.FC = () => {
   const handleSelectConversation = async (convId: string, partnerId: string) => {
       setActiveConversation(convId);
       fetchPartnerInfoInternal(partnerId);
-      
-      // Reset & Fetch Pinned Product
-      setTargetProduct(null);
-      fetchPinnedProduct(convId);
+      setPinnedProducts([]); // Reset UI
+      fetchPinnedProducts(convId); // Fetch fresh list
 
       setConversations(prev => prev.map(c => c.id === convId ? { ...c, unread_count: 0 } : c));
       if(user) {
@@ -297,30 +276,42 @@ const ChatPage: React.FC = () => {
   const checkAndCreateConversation = async (pId: string, prodId: string | null) => {
       if (!user) return;
       let convId = null;
-      const { data: existing } = await supabase.from('conversations').select('id').or(`and(participant1.eq.${user.id},participant2.eq.${pId}),and(participant1.eq.${pId},participant2.eq.${user.id})`).maybeSingle();
+      // 1. Tìm conversation cũ
+      const { data: existing } = await supabase.from('conversations').select('*').or(`and(participant1.eq.${user.id},participant2.eq.${pId}),and(participant1.eq.${pId},participant2.eq.${user.id})`).maybeSingle();
 
       if (existing) { convId = existing.id; } 
       else {
-          const { data: newConv } = await supabase.from('conversations').insert({ participant1: user.id, participant2: pId }).select().single();
+          // 2. Tạo mới nếu chưa có
+          const { data: newConv } = await supabase.from('conversations').insert({ participant1: user.id, participant2: pId, pinned_product_ids: [] }).select().single();
           if (newConv) { convId = newConv.id; await fetchConversations(); }
       }
 
       if (convId) {
           handleSelectConversation(convId, pId);
+          // 3. 🔥 Ghim sản phẩm mới vào danh sách (Nếu chưa có)
           if (prodId) {
-              await supabase.from('conversations').update({ current_product_id: prodId }).eq('id', convId);
-              const { data: pData } = await supabase.from('products').select('*').eq('id', prodId).single();
-              if (pData) setTargetProduct(pData);
+              const currentIds = existing?.pinned_product_ids || [];
+              if (!currentIds.includes(prodId)) {
+                  const newIds = [...currentIds, prodId];
+                  await supabase.from('conversations').update({ pinned_product_ids: newIds }).eq('id', convId);
+                  // Fetch lại ngay để hiện
+                  const { data: pData } = await supabase.from('products').select('*').eq('id', prodId).single();
+                  if (pData) setPinnedProducts(prev => [...prev, pData]);
+              }
           }
       }
   };
 
-  const fetchPinnedProduct = async (convId: string) => {
-      const { data: conv } = await supabase.from('conversations').select('current_product_id').eq('id', convId).single();
-      if (conv?.current_product_id) {
-          const { data: prod } = await supabase.from('products').select('*').eq('id', conv.current_product_id).single();
-          if (prod) setTargetProduct(prod);
-      } else { setTargetProduct(null); }
+  const fetchPinnedProducts = async (convId: string) => {
+      const { data: conv } = await supabase.from('conversations').select('pinned_product_ids').eq('id', convId).single();
+      const ids = conv?.pinned_product_ids;
+      
+      if (ids && ids.length > 0) {
+          const { data: prods } = await supabase.from('products').select('*').in('id', ids);
+          if (prods) setPinnedProducts(prods);
+      } else {
+          setPinnedProducts([]);
+      }
   };
 
   const fetchMessages = async (convId: string) => {
@@ -371,7 +362,7 @@ const ChatPage: React.FC = () => {
   const handleSendLocation = () => {
       if (!navigator.geolocation) return addToast("Trình duyệt không hỗ trợ vị trí", "error");
       navigator.geolocation.getCurrentPosition((pos) => {
-          const link = `http://googleusercontent.com/maps.google.com/6{pos.coords.latitude},${pos.coords.longitude}`;
+          const link = `http://googleusercontent.com/maps.google.com/7{pos.coords.latitude},${pos.coords.longitude}`;
           handleSendMessage(undefined, link, 'location');
       }, () => addToast("Không thể lấy vị trí", "error"));
   };
@@ -382,11 +373,19 @@ const ChatPage: React.FC = () => {
       setContextMenu(null);
   };
 
-  const handleUnpinProduct = async () => {
+  // --- 🔥 QUẢN LÝ GHIM SẢN PHẨM ---
+  const handleUnpinProduct = async (prodId: string) => {
       if (!activeConversation) return;
-      await supabase.from('conversations').update({ current_product_id: null }).eq('id', activeConversation);
-      // setTargetProduct(null); // Không cần set tay, realtime sẽ lo
-      setIsMenuOpen(false); 
+      // Lấy danh sách cũ
+      const { data: conv } = await supabase.from('conversations').select('pinned_product_ids').eq('id', activeConversation).single();
+      const currentIds = conv?.pinned_product_ids || [];
+      const newIds = currentIds.filter((id: string) => id !== prodId);
+      
+      // Update DB
+      await supabase.from('conversations').update({ pinned_product_ids: newIds }).eq('id', activeConversation);
+      
+      // Update UI
+      setPinnedProducts(prev => prev.filter(p => p.id !== prodId));
       addToast("Đã gỡ ghim", "info");
   };
 
@@ -395,38 +394,35 @@ const ChatPage: React.FC = () => {
       setIsMenuOpen(false);
   }
 
-  // --- DEAL LOGIC (QUAN TRỌNG) ---
-  const handleDealAction = async (action: string) => {
-      if (!targetProduct || !activeConversation) return;
+  // --- 🔥 DEAL LOGIC (CHO TỪNG SẢN PHẨM) ---
+  const handleDealAction = async (action: string, product: any) => {
+      if (!product || !activeConversation) return;
       setIsProcessing(true);
       try {
           if (action === 'request') {
-              await handleSendMessage(undefined, `👋 TÔI MUỐN MUA MÓN NÀY!\nBạn xác nhận giao dịch nhé?`);
+              await handleSendMessage(undefined, `👋 TÔI MUỐN MUA SẢN PHẨM: ${product.title}\nBạn xác nhận giao dịch nhé?`);
               addToast("Đã gửi yêu cầu", "success");
 
           } else if (action === 'confirm') {
-              await supabase.from('products').update({ status: 'pending', buyer_id: partnerProfile.id }).eq('id', targetProduct.id);
-              await handleSendMessage(undefined, `✅ ĐÃ XÁC NHẬN BÁN!\nSản phẩm đang được giữ cho bạn.`);
-              setTargetProduct({ ...targetProduct, status: 'pending' });
+              await supabase.from('products').update({ status: 'pending', buyer_id: partnerProfile.id }).eq('id', product.id);
+              await handleSendMessage(undefined, `✅ ĐÃ XÁC NHẬN BÁN: ${product.title}\nSản phẩm đang được giữ cho bạn.`);
+              // Update local state
+              setPinnedProducts(prev => prev.map(p => p.id === product.id ? { ...p, status: 'pending' } : p));
 
           } else if (action === 'finish') {
-              // 1. Cập nhật sản phẩm thành ĐÃ BÁN
-              await supabase.from('products').update({ status: 'sold' }).eq('id', targetProduct.id);
-              // 2. Gửi tin nhắn
-              await handleSendMessage(undefined, `🎉 GIAO DỊCH THÀNH CÔNG!\nCảm ơn bạn đã ủng hộ.`);
-              // 3. Xóa ghim khỏi cuộc hội thoại (Ẩn Card)
-              await supabase.from('conversations').update({ current_product_id: null }).eq('id', activeConversation);
-              setTargetProduct(null); // Update UI ngay cho mượt
+              await supabase.from('products').update({ status: 'sold' }).eq('id', product.id);
+              await handleSendMessage(undefined, `🎉 GIAO DỊCH THÀNH CÔNG: ${product.title}\nCảm ơn bạn đã ủng hộ.`);
+              
+              // 🔥 Tự động gỡ ghim khi bán xong
+              handleUnpinProduct(product.id);
               addToast("Giao dịch hoàn tất", "success");
 
           } else if (action === 'cancel') {
-              // 1. Khôi phục sản phẩm
-              await supabase.from('products').update({ status: 'available', buyer_id: null }).eq('id', targetProduct.id);
-              // 2. Thông báo
-              await handleSendMessage(undefined, `⚠️ ĐÃ HỦY GIAO DỊCH.`);
-              // 3. Tùy chọn: Xóa ghim luôn (cho đỡ rác)
-              await supabase.from('conversations').update({ current_product_id: null }).eq('id', activeConversation);
-              setTargetProduct(null);
+              await supabase.from('products').update({ status: 'available', buyer_id: null }).eq('id', product.id);
+              await handleSendMessage(undefined, `⚠️ ĐÃ HỦY GIAO DỊCH: ${product.title}.`);
+              
+              // Reset state
+              setPinnedProducts(prev => prev.map(p => p.id === product.id ? { ...p, status: 'available', buyer_id: null } : p));
               addToast("Đã hủy giao dịch", "info");
           }
       } catch(e) { console.error(e); } finally { setIsProcessing(false); }
@@ -514,15 +510,7 @@ const ChatPage: React.FC = () => {
                                 <div className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></div>
                             </div>
                             <div>
-                               <div className="flex items-center gap-2">
-                                 <h3 className="font-bold text-sm text-slate-800">{partnerProfile.name}</h3>
-                                 {/* --- TAG VAI TRÒ DYNAMIC --- */}
-                                 {partnerRole && (
-                                     <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${partnerRole.color}`}>
-                                         {partnerRole.label}
-                                     </span>
-                                 )}
-                               </div>
+                               <h3 className="font-bold text-sm text-slate-800">{partnerProfile.name}</h3>
                                <span className="text-xs text-green-600 font-medium flex items-center gap-1">
                                    {partnerTyping ? 'Đang soạn tin...' : 'Đang hoạt động'}
                                </span>
@@ -537,7 +525,6 @@ const ChatPage: React.FC = () => {
                       {isMenuOpen && (
                           <div className="dropdown-menu">
                               <button onClick={handleViewProfile} className="dropdown-item"><User size={16}/> Xem trang cá nhân</button>
-                              {targetProduct && <button onClick={handleUnpinProduct} className="dropdown-item"><XCircle size={16}/> Gỡ ghim sản phẩm</button>}
                               <button className="dropdown-item"><Flag size={16}/> Báo cáo người dùng</button>
                               <div className="h-px bg-slate-100 my-1"></div>
                               <button className="dropdown-item danger"><Trash size={16}/> Xóa cuộc trò chuyện</button>
@@ -546,31 +533,41 @@ const ChatPage: React.FC = () => {
                   </div>
                </div>
 
-               {/* TRANSACTION DASHBOARD */}
-               {targetProduct && (
-                  <div className="transaction-card p-4 animate-slide-in">
-                      <div className="flex gap-4 items-start bg-white p-3 rounded-xl border border-slate-200 shadow-sm relative overflow-hidden">
-                         <div className={`absolute top-0 left-0 bottom-0 w-1.5 ${targetProduct.status === 'sold' ? 'bg-slate-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}></div>
-                         {/* FIX PLACEHOLDER ERROR */}
-                         <img src={targetProduct.images?.[0] || 'https://placehold.co/80'} className="w-16 h-16 rounded-lg object-cover border border-slate-100 bg-slate-50 ml-2"/>
-                         <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 mb-1">
-                               <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md text-white uppercase tracking-wider ${targetProduct.status === 'sold' ? 'bg-slate-500' : targetProduct.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}>
-                                   {targetProduct.status === 'available' ? 'ĐANG BÁN' : targetProduct.status === 'pending' ? 'ĐANG GIAO DỊCH' : 'ĐÃ BÁN'}
-                               </span>
-                               <h4 className="font-bold text-slate-800 text-sm truncate">{targetProduct.title}</h4>
-                            </div>
-                            <p className="text-[#00418E] font-black text-lg">{targetProduct.price === 0 ? 'Miễn phí' : `${targetProduct.price.toLocaleString()}đ`}</p>
-                         </div>
-                      </div>
+               {/* 🔥 TRANSACTION LIST (HORIZONTAL SCROLL) */}
+               {pinnedProducts.length > 0 && (
+                  <div className="transaction-list">
+                      {pinnedProducts.map(product => {
+                          // Xác định vai trò cho từng sản phẩm
+                          const isProductSeller = user && product.seller_id === user.id;
+                          const isProductBuyer = !isProductSeller;
 
-                      <div className="flex gap-2 mt-3">
-                         {isBuyer && targetProduct.status === 'available' && <button onClick={() => handleDealAction('request')} disabled={isProcessing} className="flex-1 bg-[#00418E] text-white py-3 rounded-xl font-bold text-sm shadow-sm flex justify-center items-center gap-2 active:scale-95 transition-all hover:bg-[#00306b]"><ShoppingBag size={16}/> Yêu cầu mua</button>}
-                         {isSeller && targetProduct.status === 'available' && <button onClick={() => handleDealAction('confirm')} disabled={isProcessing} className="flex-1 bg-green-600 text-white py-3 rounded-xl font-bold text-sm shadow-sm flex justify-center items-center gap-2 active:scale-95 transition-all hover:bg-green-700"><CheckCircle2 size={18}/> Xác nhận bán</button>}
-                         {isSeller && targetProduct.status === 'pending' && <><button onClick={() => handleDealAction('finish')} className="flex-1 bg-blue-600 text-white py-3 rounded-xl font-bold text-sm shadow-sm transition-all hover:bg-blue-700"><DollarSign size={16} className="inline mr-1"/> Đã giao</button><button onClick={() => handleDealAction('cancel')} className="px-4 bg-slate-200 text-slate-700 rounded-xl font-bold text-sm hover:bg-slate-300 transition-all"><XCircle size={16}/></button></>}
-                         {isBuyer && targetProduct.status === 'pending' && <div className="flex-1 bg-orange-50 text-orange-700 py-3 rounded-xl font-bold text-xs text-center border border-orange-200 flex items-center justify-center gap-2"><Loader2 size={14} className="animate-spin"/> Đang chờ xác nhận...</div>}
-                         {targetProduct.status === 'sold' && <div className="flex-1 bg-slate-100 text-slate-500 py-3 rounded-xl font-bold text-xs text-center border border-slate-200 flex justify-center items-center gap-2"><Truck size={16}/> Giao dịch đã hoàn tất</div>}
-                      </div>
+                          return (
+                              <div key={product.id} className="transaction-card p-3">
+                                  <div className="flex justify-between items-start mb-2">
+                                      <span className={`text-[10px] font-extrabold px-2 py-0.5 rounded-md text-white uppercase tracking-wider ${product.status === 'sold' ? 'bg-slate-500' : product.status === 'pending' ? 'bg-orange-500' : 'bg-green-500'}`}>
+                                          {product.status === 'available' ? 'ĐANG BÁN' : product.status === 'pending' ? 'ĐANG GIAO DỊCH' : 'ĐÃ BÁN'}
+                                      </span>
+                                      <button onClick={() => handleUnpinProduct(product.id)} className="text-slate-400 hover:text-red-500 p-1 rounded-full hover:bg-red-50"><X size={14}/></button>
+                                  </div>
+                                  
+                                  <div className="flex gap-3 items-center mb-3">
+                                      <img src={product.images?.[0] || 'https://placehold.co/60'} className="w-12 h-12 rounded-lg object-cover border border-slate-100 bg-slate-50"/>
+                                      <div className="flex-1 min-w-0">
+                                          <h4 className="font-bold text-slate-800 text-xs truncate mb-0.5">{product.title}</h4>
+                                          <p className="text-[#00418E] font-black text-sm">{product.price === 0 ? 'Miễn phí' : `${product.price.toLocaleString()}đ`}</p>
+                                      </div>
+                                  </div>
+
+                                  <div className="flex gap-1.5">
+                                      {isProductBuyer && product.status === 'available' && <button onClick={() => handleDealAction('request', product)} disabled={isProcessing} className="flex-1 bg-[#00418E] text-white py-2 rounded-lg font-bold text-xs flex justify-center items-center gap-1 hover:bg-[#00306b]"><ShoppingBag size={14}/> Mua</button>}
+                                      {isProductSeller && product.status === 'available' && <button onClick={() => handleDealAction('confirm', product)} disabled={isProcessing} className="flex-1 bg-green-600 text-white py-2 rounded-lg font-bold text-xs flex justify-center items-center gap-1 hover:bg-green-700"><CheckCircle2 size={14}/> Bán</button>}
+                                      {isProductSeller && product.status === 'pending' && <><button onClick={() => handleDealAction('finish', product)} className="flex-1 bg-blue-600 text-white py-2 rounded-lg font-bold text-xs hover:bg-blue-700">Đã giao</button><button onClick={() => handleDealAction('cancel', product)} className="px-3 bg-slate-200 text-slate-600 rounded-lg font-bold text-xs hover:bg-slate-300"><XCircle size={14}/></button></>}
+                                      {isProductBuyer && product.status === 'pending' && <div className="flex-1 bg-orange-50 text-orange-700 py-2 rounded-lg font-bold text-[10px] text-center border border-orange-200">Chờ xác nhận...</div>}
+                                      {product.status === 'sold' && <div className="flex-1 bg-slate-100 text-slate-500 py-2 rounded-lg font-bold text-[10px] text-center border border-slate-200">Hoàn tất</div>}
+                                  </div>
+                              </div>
+                          );
+                      })}
                   </div>
                )}
 
